@@ -1,0 +1,38 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #08090c;
+  --panel: #101218;
+  --panel-2: #171a22;
+  --line: #262b37;
+  --text: #e9ecf2;
+  --muted: #8b93a7;
+  --index: #4cc9f0;   /* what search costs */
+  --video: #ffb238;   /* what playing costs */
+  --hot: #ff5d5d;
+}
+
+html, body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace; }
+
+/* Projector-friendly: never rely on hover, never rely on subtle contrast. */
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.tabular { font-variant-numeric: tabular-nums; }
+
+@keyframes tick { from { opacity: .35; } to { opacity: 1; } }
+.ticking { animation: tick .18s ease-out; }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: #2b3240; border-radius: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
