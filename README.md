@@ -10,7 +10,10 @@ that made the case for building them.
   read shown as you go. Describing 2.65 GB of video costs 23.8 KB and reads none of
   it. Read-only: nothing in it writes to a dataset.
   See [the sprint plan](docs/console-sprint-1.md) for how it was built and what Lance
-  taught us on the way.
+  taught us on the way, and [sprint 2](docs/intelligence-sprint-2.md) for the
+  intelligence layer going on top of it — findings the console derives itself, an
+  optional language layer that runs against Claude or a local Ollama model, and the
+  catalog exposed to agents over MCP.
 
 Licensed under Apache-2.0. See [CONTRIBUTING.md](CONTRIBUTING.md) for how the work is
 planned and landed.
