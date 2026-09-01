@@ -1,9 +1,10 @@
 "use client";
 
-import Image from "next/image";
 import { useCallback, useEffect, useRef, useState } from "react";
 import ByteScale from "@/app/components/ByteScale";
 import Mark from "@/app/components/Mark";
+import Wordmark from "@/app/components/Wordmark";
+import ThemeToggle from "@/app/components/ThemeToggle";
 import Player from "@/app/components/Player";
 import Results from "@/app/components/Results";
 import SchemaView from "@/app/components/SchemaView";
@@ -135,8 +136,8 @@ export default function Page() {
 
   return (
     <main className="relative z-10 min-h-screen px-[var(--stage-pad)] pt-7 pb-[210px]">
-      <header className="flex items-center justify-between mb-8">
-        <div className="flex items-center gap-4">
+      <header className="flex items-center justify-between gap-4 flex-wrap mb-8">
+        <div className="flex items-center gap-4 min-w-0">
           <a
             href="https://lancedb.com"
             target="_blank"
@@ -144,14 +145,7 @@ export default function Page() {
             title="LanceDB"
             className="shrink-0 opacity-90 hover:opacity-100 transition-opacity"
           >
-            <Image
-              src="/brand/lancedb-wordmark.png"
-              alt="LanceDB"
-              width={390}
-              height={91}
-              priority
-              className="h-[19px] w-auto"
-            />
+            <Wordmark />
           </a>
           <div className="w-px h-5 bg-[var(--rule)]" />
           <h1 className="text-[19px] font-bold tracking-tight text-[var(--bright)]">
@@ -164,13 +158,15 @@ export default function Page() {
         <div className="flex items-center gap-4">
           {offline && (
             <span className="mono text-[10px] px-2.5 py-1 rounded-sm"
-                  style={{ background: "rgba(255,115,74,0.14)", color: "var(--video)" }}>
+                  style={{ background: "rgb(var(--video-rgb) / 0.14)", color: "var(--video)" }}>
               API NOT RESPONDING
             </span>
           )}
           <span className="eyebrow">
             1&ndash;4 cues &middot; / search &middot; &crarr; open &middot; S schema &middot; R reset
+            &middot; T theme
           </span>
+          <ThemeToggle />
         </div>
       </header>
 
@@ -188,7 +184,7 @@ export default function Page() {
           className="w-full bg-[var(--ink-3)] border border-[var(--rule)] rounded-sm
                      px-6 py-5 text-[26px] text-[var(--bright)] outline-none
                      focus:border-[var(--video)] transition-colors
-                     placeholder:text-[#5c524c]"
+                     placeholder:text-[var(--dim)]"
         />
       </form>
 
@@ -206,7 +202,7 @@ export default function Page() {
             style={
               mode === m.id
                 ? { borderColor: "var(--video)", color: "var(--video)",
-                    background: "rgba(255,115,74,0.09)" }
+                    background: "rgb(var(--video-rgb) / 0.09)" }
                 : { borderColor: "var(--rule)", color: "var(--haze)" }
             }
           >
@@ -227,7 +223,7 @@ export default function Page() {
                        text-[var(--haze)] hover:text-[var(--bright)]
                        hover:border-[var(--haze)] transition-colors"
           >
-            <span className="mono text-[10px] mr-2 text-[#5c524c]">{i + 1}</span>
+            <span className="mono text-[10px] mr-2 text-[var(--dim)]">{i + 1}</span>
             {c}
           </button>
         ))}
@@ -262,7 +258,7 @@ export default function Page() {
               style={
                 track === t
                   ? { borderColor: "var(--video)", color: "var(--video)",
-                      background: "rgba(255,115,74,0.09)" }
+                      background: "rgb(var(--video-rgb) / 0.09)" }
                   : { borderColor: "var(--rule)", color: "var(--haze)" }
               }
             >

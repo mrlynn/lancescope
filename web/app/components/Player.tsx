@@ -39,7 +39,7 @@ export default function Player({ hit, onClose }: { hit: Hit; onClose: () => void
   return (
     <div
       className="fixed inset-0 z-[55] flex items-start justify-center p-8 pt-12"
-      style={{ background: "rgba(12,11,10,0.94)" }}
+      style={{ background: "var(--scrim-2)" }}
       onClick={onClose}
     >
       <div

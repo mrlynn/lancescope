@@ -15,7 +15,7 @@ export function Cost({ bytes, iops, label = "this read" }: {
         {bytes === 0 ? "nothing" : `${b.value} ${b.unit}`}
       </span>
       {iops !== undefined && iops > 0 && (
-        <span className="text-[#5c524c]"> · {iops} iops</span>
+        <span className="text-[var(--dim)]"> · {iops} iops</span>
       )}
     </span>
   );
@@ -54,8 +54,8 @@ export function Caveat({ children }: { children: React.ReactNode }) {
       className="text-[12px] leading-relaxed mt-4 p-3.5 rounded-sm"
       style={{
         color: "var(--body)",
-        background: "rgba(217,160,91,0.07)",
-        border: "1px solid rgba(217,160,91,0.28)",
+        background: "rgb(var(--index-rgb) / 0.07)",
+        border: "1px solid rgb(var(--index-rgb) / 0.28)",
       }}
     >
       {children}

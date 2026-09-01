@@ -23,13 +23,13 @@ export default function Results({
               <img src={h.thumb} alt="" className="w-full h-full object-cover" />
             )}
             <div className="absolute bottom-2 right-2 mono text-[11px] px-2 py-1 rounded-sm
-                            bg-[rgba(23,21,19,0.9)] text-[var(--video)]">
+                            bg-[var(--rail-2)] text-[var(--video)]">
               {fmtClock(h.ts_s)}
             </div>
             {/* First result is what the presenter opens with Enter. */}
             {i < 9 && (
               <div className="absolute top-2 left-2 mono text-[10px] w-5 h-5 grid place-items-center
-                              rounded-sm bg-[rgba(23,21,19,0.9)] text-[var(--haze)]">
+                              rounded-sm bg-[var(--rail-2)] text-[var(--haze)]">
                 {i + 1}
               </div>
             )}
