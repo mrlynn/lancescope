@@ -60,8 +60,9 @@ for i in $(seq 1 60); do
 done
 
 echo ""
-echo "  demo    ->  http://localhost:$WEB_PORT"
+echo "  home    ->  http://localhost:$WEB_PORT"
 echo "  console ->  http://localhost:$WEB_PORT/console"
+echo "  demo    ->  http://localhost:$WEB_PORT/demo"
 echo "  keys    ->  1-4 cues · / search · enter open · S schema · R reset · T theme"
 echo "  ctrl-c to stop"
 wait

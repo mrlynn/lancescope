@@ -2,25 +2,35 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import Icon, { type IconName } from "@/app/components/Icon";
 import Mark from "@/app/components/Mark";
-import Wordmark from "@/app/components/Wordmark";
-import ThemeToggle from "@/app/components/ThemeToggle";
+import AppBar from "@/app/components/nav/AppBar";
+import DbSwitcher from "@/app/components/nav/DbSwitcher";
 import { Cost, Empty } from "@/app/components/console/atoms";
+import TableRail from "@/app/components/console/TableRail";
 import {
   FragmentsTab, IndicesTab, RowsTab, SchemaTab, VersionsTab,
 } from "@/app/components/console/tabs";
-import { fmtBytes } from "@/app/lib/api";
 import {
   ApiError,
   type Fragments, type Indices, type Rows, type TableDetail, type TableList, type Versions,
   getFragments, getIndices, getRows, getTable, getVersions, listTables,
 } from "@/app/lib/catalog";
+import { usePins, useRecents } from "@/app/lib/recents";
 import {
   type SettingsState, activateConnection, getSettings,
 } from "@/app/lib/settings";
 
-const TABS = ["schema", "versions", "indices", "fragments", "rows"] as const;
-type Tab = (typeof TABS)[number];
+// Each tab names what it reads, and carries the glyph for it — the row is
+// scannable as shapes before any of the words are read.
+const TABS: { id: string; icon: IconName }[] = [
+  { id: "schema", icon: "schema" },
+  { id: "versions", icon: "history" },
+  { id: "indices", icon: "index" },
+  { id: "fragments", icon: "fragments" },
+  { id: "rows", icon: "rows" },
+];
+type Tab = "schema" | "versions" | "indices" | "fragments" | "rows";
 
 const PAGE = 25;
 
@@ -29,6 +39,7 @@ export default function Console() {
   const [listError, setListError] = useState<string | null>(null);
   const [picked, setPicked] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("schema");
+  const [railQuery, setRailQuery] = useState("");
 
   const [detail, setDetail] = useState<TableDetail | null>(null);
   const [versions, setVersions] = useState<Versions | null>(null);
@@ -43,6 +54,12 @@ export default function Console() {
   const [cost, setCost] = useState<{ bytes: number; iops: number } | null>(null);
   const [settings, setSettings] = useState<SettingsState | null>(null);
 
+  // Pins and recents are scoped to the database, so they follow a connection
+  // switch rather than showing the last database's history against this one.
+  const root = list?.root ?? settings?.root.root ?? null;
+  const { recents, touch } = useRecents(root);
+  const { pins, toggle: togglePin } = usePins(root);
+
   // Everything downstream of the selected table is cleared here rather than in an
   // effect keyed on `picked`: an effect would re-render twice on every click, and
   // the reset is a consequence of the click, not of the state having changed.
@@ -52,17 +69,26 @@ export default function Console() {
     setRows(null); setOffset(0); setFilter(""); setExpanded([]); setRowsError(null);
   }, []);
 
-  const loadTables = useCallback(() => {
+  const loadTables = useCallback((want?: string | null) => {
     listTables()
       .then((d) => {
         setList(d);
-        setPicked((p) => (p && d.tables.some((t) => t.name === p) ? p : d.tables[0]?.name ?? null));
+        const has = (n: string | null | undefined) => !!n && d.tables.some((t) => t.name === n);
+        setPicked((p) => (has(want) ? want! : has(p) ? p : d.tables[0]?.name ?? null));
       })
       .catch((e) => setListError(e instanceof Error ? e.message : "unreachable"));
   }, []);
 
+  /** `?table=` deep-links straight to one table — what the recent-table chips on the
+   *  home screen point at. Read from `location` rather than `useSearchParams` so this
+   *  page keeps prerendering without a Suspense boundary around the whole console. */
+  const wanted = () => {
+    if (typeof window === "undefined") return null;
+    return new URLSearchParams(window.location.search).get("table");
+  };
+
   useEffect(() => {
-    loadTables();
+    loadTables(wanted());
     getSettings().then(setSettings).catch(() => setSettings(null));
   }, [loadTables]);
 
@@ -75,6 +101,7 @@ export default function Console() {
       selectTable(null);
       setList(null);
       setCost(null);
+      setRailQuery("");
       loadTables();
     } catch (e) {
       setListError(e instanceof Error ? e.message : "could not switch connection");
@@ -134,53 +161,34 @@ export default function Console() {
 
   return (
     <main className="relative z-10 min-h-screen px-[var(--stage-pad)] pt-7 pb-16">
-      <header className="flex items-center justify-between gap-4 flex-wrap mb-8">
-        <div className="flex items-center gap-4 min-w-0">
-          <a href="https://lancedb.com" target="_blank" rel="noreferrer" title="LanceDB"
-             className="shrink-0 opacity-90 hover:opacity-100 transition-opacity">
-            <Wordmark />
-          </a>
-          <div className="w-px h-5 bg-[var(--rule)]" />
-          <h1 className="text-[19px] font-bold tracking-tight text-[var(--bright)]">Console</h1>
-          {settings && settings.connections.length > 1 ? (
-            <select
-              className="inp mono shrink-0 text-[11px] py-1"
-              // `.inp` sets width:100%, and it wins on source order — so the width
-              // this control actually needs has to be stated here.
-              style={{ width: 190 }}
-              value={settings.root.connection_id ?? ""}
-              onChange={(e) => switchTo(e.target.value)}
-              disabled={settings.env_locked}
-              title={settings.env_locked
-                ? "LANCE_ROOT is set; connections are inert"
-                : `${list?.root ?? ""} — switch connection`}
-            >
-              {settings.connections.map((c) => (
-                <option key={c.id} value={c.id}>{c.label}</option>
-              ))}
-            </select>
-          ) : null}
-          <span className="eyebrow normal-case truncate min-w-0 hidden md:block" title={list?.root}>
-            {list?.root ?? "…"}
-          </span>
-        </div>
-        <div className="flex items-center gap-4">
-          {cost && <Cost bytes={cost.bytes} iops={cost.iops} />}
-          <ThemeToggle />
-          <Link href="/console/settings" className="pill">Settings</Link>
-          <Link href="/"
-                className="mono text-[10px] tracking-[0.14em] uppercase px-3 py-1.5 rounded-sm
-                           border border-[var(--rule)] text-[var(--haze)]
-                           hover:text-[var(--bright)] hover:border-[var(--haze)] transition-colors">
-            Demo
-          </Link>
-        </div>
-      </header>
+      <AppBar crumbs={[{ label: "Console" }]}>
+        {cost && <Cost bytes={cost.bytes} iops={cost.iops} />}
+        <Link href="/demo" className="iconbtn" data-tip="Ctrl-F for Video" aria-label="Open the demo">
+          <Icon name="play" size={16} />
+        </Link>
+      </AppBar>
+
+      <div className="flex items-center gap-3 mb-7 flex-wrap">
+        <DbSwitcher
+          settings={settings}
+          root={list?.root ?? null}
+          tableCount={list?.tables.length}
+          onSwitch={switchTo}
+        />
+        {current && (
+          <>
+            <span className="text-[var(--dim)]" aria-hidden><Icon name="chevronRight" size={13} /></span>
+            <span className="mono text-[13px] text-[var(--bright)]">{current.name}</span>
+            <CopyPath uri={current.uri} />
+          </>
+        )}
+      </div>
 
       {listError && (
-        <div className="mono text-[12px] px-3.5 py-3 rounded-sm mb-6"
+        <div className="mono flex items-center gap-2.5 text-[12px] px-3.5 py-3 rounded-sm mb-6"
              style={{ background: "rgb(var(--video-rgb) / 0.12)",
                       border: "1px solid rgb(var(--video-rgb) / 0.4)", color: "var(--video)" }}>
+          <Icon name="warning" size={15} />
           {listError}
         </div>
       )}
@@ -199,76 +207,32 @@ export default function Console() {
         </div>
       ) : (
         <div className="flex flex-col lg:flex-row gap-6 items-stretch lg:items-start">
-          {/* ------------------------------------------------------------ rail */}
-          <nav className="w-full lg:w-[248px] shrink-0 space-y-1.5">
-            <div className="eyebrow mb-3">
-              {list ? `${list.tables.length} table${list.tables.length === 1 ? "" : "s"}` : "loading"}
-            </div>
-            {list?.tables.map((t) => {
-              const on = t.name === picked;
-              return (
-                <button
-                  key={t.name}
-                  onClick={() => selectTable(t.name)}
-                  className="w-full text-left px-3.5 py-3 rounded-sm border transition-colors"
-                  style={
-                    on
-                      ? { borderColor: "var(--video)", background: "rgb(var(--video-rgb) / 0.09)" }
-                      : { borderColor: "var(--rule)" }
-                  }
-                >
-                  <div className="mono text-[13px] mb-1"
-                       style={{ color: on ? "var(--video)" : "var(--bright)" }}>
-                    {t.name}
-                  </div>
-                  <div className="mono text-[10px] text-[var(--haze)]">
-                    {t.rows.toLocaleString()} rows · {t.columns} cols · v{t.version}
-                  </div>
-                  {t.blob_columns.length > 0 && (
-                    <div className="mono text-[10px] mt-1" style={{ color: "var(--video)" }}>
-                      {t.blob_columns.length} blob column
-                      {t.blob_columns.length === 1 ? "" : "s"}
-                    </div>
-                  )}
-                </button>
-              );
-            })}
-            {list && (
-              <p className="text-[11px] text-[var(--haze)] leading-relaxed pt-3">
-                Listing every table cost{" "}
-                <span className="mono" style={{ color: "var(--index)" }}>
-                  {fmtBytes(list.read_bytes).value} {fmtBytes(list.read_bytes).unit}
-                </span>
-                . It reads manifests, never data.
-              </p>
-            )}
-          </nav>
+          <TableRail
+            tables={list?.tables ?? null}
+            picked={picked}
+            query={railQuery}
+            onQuery={setRailQuery}
+            onPick={(n) => { selectTable(n); touch(n); }}
+            pins={pins}
+            onTogglePin={togglePin}
+            recents={recents}
+            listBytes={list?.read_bytes ?? null}
+          />
 
           {/* ---------------------------------------------------------- detail */}
           <section className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 mb-6 flex-wrap">
+            <div className="seg mb-6 flex-wrap">
               {TABS.map((t) => (
                 <button
-                  key={t}
-                  onClick={() => setTab(t)}
-                  className="mono text-[10px] tracking-[0.14em] uppercase px-3.5 py-2
-                             rounded-sm border transition-colors"
-                  style={
-                    tab === t
-                      ? { borderColor: "var(--video)", color: "var(--video)",
-                          background: "rgb(var(--video-rgb) / 0.09)" }
-                      : { borderColor: "var(--rule)", color: "var(--haze)" }
-                  }
+                  key={t.id}
+                  onClick={() => setTab(t.id as Tab)}
+                  data-on={tab === t.id}
+                  className="mono !px-3.5 text-[10px] tracking-[0.14em] uppercase"
                 >
-                  {t}
+                  <Icon name={t.icon} size={14} />
+                  {t.id}
                 </button>
               ))}
-              {current && (
-                <span className="eyebrow ml-2 normal-case truncate min-w-0 hidden xl:block"
-                      title={current.uri}>
-                  {current.uri}
-                </span>
-              )}
             </div>
 
             <div className="panel p-6 min-h-[380px]">
@@ -297,5 +261,30 @@ export default function Console() {
         </div>
       )}
     </main>
+  );
+}
+
+/** The table's URI, on demand rather than on screen. You need it to paste into a
+ *  script perhaps once a session; you were being shown it continuously. */
+function CopyPath({ uri }: { uri: string }) {
+  const [done, setDone] = useState(false);
+  return (
+    <button
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(uri);
+          setDone(true);
+          setTimeout(() => setDone(false), 1400);
+        } catch {
+          // No clipboard permission. The title attribute still carries the path.
+        }
+      }}
+      className="iconbtn !w-7 !h-7"
+      title={uri}
+      data-tip={done ? "Copied" : "Copy table path"}
+      aria-label="Copy table path"
+    >
+      <Icon name={done ? "check" : "external"} size={13} />
+    </button>
   );
 }

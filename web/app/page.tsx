@@ -1,325 +1,208 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import ByteScale from "@/app/components/ByteScale";
+/** Home.
+ *
+ *  `/` used to be the conference demo, which made the demo look like the product.
+ *  It is one thing this app does. The app is a console for reading LanceDB
+ *  datasets, and its home is the place that says which database you are attached
+ *  to and gets you into it in one click — with the demo alongside as an equal, not
+ *  as the front door.
+ *
+ *  Everything on this page is live. A home screen that lists features it cannot
+ *  confirm are working is a brochure; this one says how many tables are actually
+ *  there, and says so when there are none.
+ */
+
+import Link from "next/link";
+import { useEffect, useState } from "react";
+import Icon, { type IconName } from "@/app/components/Icon";
 import Mark from "@/app/components/Mark";
-import Wordmark from "@/app/components/Wordmark";
-import ThemeToggle from "@/app/components/ThemeToggle";
-import Player from "@/app/components/Player";
-import Results from "@/app/components/Results";
-import SchemaView from "@/app/components/SchemaView";
-import { search, resetMeter, type Hit, type MeterState, type SearchResponse } from "@/app/lib/api";
+import AppBar from "@/app/components/nav/AppBar";
+import { fmtBytes } from "@/app/lib/api";
+import { type TableList, listTables } from "@/app/lib/catalog";
+import { ROOT_SOURCE, dbName } from "@/app/lib/dbname";
+import { useRecents } from "@/app/lib/recents";
+import { type SettingsState, getSettings } from "@/app/lib/settings";
 
-const MODES = [
-  { id: "vector", label: "Semantic", hint: "text matched against the frame itself" },
-  { id: "fts", label: "Full text", hint: "BM25 over the transcripts" },
-  { id: "hybrid", label: "Hybrid", hint: "both, fused by rank" },
-];
+type Health = { ok: boolean; moments: number; talks: number };
 
-// The run of queries the talk walks through, in order. Keys 1-4 fire them.
-const CUES = [
-  "a diagram with boxes and arrows",
-  "a terminal full of code",
-  "a benchmark chart with bars",
-  "a slide with a bulleted list",
-];
-
-export default function Page() {
-  const [q, setQ] = useState("");
-  const [mode, setMode] = useState("vector");
-  const [hits, setHits] = useState<Hit[]>([]);
-  const [meta, setMeta] = useState<SearchResponse | null>(null);
-  const [meter, setMeter] = useState<MeterState | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [picked, setPicked] = useState<Hit | null>(null);
-  const [showSchema, setShowSchema] = useState(false);
-  const [browsing, setBrowsing] = useState(false);
-  const [offline, setOffline] = useState(false);
-  const [tracks, setTracks] = useState<string[]>([]);
-  const [track, setTrack] = useState<string | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  // Open on a wall of real moments rather than an empty page.
-  useEffect(() => {
-    fetch("/api/sample?n=40")
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.hits?.length) {
-          setHits(d.hits);
-          setBrowsing(true);
-        }
-      })
-      .catch(() => {});
-  }, []);
+export default function Home() {
+  const [list, setList] = useState<TableList | null>(null);
+  const [settings, setSettings] = useState<SettingsState | null>(null);
+  const [health, setHealth] = useState<Health | null>(null);
+  const [reachable, setReachable] = useState<boolean | null>(null);
 
   useEffect(() => {
-    fetch("/api/tracks")
-      .then((r) => r.json())
-      .then((d) => setTracks(d.tracks ?? []))
-      .catch(() => setTracks([]));
+    listTables().then((d) => { setList(d); setReachable(true); })
+      .catch(() => setReachable(false));
+    getSettings().then(setSettings).catch(() => setSettings(null));
+    fetch("/api/health", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then(setHealth)
+      .catch(() => setHealth(null));
   }, []);
 
-  // Poll rather than stream: the counter has to keep moving while the browser
-  // pulls video ranges, and a 300ms poll against localhost has far fewer failure
-  // modes on a stage than an SSE stream through a dev proxy.
-  useEffect(() => {
-    let alive = true;
-    const tick = async () => {
-      try {
-        const res = await fetch("/api/meter", { cache: "no-store" });
-        if (!res.ok) throw new Error();
-        if (alive) {
-          setMeter(await res.json());
-          setOffline(false);
-        }
-      } catch {
-        if (alive) setOffline(true);
-      }
-    };
-    tick();
-    const id = setInterval(tick, 300);
-    return () => {
-      alive = false;
-      clearInterval(id);
-    };
-  }, []);
-
-  const run = useCallback(async (query: string, m: string, t?: string | null) => {
-    if (!query.trim()) return;
-    setBusy(true);
-    try {
-      const res = await search({ q: query, mode: m, limit: 24, track: t ?? null });
-      setHits(res.hits);
-      setBrowsing(false);
-      setMeta(res);
-      setMeter(res.meter);
-      setOffline(false);
-    } catch {
-      setOffline(true);
-    } finally {
-      setBusy(false);
-    }
-  }, []);
-
-  // Presenter control. Everything reachable without looking at the keyboard.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const typing = document.activeElement === inputRef.current;
-      if (e.key === "/" && !typing) {
-        e.preventDefault();
-        inputRef.current?.focus();
-        return;
-      }
-      if (typing && e.key !== "Escape") return;
-      if (picked) return;
-      if (e.key.toLowerCase() === "s") {
-        setShowSchema((v) => !v);
-        return;
-      }
-      if (showSchema) return;
-
-      const n = parseInt(e.key, 10);
-      if (n >= 1 && n <= CUES.length) {
-        setQ(CUES[n - 1]);
-        run(CUES[n - 1], mode, track);
-      } else if (e.key.toLowerCase() === "r") {
-        resetMeter().then(setMeter);
-      } else if ((e.key === "Enter" || e.code === "NumpadEnter") && hits.length) {
-        setPicked(hits[0]);
-      } else if (e.key === "Escape") {
-        inputRef.current?.blur();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [run, mode, track, hits, picked, showSchema]);
+  const root = list?.root ?? settings?.root.root ?? null;
+  const { recents } = useRecents(root);
+  const active = settings?.connections.find((c) => c.active) ?? null;
+  const name = active?.label ?? dbName(root);
+  const tables = list?.tables.length ?? 0;
+  const demoReady = health?.ok ?? false;
 
   return (
-    <main className="relative z-10 min-h-screen px-[var(--stage-pad)] pt-7 pb-[210px]">
-      <header className="flex items-center justify-between gap-4 flex-wrap mb-8">
-        <div className="flex items-center gap-4 min-w-0">
-          <a
-            href="https://lancedb.com"
-            target="_blank"
-            rel="noreferrer"
-            title="LanceDB"
-            className="shrink-0 opacity-90 hover:opacity-100 transition-opacity"
-          >
-            <Wordmark />
-          </a>
-          <div className="w-px h-5 bg-[var(--rule)]" />
-          <h1 className="text-[19px] font-bold tracking-tight text-[var(--bright)]">
-            Ctrl&#8209;F for Video
+    <main className="relative z-10 min-h-screen px-[var(--stage-pad)] pt-7 pb-20">
+      <AppBar crumbs={[]} />
+
+      {/* ------------------------------------------------------------- masthead */}
+      <section className="max-w-[720px] mt-6 mb-12">
+        <div className="flex items-center gap-3 mb-4">
+          <Mark size={26} className="text-[var(--video)]" />
+          <h1 className="text-[34px] leading-none font-black tracking-tight text-[var(--bright)]">
+            LanceScope
           </h1>
-          <span className="eyebrow normal-case">
-            the video and its index are the same table
-          </span>
         </div>
-        <div className="flex items-center gap-4">
-          {offline && (
-            <span className="mono text-[10px] px-2.5 py-1 rounded-sm"
-                  style={{ background: "rgb(var(--video-rgb) / 0.14)", color: "var(--video)" }}>
-              API NOT RESPONDING
-            </span>
-          )}
-          <span className="eyebrow">
-            1&ndash;4 cues &middot; / search &middot; &crarr; open &middot; S schema &middot; R reset
-            &middot; T theme
-          </span>
-          <ThemeToggle />
-        </div>
-      </header>
+        <p className="text-[16px] leading-relaxed text-[var(--body)]">
+          See what is actually inside a LanceDB dataset — its schema, versions,
+          indices, fragments and rows — with the byte cost of every read shown as you
+          go. Read&#8209;only, by construction: nothing here writes to a table.
+        </p>
+      </section>
 
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          run(q, mode, track);
-        }}
-      >
-        <input
-          ref={inputRef}
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Describe what you want to see — or press / to type"
-          className="w-full bg-[var(--ink-3)] border border-[var(--rule)] rounded-sm
-                     px-6 py-5 text-[26px] text-[var(--bright)] outline-none
-                     focus:border-[var(--video)] transition-colors
-                     placeholder:text-[var(--dim)]"
-        />
-      </form>
-
-      <div className="flex flex-wrap items-center gap-2 mt-4 mb-7">
-        {MODES.map((m) => (
-          <button
-            key={m.id}
-            title={m.hint}
-            onClick={() => {
-              setMode(m.id);
-              if (q.trim()) run(q, m.id, track);
-            }}
-            className="mono text-[10px] tracking-[0.14em] uppercase px-3.5 py-2
-                       rounded-sm border transition-colors"
-            style={
-              mode === m.id
-                ? { borderColor: "var(--video)", color: "var(--video)",
-                    background: "rgb(var(--video-rgb) / 0.09)" }
-                : { borderColor: "var(--rule)", color: "var(--haze)" }
-            }
-          >
-            {m.label}
-          </button>
-        ))}
-
-        <div className="w-px h-6 bg-[var(--rule)] mx-2" />
-
-        {CUES.map((c, i) => (
-          <button
-            key={c}
-            onClick={() => {
-              setQ(c);
-              run(c, mode, track);
-            }}
-            className="group text-[13px] px-3 py-2 rounded-sm border border-[var(--rule)]
-                       text-[var(--haze)] hover:text-[var(--bright)]
-                       hover:border-[var(--haze)] transition-colors"
-          >
-            <span className="mono text-[10px] mr-2 text-[var(--dim)]">{i + 1}</span>
-            {c}
-          </button>
-        ))}
-      </div>
-
-      {tracks.length > 1 && (
-        <div className="flex flex-wrap items-center gap-2 mb-6">
-          <span className="eyebrow mr-1">Devroom</span>
-          <button
-            onClick={() => {
-              setTrack(null);
-              if (q.trim()) run(q, mode, null);
-            }}
-            className="text-[12px] px-2.5 py-1.5 rounded-sm border transition-colors"
-            style={
-              track === null
-                ? { borderColor: "var(--haze)", color: "var(--bright)" }
-                : { borderColor: "var(--rule)", color: "var(--haze)" }
-            }
-          >
-            All
-          </button>
-          {tracks.map((t) => (
-            <button
-              key={t}
-              onClick={() => {
-                const next = track === t ? null : t;
-                setTrack(next);
-                if (q.trim()) run(q, mode, next);
-              }}
-              className="text-[12px] px-2.5 py-1.5 rounded-sm border transition-colors"
-              style={
-                track === t
-                  ? { borderColor: "var(--video)", color: "var(--video)",
-                      background: "rgb(var(--video-rgb) / 0.09)" }
-                  : { borderColor: "var(--rule)", color: "var(--haze)" }
-              }
-            >
-              {t}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {browsing && !busy && (
-        <div className="mono text-[11px] mb-5 text-[var(--haze)]">
-          {meter
-            ? `${meter.corpus_moments.toLocaleString()} moments across ${meter.corpus_talks} talks — a sample`
-            : "loading the corpus"}
-          <span className="mx-3 text-[var(--rule)]">&middot;</span>
-          press 1, or describe something you want to see
-        </div>
-      )}
-
-      {meta && !busy && !browsing && (
-        <div className="mono text-[11px] mb-5 text-[var(--haze)]">
-          {hits.length} moments in {meta.ms}ms
-          {track && (
+      {/* --------------------------------------------------------- what is bound */}
+      <section className="panel p-5 mb-6 flex items-center gap-4 flex-wrap">
+        <span style={{ color: reachable === false ? "var(--video)" : "var(--index)" }}>
+          <Icon name={reachable === false ? "warning" : "database"} size={20} />
+        </span>
+        <div className="min-w-0 flex-1">
+          {reachable === false ? (
             <>
-              <span className="mx-3 text-[var(--rule)]">&middot;</span>
-              <span style={{ color: "var(--video)" }}>
-                filtered to {track} inside the search, not after it
-              </span>
+              <div className="text-[14px] text-[var(--bright)]">The API is not answering</div>
+              <div className="mono text-[11px] text-[var(--haze)] mt-1">
+                Start it with <span className="text-[var(--bright)]">make api</span>, or run
+                both halves with <span className="text-[var(--bright)]">make dev</span>.
+              </div>
+            </>
+          ) : root ? (
+            <>
+              <div className="text-[14px] text-[var(--bright)]">
+                {name}
+                <span className="text-[var(--haze)] font-normal">
+                  {" — "}{tables} table{tables === 1 ? "" : "s"}
+                  {list && <>, listed for {fmtBytes(list.read_bytes).value} {fmtBytes(list.read_bytes).unit}</>}
+                </span>
+              </div>
+              <div className="mono flex flex-wrap items-baseline gap-x-2 text-[11px] text-[var(--haze)] mt-1">
+                <span className="truncate max-w-full" title={root}>{root}</span>
+                {settings && (
+                  <span className="text-[var(--dim)]">· {ROOT_SOURCE[settings.root.source]}</span>
+                )}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="text-[14px] text-[var(--bright)]">No database connected</div>
+              <div className="mono text-[11px] text-[var(--haze)] mt-1">
+                Point the console at any directory holding <span className="text-[var(--bright)]">.lance</span> tables.
+              </div>
             </>
           )}
-          <span className="mx-3 text-[var(--rule)]">&middot;</span>
-          this query read{" "}
-          <span style={{ color: "var(--index)" }}>
-            {(meta.query_index_bytes / 1e6).toFixed(2)} MB
-          </span>{" "}
-          finding it and{" "}
-          <span style={{ color: "var(--video)" }}>
-            {meta.query_video_bytes === 0 ? "nothing" : `${meta.query_video_bytes} bytes`}
-          </span>{" "}
-          of video
         </div>
-      )}
+        <Link href="/console/settings" className="btn shrink-0">
+          <Icon name="settings" size={15} />
+          {root ? "Connections" : "Connect a database"}
+        </Link>
+      </section>
 
-      {busy && (
-        <div className="mono text-[11px] text-[var(--haze)] mb-5">searching&hellip;</div>
-      )}
+      {/* ------------------------------------------------------------------ ways in */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-10">
+        <Card
+          href="/console"
+          icon="table"
+          title="Console"
+          accent
+          body={root
+            ? `Browse ${tables} table${tables === 1 ? "" : "s"} — schema, history, indices, fragments and rows.`
+            : "Browse a dataset's schema, history, indices, fragments and rows."}
+          foot={list ? `${tables} table${tables === 1 ? "" : "s"} ready` : "checking…"}
+        />
+        <Card
+          href="/demo"
+          icon="play"
+          title="Ctrl-F for Video"
+          body="Multimodal search over conference talks, where the video and its index are the same table."
+          foot={health === null
+            ? "checking…"
+            : demoReady
+              ? `${health.moments.toLocaleString()} moments · ${health.talks} talks`
+              : "corpus not built — make ingest"}
+          dim={health !== null && !demoReady}
+        />
+        <Card
+          href="/console/settings"
+          icon="settings"
+          title="Settings"
+          body="Connections, and the optional intelligence layer that powers plain-English filters and summaries."
+          foot={settings
+            ? `${settings.connections.length} connection${settings.connections.length === 1 ? "" : "s"} · ${settings.intelligence.provider}`
+            : "checking…"}
+        />
+      </div>
 
-      {!hits.length && !busy && (
-        <div className="mt-24 text-center">
-          <Mark size={34} className="mx-auto mb-5 text-[var(--rule)]" />
-          <p className="text-[15px] text-[var(--haze)] max-w-lg mx-auto leading-relaxed">
-            No moments loaded. Build the corpus with{" "}
-            <span className="mono text-[var(--bright)]">make ingest</span>, then reload.
-          </p>
-        </div>
+      {/* ------------------------------------------------------------------ recents */}
+      {recents.length > 0 && (
+        <section>
+          <div className="eyebrow flex items-center gap-2 mb-3">
+            <Icon name="clock" size={12} />
+            Recent tables
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {recents.map((n) => (
+              <Link key={n} href={`/console?table=${encodeURIComponent(n)}`} className="btn">
+                <Icon name="table" size={14} />
+                <span className="mono text-[12px]">{n}</span>
+              </Link>
+            ))}
+          </div>
+        </section>
       )}
-
-      <Results hits={hits} onPick={setPicked} />
-      {picked && <Player hit={picked} onClose={() => setPicked(null)} />}
-      {showSchema && <SchemaView onClose={() => setShowSchema(false)} />}
-      <ByteScale meter={meter} />
     </main>
+  );
+}
+
+function Card({ href, icon, title, body, foot, accent = false, dim = false }: {
+  href: string;
+  icon: IconName;
+  title: string;
+  body: string;
+  foot: string;
+  accent?: boolean;
+  dim?: boolean;
+}) {
+  return (
+    <Link
+      href={href}
+      className="panel p-5 flex flex-col gap-3 group transition-colors"
+      style={accent ? { borderColor: "rgb(var(--video-rgb) / 0.45)" } : undefined}
+    >
+      <span
+        className="w-9 h-9 grid place-items-center rounded-sm transition-colors"
+        style={{
+          color: accent ? "var(--video)" : "var(--haze)",
+          background: accent ? "rgb(var(--video-rgb) / 0.11)" : "rgb(var(--index-rgb) / 0.08)",
+        }}
+      >
+        <Icon name={icon} size={19} />
+      </span>
+      <span className="flex items-center gap-2 text-[16px] font-bold tracking-tight text-[var(--bright)]">
+        {title}
+        <span className="text-[var(--dim)] group-hover:text-[var(--video)] transition-colors">
+          <Icon name="arrowRight" size={15} />
+        </span>
+      </span>
+      <span className="text-[13px] leading-relaxed text-[var(--body)] flex-1">{body}</span>
+      <span className="mono text-[10px]" style={{ color: dim ? "var(--dim)" : "var(--haze)" }}>
+        {foot}
+      </span>
+    </Link>
   );
 }

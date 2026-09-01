@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Icon from "@/app/components/Icon";
 import { Bytes, Caveat, Cost, Empty, Eyebrow, Td, Th, fmtWhen } from "@/app/components/console/atoms";
 import { fmtBytes } from "@/app/lib/api";
 import type {
@@ -353,22 +354,19 @@ export function RowsTab({
                      px-3 py-2 mono text-[12px] text-[var(--bright)] outline-none
                      focus:border-[var(--video)] transition-colors placeholder:text-[var(--dim)]"
         />
-        <button
-          type="submit"
-          className="mono text-[10px] tracking-[0.14em] uppercase px-3.5 py-2 rounded-sm
-                     border border-[var(--rule)] text-[var(--haze)]
-                     hover:text-[var(--bright)] hover:border-[var(--haze)] transition-colors"
-        >
+        <button type="submit" className="btn mono text-[10px] tracking-[0.14em] uppercase">
+          <Icon name="search" size={14} />
           Filter
         </button>
       </form>
 
       {error && (
         <div
-          className="mono text-[12px] px-3.5 py-3 rounded-sm mb-4"
+          className="mono flex items-center gap-2.5 text-[12px] px-3.5 py-3 rounded-sm mb-4"
           style={{ background: "rgb(var(--video-rgb) / 0.12)", border: "1px solid rgb(var(--video-rgb) / 0.4)",
                    color: "var(--video)" }}
         >
+          <Icon name="warning" size={15} />
           {error}
         </div>
       )}
@@ -383,23 +381,22 @@ export function RowsTab({
                   key={c.name}
                   onClick={() => onExpand(c.name)}
                   title={`${c.type} — click to read it and see what it costs`}
-                  className="mono text-[11px] px-2.5 py-1.5 rounded-sm border
-                             border-[var(--rule)] text-[var(--haze)]
-                             hover:text-[var(--bright)] hover:border-[var(--haze)]
-                             transition-colors"
+                  className="btn mono !h-[26px] !px-2.5 text-[11px]"
                 >
-                  {c.name}{c.vector_dim ? `[${c.vector_dim}]` : ""} +
+                  <Icon name="plus" size={12} />
+                  {c.name}{c.vector_dim ? `[${c.vector_dim}]` : ""}
                 </button>
               ))}
               {expanded.map((c) => (
                 <button
                   key={c}
                   onClick={() => onExpand(c)}
-                  className="mono text-[11px] px-2.5 py-1.5 rounded-sm border transition-colors"
+                  className="btn mono !h-[26px] !px-2.5 text-[11px]"
                   style={{ borderColor: "var(--index)", color: "var(--index)",
                            background: "rgb(var(--index-rgb) / 0.09)" }}
                 >
-                  {c} ×
+                  <Icon name="close" size={12} />
+                  {c}
                 </button>
               ))}
             </div>
@@ -437,13 +434,15 @@ export function RowsTab({
                 disabled={d.offset === 0}
                 onClick={() => onPage(Math.max(0, d.offset - d.limit))}
               >
-                ← prev
+                <Icon name="chevronLeft" size={13} />
+                prev
               </PageBtn>
               <PageBtn
                 disabled={d.offset + d.returned >= d.total_rows}
                 onClick={() => onPage(d.offset + d.limit)}
               >
-                next →
+                next
+                <Icon name="chevronRight" size={13} />
               </PageBtn>
             </div>
           </div>
@@ -460,10 +459,7 @@ function PageBtn({ disabled, onClick, children }: {
     <button
       disabled={disabled}
       onClick={onClick}
-      className="mono text-[11px] px-3 py-1.5 rounded-sm border border-[var(--rule)]
-                 text-[var(--haze)] enabled:hover:text-[var(--bright)]
-                 enabled:hover:border-[var(--haze)] disabled:opacity-35
-                 disabled:cursor-not-allowed transition-colors"
+      className="btn mono !h-[26px] !px-2.5 !gap-1.5 text-[11px]"
     >
       {children}
     </button>

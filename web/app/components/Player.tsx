@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Icon from "@/app/components/Icon";
 import { fmtClock, type Hit } from "@/app/lib/api";
 
 const LEAD_IN = 5;
@@ -58,10 +59,12 @@ export default function Player({ hit, onClose }: { hit: Hit; onClose: () => void
           </div>
           <button
             onClick={onClose}
-            className="mono text-[10px] tracking-[0.16em] px-3 py-1.5 rounded-sm border
-                       border-[var(--rule)] text-[var(--haze)] shrink-0"
+            className="iconbtn shrink-0"
+            data-tip="Close — ESC"
+            data-tip-side="left"
+            aria-label="Close"
           >
-            CLOSE &middot; ESC
+            <Icon name="close" size={16} />
           </button>
         </div>
 
