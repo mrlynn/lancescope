@@ -494,12 +494,15 @@ async def rows(
         else:
             projected.append(c)
 
-    total = ds.count_rows()
     limit = max(0, min(limit, 200))
     offset = max(0, offset)
 
     h.drain()                                       # zero, so the cost below is ours
     try:
+        # Counted with the filter applied. Counting the whole table instead would
+        # report "1-25 of 1,114" on a predicate matching 99 rows, and leave the
+        # caller paging into emptiness.
+        total = ds.count_rows(filter=filter or None)
         table = ds.scanner(
             columns=projected, filter=filter or None, limit=limit, offset=offset
         ).to_table()
