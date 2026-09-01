@@ -135,6 +135,32 @@ def findings_checks() -> None:
           all(f["evidence"] and f["panel"] for f in m["findings"] + sg["findings"]),
           f"{len(every)} distinct finding(s)")
 
+    check("a complete analysis says so", m["partial_analysis"] is False
+          and sg["partial_analysis"] is False and not m["failed_rules"])
+
+    # The failure mode this whole design exists to avoid: a rule that raises used to
+    # be swallowed, so a broken check looked exactly like a clean table. Break one on
+    # purpose and require the difference to be visible.
+    from server.intel import findings as intel_findings
+
+    def explodes(_facts):
+        raise ZeroDivisionError("deliberately broken rule")
+
+    original = intel_findings.RULES
+    intel_findings.RULES = (*original, explodes)
+    try:
+        broken = api.get("/catalog/tables/moments/findings").json()
+    finally:
+        intel_findings.RULES = original
+
+    check("a rule that raises is reported, not swallowed",
+          broken["partial_analysis"] is True
+          and any(f["error"] == "ZeroDivisionError" for f in broken["failed_rules"]),
+          ", ".join(f["rule"] for f in broken["failed_rules"]) or "nothing reported")
+    check("a broken rule does not take the working ones down with it",
+          len(broken["findings"]) == len(m["findings"]),
+          f"{len(broken['findings'])} finding(s) still returned")
+
 
 def intel_checks() -> None:
     """The language layer resolves to the right thing in every state, including none.

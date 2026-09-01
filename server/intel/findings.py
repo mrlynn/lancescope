@@ -22,11 +22,14 @@ compacting a table that needs nothing done to it.
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import asdict, dataclass, field
 
 import pyarrow as pa
 
 from server.catalog import Handle, disk_usage, is_blob_field
+
+log = logging.getLogger(__name__)
 
 # Which console panel shows the evidence. A finding belongs next to the number that
 # produced it; this is what lets the UI put it there instead of in a list far away.
@@ -310,22 +313,72 @@ def gather(handle: Handle) -> dict:
     }
 
 
-def findings_for(handle: Handle) -> list[Finding]:
-    """Every finding for one table, worst first.
+@dataclass(frozen=True)
+class RuleFailure:
+    """A check that could not run, kept rather than swallowed.
 
-    A rule that raises is a bug in that rule, not a broken panel: the others still
-    have something to say, and a table that produces no findings is a normal result
-    rather than an error.
+    The first version of this module caught every exception and continued, which
+    made a broken rule indistinguishable from a clean table — the one failure mode a
+    panel whose entire job is honesty cannot have. A rule that raises still must not
+    take the others down with it, so the failure is captured, logged, and returned
+    for the UI to say so out loud.
+    """
+
+    rule: str
+    error: str
+    message: str
+
+    def as_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class Analysis:
+    """Findings, plus an honest account of what could not be checked."""
+
+    findings: list[Finding]
+    failures: list[RuleFailure]
+
+    @property
+    def partial(self) -> bool:
+        return bool(self.failures)
+
+    def as_dict(self) -> dict:
+        return {
+            "findings": [f.as_dict() for f in self.findings],
+            "summary": summarise(self.findings),
+            # Named states, not a generic error: "nothing to report" and "one check
+            # could not run" are different answers and the UI renders them as such.
+            "partial_analysis": self.partial,
+            "failed_rules": [f.as_dict() for f in self.failures],
+        }
+
+
+def analyse(handle: Handle) -> Analysis:
+    """Run every rule over one table, worst finding first, keeping what broke.
+
+    `gather()` failing is different from a rule failing: there are no facts, so
+    there is nothing to be partial about, and the caller gets the exception.
     """
     facts = gather(handle)
     out: list[Finding] = []
+    failures: list[RuleFailure] = []
     for rule in RULES:
+        name = rule.__name__.lstrip("_")
         try:
             out.extend(rule(facts))
-        except Exception:                                    # noqa: BLE001
-            continue
+        except Exception as e:                               # noqa: BLE001
+            log.exception("findings rule %s failed on %s", name, handle.name)
+            failures.append(RuleFailure(rule=name, error=type(e).__name__,
+                                        message=str(e)[:200]))
     order = {"warn": 0, "note": 1}
-    return sorted(out, key=lambda f: (order.get(f.severity, 9), f.id))
+    findings = sorted(out, key=lambda f: (order.get(f.severity, 9), f.id))
+    return Analysis(findings=findings, failures=failures)
+
+
+def findings_for(handle: Handle) -> list[Finding]:
+    """Just the findings, for callers that have no way to show a partial state."""
+    return analyse(handle).findings
 
 
 def summarise(findings: list[Finding]) -> dict:

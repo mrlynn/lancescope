@@ -78,6 +78,38 @@ export function FindingCard({ f, compact = false }: { f: Finding; compact?: bool
   );
 }
 
+/** "One check could not run" — its own state, never folded into "nothing to report".
+ *
+ *  A rule that raises used to be swallowed, which made a broken check look like a
+ *  clean table. Anything derived from a partial analysis has to say so, including
+ *  the language layer when it eventually narrates this. */
+export function PartialAnalysis({ d }: { d: Findings | null }) {
+  if (!d?.partial_analysis) return null;
+  const n = d.failed_rules.length;
+  return (
+    <div className="rounded-sm border px-4 py-3 mt-4"
+         style={{ borderColor: "rgb(var(--video-rgb) / 0.4)",
+                  background: "rgb(var(--video-rgb) / 0.06)" }}>
+      <div className="flex items-center gap-2 mono text-[12px]" style={{ color: "var(--video)" }}>
+        <Icon name="warning" size={14} />
+        {n} check{n === 1 ? "" : "s"} could not run
+      </div>
+      <p className="text-[12px] text-[var(--body)] leading-relaxed mt-2">
+        This analysis is incomplete. What is shown below is still derived from real
+        metadata — but something this console normally checks was skipped, so the
+        absence of a finding is not evidence of its absence.
+      </p>
+      <ul className="mt-2 space-y-1">
+        {d.failed_rules.map((f) => (
+          <li key={f.rule} className="mono text-[10px] text-[var(--haze)]">
+            {f.rule} — {f.error}: {f.message}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 /** The findings belonging to one panel, under that panel's own numbers. */
 export function PanelFindings({ d, panel }: { d: Findings | null; panel: Finding["panel"] }) {
   const mine = (d?.findings ?? []).filter((f) => f.panel === panel);
@@ -95,10 +127,15 @@ export function InsightsTab({ d }: { d: Findings | null }) {
 
   if (!d.findings.length) {
     return (
-      <Empty>
-        Nothing to report on <span className="mono text-[var(--bright)]">{d.name}</span>.
-        Every rule this console knows was checked and none of them fired.
-      </Empty>
+      <>
+        <PartialAnalysis d={d} />
+        <Empty>
+          Nothing to report on <span className="mono text-[var(--bright)]">{d.name}</span>.
+          {d.partial_analysis
+            ? " Of the rules that ran, none fired — see above for the ones that did not."
+            : " Every rule this console knows was checked and none of them fired."}
+        </Empty>
+      </>
     );
   }
 
@@ -112,10 +149,14 @@ export function InsightsTab({ d }: { d: Findings | null }) {
         {". "}
         Every one of these is derived from the metadata on the other tabs — no model
         was asked, and nothing here cost a token. Each also appears under the panel
-        holding the numbers it was computed from.
+        holding the numbers it was computed from.{d.partial_analysis
+          ? " This sweep was incomplete; see below."
+          : ""}
       </p>
 
-      <div className="space-y-3">
+      <PartialAnalysis d={d} />
+
+      <div className="space-y-3 mt-4">
         {d.findings.map((f) => <FindingCard key={f.id} f={f} />)}
       </div>
     </>
