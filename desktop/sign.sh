@@ -83,6 +83,23 @@ if [ -n "${NOTARY_PROFILE:-}" ]; then
          echo "    --apple-id you@example.com --team-id TEAMID --password <app-specific>"
          exit 1; }
 elif [ -n "${APPLE_ID:-}" ]; then
+  # An Apple ID is an email address. Checking the shape before asking Apple turns a
+  # round trip and a generic 401 into an immediate sentence about the actual
+  # mistake, which is usually a username typed where an address belongs.
+  case "$APPLE_ID" in
+    *@*.*) ;;
+    *)
+      echo
+      echo "APPLE_ID is \"$APPLE_ID\", which is not an email address."
+      echo
+      echo "An Apple ID is the full address your developer account is registered"
+      echo "under — you@example.com, not the username part on its own."
+      echo
+      echo "Nothing was built."
+      exit 1
+      ;;
+  esac
+
   echo "==> checking the notarisation credentials"
   if ! xcrun notarytool history \
         --apple-id "$APPLE_ID" \
