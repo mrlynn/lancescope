@@ -64,7 +64,7 @@ ui:
 # The macOS app: a window that owns the server, rather than a script the login
 # shell gets to interfere with. Unsigned — see desktop/sign.sh for the rest.
 app: sidecar
-	cd desktop/src-tauri && npx --yes @tauri-apps/cli@2 build
+	./desktop/build.sh
 
 sidecar: ui
 	uv run --only-group console --with pyinstaller pyinstaller \
