@@ -219,7 +219,7 @@ the registry as a starting point, not a restriction.
 **Done when:** the same summary and filter requests succeed against Claude and against
 a local model, and a model returning malformed JSON produces a clear error in the UI.
 
-### I2 — Findings engine
+### I2 — Findings engine  ✅ landed
 `server/intel/findings.py` + `GET /catalog/tables/{name}/findings`, reusing
 `disk_usage()` and the metadata the existing routes already gather rather than
 re-deriving it. Zero tokens.

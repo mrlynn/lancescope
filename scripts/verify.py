@@ -79,6 +79,63 @@ def heavy_columns(fields: list[dict]) -> list[str]:
     return out
 
 
+def findings_checks() -> None:
+    """The console's own findings: correct, cheap, and free of a provider.
+
+    Driven through the router, and asserted on the two things this corpus is known
+    to be — an unindexed vector column, and a blob table whose small-file count is
+    misleading — because those are the findings the whole layer above is built to
+    narrate.
+    """
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from server.catalog import Catalog
+    from server.routes import catalog as catalog_routes
+
+    app = FastAPI()
+    catalog_routes.bind(Catalog(LANCE))
+    app.include_router(catalog_routes.router)
+    api = TestClient(app)
+
+    moments = api.get("/catalog/tables/moments/findings")
+    segments = api.get("/catalog/tables/segments/findings")
+    check("findings answer for every table",
+          moments.status_code == 200 and segments.status_code == 200
+          and api.get("/catalog/tables/nope/findings").status_code == 404)
+
+    m, sg = moments.json(), segments.json()
+    ids = {f["id"] for f in m["findings"]}
+    check("the unindexed vector column is reported as a finding",
+          "vector-column-unindexed" in ids,
+          ", ".join(sorted(ids)) or "none")
+
+    small = next((f for f in sg["findings"] if f["id"] == "small-data-files"), None)
+    # The reason this rule exists: the count is right and acting on it would be
+    # wrong, so the caveat is not decoration and a regression that drops it turns
+    # the panel into bad advice.
+    check("the small-file count carries its blob caveat",
+          small is not None and bool(small["caveat"])
+          and small["severity"] == "note",
+          (small or {}).get("title", "not found"))
+
+    check("a blob table reports its split from measured bytes",
+          any(f["id"] == "blob-heavy-table"
+              and f["evidence"]["blob_bytes"] > 1_000 * f["evidence"]["meta_bytes"]
+              for f in sg["findings"]))
+
+    # Findings are metadata work. Reading video to produce them would defeat the
+    # point of the panel they sit in.
+    check("working out the findings costs kilobytes, not megabytes",
+          m["read_bytes"] < 1_000_000 and sg["read_bytes"] < 1_000_000,
+          f"{m['read_bytes']:,} B and {sg['read_bytes']:,} B")
+
+    every = {f["id"] for f in m["findings"] + sg["findings"]}
+    check("every finding carries evidence and a panel to sit in",
+          all(f["evidence"] and f["panel"] for f in m["findings"] + sg["findings"]),
+          f"{len(every)} distinct finding(s)")
+
+
 def intel_checks() -> None:
     """The language layer resolves to the right thing in every state, including none.
 
@@ -448,6 +505,9 @@ def main() -> int:
 
     print("\n  settings")
     settings_checks()
+
+    print("\n  findings")
+    findings_checks()
 
     print("\n  intelligence")
     intel_checks()
