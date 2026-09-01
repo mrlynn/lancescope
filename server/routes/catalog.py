@@ -547,14 +547,13 @@ async def findings(name: str) -> JSONResponse:
     """
     h = _open(name)
     h.drain()                                       # zero, so the cost below is ours
-    found = intel_findings.findings_for(h)
+    analysis = intel_findings.analyse(h)
     d = h.drain()
 
     return JSONResponse({
         "name": name,
         "uri": h.uri,
-        "findings": [f.as_dict() for f in found],
-        "summary": intel_findings.summarise(found),
+        **analysis.as_dict(),
         "read_bytes": d.read_bytes,
         "read_iops": d.read_iops,
     })

@@ -17,7 +17,9 @@ import {
   type TableList, type Versions,
   getFindings, getFragments, getIndices, getRows, getTable, getVersions, listTables,
 } from "@/app/lib/catalog";
-import { InsightsTab, PanelFindings } from "@/app/components/console/Findings";
+import {
+  InsightsTab, PanelFindings, PartialAnalysis,
+} from "@/app/components/console/Findings";
 import { usePins, useRecents } from "@/app/lib/recents";
 import {
   type SettingsState, activateConnection, getSettings,
@@ -256,6 +258,7 @@ export default function Console() {
             </div>
 
             <div className="panel p-6 min-h-[380px]">
+              {tab !== "insights" && <PartialAnalysis d={findings} />}
               {tab === "schema" && (detail
                 ? <><SchemaTab d={detail} /><PanelFindings d={findings} panel="schema" /></>
                 : <Empty>reading schema…</Empty>)}

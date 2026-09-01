@@ -187,6 +187,15 @@ export type Finding = {
   columns: string[];
 };
 
+/** A check that could not run. Distinct from "nothing to report": a partial
+ *  analysis has to look different from a clean one, or a broken rule reads as good
+ *  news. */
+export type RuleFailure = {
+  rule: string;
+  error: string;
+  message: string;
+};
+
 export type Findings = {
   name: string;
   uri: string;
@@ -197,6 +206,8 @@ export type Findings = {
     note: number;
     by_panel: Record<string, number>;
   };
+  partial_analysis: boolean;
+  failed_rules: RuleFailure[];
   read_bytes: number;
   read_iops: number;
 };
