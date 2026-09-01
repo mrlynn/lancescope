@@ -18,7 +18,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from server import query
+from server import compare, query
 from server.catalog import (
     Catalog,
     Handle,
@@ -587,6 +587,40 @@ async def query_capabilities(name: str) -> JSONResponse:
     })
 
 
+@router.get("/tables/{name:path}/compare")
+async def compare_versions(name: str, a: int, b: int) -> JSONResponse:
+    """Two versions of one table, side by side and pinned.
+
+    Pinned is the point: a dataset written to while a comparison is on screen would
+    otherwise produce a before from one moment and an after from another, and the
+    diff between them would describe nothing that ever existed.
+    """
+    catalog = _catalog()
+    try:
+        left, right = compare.open_pair(catalog, name, a, b)
+    except FileNotFoundError:
+        raise HTTPException(404, f"no table named {name!r}") from None
+    except (ValueError, OSError) as e:
+        # An out-of-range version is the caller asking for something that is not
+        # there, not a fault.
+        raise HTTPException(400, f"cannot open both versions: "
+                                 f"{str(e).splitlines()[0][:160]}") from None
+
+    left.drain()
+    right.drain()
+    side_a, side_b = compare.describe(left), compare.describe(right)
+    cost = left.drain() + right.drain()
+
+    return JSONResponse({
+        "name": name,
+        "a": side_a.as_dict(),
+        "b": side_b.as_dict(),
+        "diff": compare.structural_diff(side_a, side_b),
+        "read_bytes": cost.read_bytes,
+        "read_iops": cost.read_iops,
+    })
+
+
 # Registered last on purpose. `{name:path}` matches slashes, so this would swallow
 # `/tables/x/versions` if it came first; Starlette resolves in definition order.
 @router.get("/tables/{name:path}")
@@ -683,6 +717,35 @@ async def query_explain(name: str, body: QueryBody) -> JSONResponse:
     d = h.drain()
     return JSONResponse({"name": name, "plan": plan.as_dict(),
                          "read_bytes": d.read_bytes, "read_iops": d.read_iops})
+
+
+class CompareQueryBody(QueryBody):
+    a: int
+    b: int
+
+
+@router.post("/tables/{name:path}/compare/query")
+async def compare_query(name: str, body: CompareQueryBody) -> JSONResponse:
+    """The same query against both versions — the before and after of an operation.
+
+    This is what turns "the index exists now" into a byte count and an access path
+    that either changed or did not.
+    """
+    catalog = _catalog()
+    try:
+        left, right = compare.open_pair(catalog, name, body.a, body.b)
+    except FileNotFoundError:
+        raise HTTPException(404, f"no table named {name!r}") from None
+    except (ValueError, OSError) as e:
+        raise HTTPException(400, f"cannot open both versions: "
+                                 f"{str(e).splitlines()[0][:160]}") from None
+
+    spec = query.QuerySpec(**body.model_dump(exclude={"a", "b"}))
+    result = compare.compare_query(left, right, spec, cell=_cell)
+    if result.a is None and result.b is None:
+        raise HTTPException(400, result.a_error or "the query could not be run")
+    return JSONResponse({"name": name, "versions": {"a": body.a, "b": body.b},
+                         **result.as_dict()})
 
 
 @router.post("/tables/{name:path}/query")
