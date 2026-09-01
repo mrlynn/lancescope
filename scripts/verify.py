@@ -79,6 +79,84 @@ def heavy_columns(fields: list[dict]) -> list[str]:
     return out
 
 
+def settings_checks() -> None:
+    """Connections move the catalog, and the settings surface keeps its promises.
+
+    Runs against a temporary settings file, never the operator's own: this is a
+    check, and a check that edits `~/.config` is a side effect.
+    """
+    import os
+    import stat
+    import tempfile
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from server.catalog import Catalog
+    from server.routes import catalog as catalog_routes
+    from server.routes import settings as settings_routes
+
+    with tempfile.TemporaryDirectory() as tmp:
+        os.environ["LANCESCOPE_CONFIG"] = str(Path(tmp) / "settings.json")
+        os.environ.pop("LANCE_ROOT", None)
+
+        empty = Path(tmp) / "empty"
+        empty.mkdir()
+
+        catalog = Catalog(empty)
+        app = FastAPI()
+        catalog_routes.bind(catalog)
+        settings_routes.bind(catalog)
+        app.include_router(catalog_routes.router)
+        app.include_router(settings_routes.router)
+        api = TestClient(app)
+
+        check("console lists nothing under an empty root",
+              api.get("/catalog/tables").json()["tables"] == [])
+
+        good = api.post("/settings/connections/probe", json={"uri": str(LANCE)}).json()
+        bad = api.post("/settings/connections/probe",
+                       json={"uri": str(Path(tmp) / "nope")}).json()
+        check("probe tells a database from a typo",
+              good["reachable"] is True and len(good["tables"]) >= 2
+              and bad["reachable"] is False,
+              f"{len(good['tables'])} tables found")
+
+        added = api.post("/settings/connections",
+                         json={"uri": str(LANCE), "label": "corpus"})
+        names = [t["name"] for t in api.get("/catalog/tables").json()["tables"]]
+        check("adding a connection repoints the catalog, no restart",
+              added.status_code == 200 and len(names) >= 2, ", ".join(names))
+
+        refused = api.post("/settings/connections", json={"uri": str(Path(tmp) / "nope")})
+        check("a path with nothing at it is refused", refused.status_code == 400)
+
+        # A key may live in this file, so its mode is part of the contract.
+        mode = stat.S_IMODE(Path(os.environ["LANCESCOPE_CONFIG"]).stat().st_mode)
+        check("settings file is not world readable", mode == 0o600, oct(mode))
+
+        api.put("/settings/intelligence", json={"provider": "anthropic",
+                                                "api_key": "sk-ant-verify-only"})
+        body = api.get("/settings").text
+        check("a stored key never leaves the process",
+              "sk-ant-verify-only" not in body)
+
+        conn_id = added.json()["connection"]["id"]
+        after = api.delete(f"/settings/connections/{conn_id}").json()
+        # Removing the last connection falls back down the same ladder the server
+        # resolves at boot: env, then connection, then the ingest directory if it
+        # actually holds tables, then nothing. What matters is that it never keeps
+        # reading a connection that has been deleted, and that it says which rung
+        # it landed on.
+        check("removing a connection falls back, and says to what",
+              after["root"]["connection_id"] is None
+              and after["root"]["source"] in ("default", "none")
+              and bool(after["root"]["detail"]),
+              after["root"]["source"])
+
+        os.environ.pop("LANCESCOPE_CONFIG", None)
+
+
 def console_checks() -> None:
     """Every catalog endpoint answers, and none of them read video.
 
@@ -279,6 +357,9 @@ def main() -> int:
 
     print("\n  console")
     console_checks()
+
+    print("\n  settings")
+    settings_checks()
 
     print(f"\n{'ALL GOOD — go on stage' if ok else 'SOMETHING IS BROKEN'}")
     return 0 if ok else 1

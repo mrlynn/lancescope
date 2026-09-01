@@ -149,17 +149,30 @@ flounder through an agent loop. An unknown local model is assumed
 Choosing a cheaper model is the operator's call, surfaced in config and docs — not
 something the tool does silently to save money.
 
+Configuration has two sources and one rule: **the environment wins.** A deployment
+that exports a key or pins a root should not be overridden by a file someone edited
+through a browser, and an operator who did edit it through the browser should be told
+which of the two is in play.
+
+Persisted in the settings file (`~/.config/lancescope/settings.json`, moved by
+`LANCESCOPE_CONFIG`, written at 0600) and edited at `/console/settings`: provider,
+model per role, endpoint, spend ceiling, cache directory, and — opt-in, with the
+tradeoff stated on the page — an API key.
+
+Read from the environment, where set:
+
 ```
-ANTHROPIC_API_KEY           enables the Claude path
+ANTHROPIC_API_KEY           enables the Claude path; beats a stored key
 LANCESCOPE_LLM_PROVIDER     anthropic | ollama | openai-compat | none  (default: auto-detect)
 OLLAMA_HOST                 as Ollama itself defines it (default localhost:11434)
 LANCESCOPE_LLM_BASE_URL     for openai-compat (e.g. http://localhost:1234/v1)
 LANCESCOPE_LLM_API_KEY      for openai-compat
-LANCESCOPE_MODEL            role default override
-LANCESCOPE_MODEL_FAST       override for NL→filter
 LANCESCOPE_CACHE            artifact cache dir (default ~/.cache/lancescope)
-LANCESCOPE_SPEND_CEILING    optional per-process dollar cap; refuses past it
 ```
+
+The settings page also answers the question a config file cannot: it probes for a
+running Ollama and lists the models actually pulled, so picking one is a dropdown
+rather than a guess at a name.
 
 ---
 
@@ -189,8 +202,9 @@ Alongside the zero-bytes rule in `CONTRIBUTING.md`, and asserted by `verify.py`.
 ## Tickets
 
 ### I1 — Provider shim, model registry, capabilities endpoint
-`server/intel/{providers,registry,config}.py`; auto-detection in the resolution order
-above; `GET /intel/capabilities` returning `{available, provider, models_by_role,
+`server/intel/{providers,registry,config}.py`, reading the stored `Intelligence` block
+from `server/settings.py` rather than inventing a config of its own; auto-detection in
+the resolution order above; `GET /intel/capabilities` returning `{available, provider, models_by_role,
 installed_models, tools_capable, reason_if_unavailable, setup_hint}`. Adds
 `anthropic` to `pyproject.toml`; Ollama adds nothing.
 **Done when:** capabilities answers correctly in four states — nothing configured, an
@@ -310,3 +324,27 @@ the sprint runs long.
 - With a key, every AI response shows tokens, dollars, and the bytes it read.
 - Claude Code can inspect a Lance directory through the MCP server.
 - No endpoint added in this sprint writes to a dataset.
+
+---
+
+## Landed before the sprint
+
+Two things arrived ahead of I1 because they blocked using the tool at all, and both
+change what the tickets above have to build.
+
+**Connections.** The root was resolved once at import from `LANCE_ROOT` or the ingest
+directory, so pointing the console at a second database meant restarting the process,
+and a fresh clone looked hardwired to the demo. There is now a saved connection list,
+one active, switchable at runtime — `Catalog.rebind()` repoints the console's handles
+and leaves the demo's pinned ones alone, so switching cannot stop a video mid-talk.
+The demo also arms itself when a connection turns out to hold its corpus, rather than
+returning 503 until somebody restarts the process.
+
+**A settings page**, at `/console/settings`: connections, provider, model per role,
+spend ceiling, and a live probe of what this machine can actually do — including the
+models Ollama has pulled. It is the only surface in the app that writes anything, and
+what it writes is its own file.
+
+For I1 this means the provider shim reads a config object that already exists, and
+`GET /intel/capabilities` is a second opinion on `/settings/intelligence/probe` rather
+than the first thing to answer that question.

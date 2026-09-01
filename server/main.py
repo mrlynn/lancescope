@@ -7,6 +7,11 @@ Startup used to `SystemExit` when the demo corpus was missing. It no longer does
 console has to be able to boot against a directory with no tables in it and say so.
 The demo's routes return 503 instead, which is the honest answer to "search this
 corpus" when there is no corpus.
+
+The root is no longer a constant resolved at import. It comes from the saved
+connection, or `LANCE_ROOT` where that is set, and the demo corpus is a fallback for
+a first run rather than the thing the console is wired to. `/settings` can move it
+at runtime.
 """
 
 import sys
@@ -18,18 +23,27 @@ from fastapi.middleware.cors import CORSMiddleware
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "ingest"))
 
-from server.catalog import Catalog, default_root
+from server import settings as cfg
+from server.catalog import Catalog
 from server.routes import catalog as catalog_routes
 from server.routes import demo
+from server.routes import settings as settings_routes
 
-CATALOG = Catalog(default_root())
+ROOT = cfg.resolve_root(cfg.load())
+CATALOG = Catalog(ROOT.root or Path())
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     catalog_routes.bind(CATALOG)
-    tables = CATALOG.discover()
-    print(f"catalog: {CATALOG.root} — {len(tables)} table(s): {', '.join(tables) or 'none'}")
+    settings_routes.bind(CATALOG)
+    if ROOT.root is None:
+        print(f"catalog: nothing configured — {ROOT.detail} Add a connection at "
+              f"/console/settings.")
+    else:
+        tables = CATALOG.discover()
+        print(f"catalog: {CATALOG.root} ({ROOT.source}) — {len(tables)} table(s): "
+              f"{', '.join(tables) or 'none'}")
 
     if demo.load(CATALOG):
         demo.warm()
@@ -58,3 +72,6 @@ app.include_router(demo.router)
 
 # The console, under /catalog/*. Read-only: nothing here writes to a dataset.
 app.include_router(catalog_routes.router)
+
+# Configuration, under /settings/*. Writes one file — its own — and never a dataset.
+app.include_router(settings_routes.router)

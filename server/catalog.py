@@ -19,7 +19,6 @@ video would stop mid-talk.
 
 from __future__ import annotations
 
-import os
 from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,19 +32,6 @@ MAX_DEPTH = 3
 
 # Open datasets held at once, excluding pinned ones.
 MAX_OPEN = 32
-
-
-def default_root() -> Path:
-    """Where to look for tables.
-
-    `LANCE_ROOT` wins; otherwise the ingest pipeline's own output directory, which
-    is what every existing invocation expects.
-    """
-    env = os.environ.get("LANCE_ROOT")
-    if env:
-        return Path(env).expanduser()
-    from config import LANCE  # imported lazily: ingest/ is put on sys.path by the app
-    return Path(LANCE)
 
 
 @dataclass(frozen=True)
@@ -170,6 +156,25 @@ class Catalog:
             _, stale = self._open.popitem(last=False)
             stale.close()
         return handle
+
+    def rebind(self, root: Path | str | None) -> int:
+        """Point the catalog at a different directory, at runtime.
+
+        Console handles are closed — they belong to the old root and their names no
+        longer resolve. **Pinned handles are not**: the demo's `moments` and
+        `segments` were opened by URI and pinned precisely so nothing could evict
+        them, and a `BlobFile` hanging off `segments` is what a talk is playing
+        from. Switching the console to another database mid-demo must not stop the
+        video.
+
+        Returns the number of handles closed.
+        """
+        self.root = Path(root) if root is not None else Path()
+        closed = len(self._open)
+        for h in self._open.values():
+            h.close()
+        self._open.clear()
+        return closed
 
     def close_all(self) -> None:
         for h in list(self._open.values()) + list(self._pinned.values()):

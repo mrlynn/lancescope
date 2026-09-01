@@ -49,6 +49,18 @@ fails if any claim in `README.md` has stopped being true. CI cannot run it — t
 corpus is gigabytes of gitignored video — so it is on you to run it locally before
 asking for a merge.
 
+## Configuration
+
+Two sources, one rule: **the environment wins.** `LANCE_ROOT` beats a saved
+connection, `ANTHROPIC_API_KEY` beats a stored key, and every surface that shows a
+resolved value also shows which rung it came from. A settings page that silently
+loses to an env var is worse than no settings page.
+
+`server/settings.py` owns the file (`~/.config/lancescope/settings.json`, moved by
+`LANCESCOPE_CONFIG`, written at 0600 because a key may be in it). It is the only file
+this project writes. Nothing under `/settings/*` touches a dataset — the most it does
+is read directory entries to check a path before saving it.
+
 ## The invariant
 
 This project exists to demonstrate one thing: **searching the corpus reads zero video
