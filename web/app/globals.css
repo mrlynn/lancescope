@@ -139,6 +139,34 @@ body::before {
   border-radius: 4px;
 }
 
+/* Controls. The console had no forms until settings; these are the two shapes it
+   needs, in the same quiet language as everything else on the page. */
+.pill {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 6px 12px;
+  border-radius: 2px;
+  border: 1px solid var(--rule);
+  color: var(--haze);
+  transition: color .15s, border-color .15s;
+}
+.pill:hover:not(:disabled) { color: var(--bright); border-color: var(--haze); }
+.pill:disabled { opacity: .4; cursor: not-allowed; }
+
+.inp {
+  width: 100%;
+  font-size: 12px;
+  padding: 7px 10px;
+  border-radius: 2px;
+  background: var(--ink-3);
+  border: 1px solid var(--rule);
+  color: var(--bright);
+}
+.inp::placeholder { color: var(--dim); }
+.inp:focus { border-color: var(--haze); }
+
 /* Focus that survives a projector. */
 :focus-visible {
   outline: 2px solid var(--video);

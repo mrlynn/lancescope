@@ -15,6 +15,9 @@ import {
   type Fragments, type Indices, type Rows, type TableDetail, type TableList, type Versions,
   getFragments, getIndices, getRows, getTable, getVersions, listTables,
 } from "@/app/lib/catalog";
+import {
+  type SettingsState, activateConnection, getSettings,
+} from "@/app/lib/settings";
 
 const TABS = ["schema", "versions", "indices", "fragments", "rows"] as const;
 type Tab = (typeof TABS)[number];
@@ -38,6 +41,7 @@ export default function Console() {
   const [expanded, setExpanded] = useState<string[]>([]);
   const [rowsError, setRowsError] = useState<string | null>(null);
   const [cost, setCost] = useState<{ bytes: number; iops: number } | null>(null);
+  const [settings, setSettings] = useState<SettingsState | null>(null);
 
   // Everything downstream of the selected table is cleared here rather than in an
   // effect keyed on `picked`: an effect would re-render twice on every click, and
@@ -48,14 +52,34 @@ export default function Console() {
     setRows(null); setOffset(0); setFilter(""); setExpanded([]); setRowsError(null);
   }, []);
 
-  useEffect(() => {
+  const loadTables = useCallback(() => {
     listTables()
       .then((d) => {
         setList(d);
-        setPicked((p) => p ?? d.tables[0]?.name ?? null);
+        setPicked((p) => (p && d.tables.some((t) => t.name === p) ? p : d.tables[0]?.name ?? null));
       })
       .catch((e) => setListError(e instanceof Error ? e.message : "unreachable"));
   }, []);
+
+  useEffect(() => {
+    loadTables();
+    getSettings().then(setSettings).catch(() => setSettings(null));
+  }, [loadTables]);
+
+  // Switching connection repoints the catalog server-side, so everything below the
+  // rail is about a different database now. Clear it rather than leaving a schema
+  // from the old one on screen while the new list arrives.
+  const switchTo = useCallback(async (id: string) => {
+    try {
+      setSettings(await activateConnection(id));
+      selectTable(null);
+      setList(null);
+      setCost(null);
+      loadTables();
+    } catch (e) {
+      setListError(e instanceof Error ? e.message : "could not switch connection");
+    }
+  }, [loadTables, selectTable]);
 
   const loadRows = useCallback(
     async (name: string, off: number, f: string, exp: string[]) => {
@@ -118,6 +142,24 @@ export default function Console() {
           </a>
           <div className="w-px h-5 bg-[var(--rule)]" />
           <h1 className="text-[19px] font-bold tracking-tight text-[var(--bright)]">Console</h1>
+          {settings && settings.connections.length > 1 ? (
+            <select
+              className="inp mono shrink-0 text-[11px] py-1"
+              // `.inp` sets width:100%, and it wins on source order — so the width
+              // this control actually needs has to be stated here.
+              style={{ width: 190 }}
+              value={settings.root.connection_id ?? ""}
+              onChange={(e) => switchTo(e.target.value)}
+              disabled={settings.env_locked}
+              title={settings.env_locked
+                ? "LANCE_ROOT is set; connections are inert"
+                : `${list?.root ?? ""} — switch connection`}
+            >
+              {settings.connections.map((c) => (
+                <option key={c.id} value={c.id}>{c.label}</option>
+              ))}
+            </select>
+          ) : null}
           <span className="eyebrow normal-case truncate min-w-0 hidden md:block" title={list?.root}>
             {list?.root ?? "…"}
           </span>
@@ -125,6 +167,7 @@ export default function Console() {
         <div className="flex items-center gap-4">
           {cost && <Cost bytes={cost.bytes} iops={cost.iops} />}
           <ThemeToggle />
+          <Link href="/console/settings" className="pill">Settings</Link>
           <Link href="/"
                 className="mono text-[10px] tracking-[0.14em] uppercase px-3 py-1.5 rounded-sm
                            border border-[var(--rule)] text-[var(--haze)]
@@ -147,10 +190,11 @@ export default function Console() {
           <Mark size={34} className="mx-auto mb-5 text-[var(--rule)]" />
           <p className="text-[15px] text-[var(--haze)] max-w-lg mx-auto leading-relaxed">
             No Lance tables under{" "}
-            <span className="mono text-[var(--bright)]">{list.root}</span>. Point the API at
-            another directory with{" "}
-            <span className="mono text-[var(--bright)]">LANCE_ROOT</span>, or build the demo
-            corpus with <span className="mono text-[var(--bright)]">make ingest</span>.
+            <span className="mono text-[var(--bright)]">{list.root || "any configured path"}</span>.{" "}
+            <Link href="/console/settings" className="underline"
+                  style={{ color: "var(--video)" }}>Add a connection</Link>{" "}
+            pointing at a LanceDB directory, or build the demo corpus with{" "}
+            <span className="mono text-[var(--bright)]">make ingest</span>.
           </p>
         </div>
       ) : (

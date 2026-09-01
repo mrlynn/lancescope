@@ -5,15 +5,52 @@ that made the case for building them.
 
 - **[Ctrl-F for Video](#ctrl-f-for-video)** — the demo, below. Multimodal search over
   a corpus of conference talks where the video and its index are the same table.
-- **The console** at `/console`. Point it at any Lance directory — `LANCE_ROOT` — and
-  read its schema, versions, indices, fragments and rows, with the byte cost of every
-  read shown as you go. Describing 2.65 GB of video costs 23.8 KB and reads none of
-  it. Read-only: nothing in it writes to a dataset.
+- **The console** at `/console`. Point it at any Lance directory — from the settings
+  page, at runtime, no restart — and read its schema, versions, indices, fragments and
+  rows, with the byte cost of every read shown as you go. Describing 2.65 GB of video
+  costs 23.8 KB and reads none of it. Read-only: nothing in it writes to a dataset.
   See [the sprint plan](docs/console-sprint-1.md) for how it was built and what Lance
   taught us on the way, and [sprint 2](docs/intelligence-sprint-2.md) for the
   intelligence layer going on top of it — findings the console derives itself, an
   optional language layer that runs against Claude or a local Ollama model, and the
   catalog exposed to agents over MCP.
+
+## Pointing it at your own data
+
+The console is not wired to the demo. It reads whatever connection is active, and you
+manage those at **`/console/settings`** — paste a path, check what is there, switch.
+The catalog is repointed in place; nothing restarts.
+
+Where the root comes from, in order:
+
+| rung | when |
+|---|---|
+| `LANCE_ROOT` | set in the environment — wins, and the settings page says so |
+| the active connection | saved in `~/.config/lancescope/settings.json` |
+| `data/lance` | first run with nothing configured, **and only if it holds tables** |
+| nothing | the console says so and points at settings |
+
+`LANCESCOPE_CONFIG` moves the settings file. Connections may be local directories or
+`s3://` / `db://` URIs; remote ones are saved unverified rather than falsely ticked.
+
+## Intelligence
+
+Optional, and the console is useful without it. The settings page configures which
+provider powers the language layer — Claude, a local Ollama model, or any
+OpenAI-compatible endpoint — and reports what is actually available on the machine
+right now, including the models Ollama has pulled.
+
+Two ways in:
+
+```bash
+ollama pull qwen3:8b            # local, free, offline, no account
+export ANTHROPIC_API_KEY=sk-…   # or Claude, with the cost of every call shown
+```
+
+Neither is required. A key pasted into the settings page is stored in the settings
+file at mode 0600 — the environment variable is the safer path and always wins over
+it. See [the sprint plan](docs/intelligence-sprint-2.md) for what the layer does with
+this once it lands.
 
 Licensed under Apache-2.0. See [CONTRIBUTING.md](CONTRIBUTING.md) for how the work is
 planned and landed.
