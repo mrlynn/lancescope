@@ -5,9 +5,12 @@ that made the case for building them.
 
 - **[Ctrl-F for Video](#ctrl-f-for-video)** — the demo, below. Multimodal search over
   a corpus of conference talks where the video and its index are the same table.
-- **[The console](docs/console-sprint-1.md)** — in progress. Point it at any Lance
-  directory and read its schema, versions, indices, fragments and rows, with the byte
-  cost of every read shown as you go.
+- **The console** at `/console`. Point it at any Lance directory — `LANCE_ROOT` — and
+  read its schema, versions, indices, fragments and rows, with the byte cost of every
+  read shown as you go. Describing 2.65 GB of video costs 23.8 KB and reads none of
+  it. Read-only: nothing in it writes to a dataset.
+  See [the sprint plan](docs/console-sprint-1.md) for how it was built and what Lance
+  taught us on the way.
 
 Licensed under Apache-2.0. See [CONTRIBUTING.md](CONTRIBUTING.md) for how the work is
 planned and landed.

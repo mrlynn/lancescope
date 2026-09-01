@@ -179,3 +179,45 @@ C8 is the biggest chunk of wall-clock.
   shows their schema, versions, indices and fragments, and browses rows.
 - Pointed at an empty directory, it says so and doesn't crash.
 - No endpoint added in this sprint writes to a dataset.
+
+---
+
+## What actually happened
+
+Written after the sprint. Four things the plan above got wrong or didn't know,
+recorded because they change how sprint 2 should be approached.
+
+**Lance's manifest cannot see Blob V2 side files.** `tracked_files()` lists no `.blob`
+paths, and `total_files_size` reports 43,424 bytes for a `segments` table holding
+2.65 GB. The cheap figure and the true figure are different numbers answering
+different questions, and every panel that shows one has to say which. This is why the
+listing route carries a `note` field and three UI panels carry a caveat.
+
+**Blob columns were being detected by name.** The `/schema` route decided a column was
+a blob by testing for the substring `video_blob`. Correct for one table, wrong for a
+console. The real signals are `lance-encoding:blob` field metadata (V1) and the
+`lance.blob.v2` extension type (V2) — and `blobmeta` reads `None` even on the real
+blob column, so there was nothing better available when that line was written.
+
+**C7's stated risk was wrong.** The plan called row browsing the ticket most able to
+break the zero-bytes claim. It isn't: projecting a Blob V2 column yields a descriptor,
+not bytes — all 162 descriptors cost 43 KB while describing 2.65 GB. Selecting a blob
+column cannot leak video even deliberately. The columns that actually cost something
+are the ordinary ones: `thumb_jpeg` takes a page from 34 KB to 383 KB.
+
+**The console found a bug in the console.** `/rows` counted the whole table rather than
+the filtered set, so a predicate matching 99 of 1,114 rows rendered as "1–25 of 1,114"
+and paged off the end of the results. The API tests written for that ticket never
+asserted on `total_rows` under a filter; it was only visible once it was on screen.
+
+### For sprint 2
+
+`num_small_files` flags all 16 `segments` fragments, and by Lance's measure it is
+right — the data files are 2.7 KB each. They also hold ~195 MB of video apiece.
+**A compaction button wired to that number would rewrite the small half of a table
+that needs nothing done to it.** The fragments panel says so in words; the button must
+not ignore it.
+
+`moments.vector` is still unindexed, deliberately. Every semantic search scans all
+1,114 rows, which is where README's 3.45 MB per query comes from. The console reports
+it as a finding rather than an error. Revisit if the corpus grows.
