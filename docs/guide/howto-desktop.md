@@ -47,6 +47,15 @@ its own code runs.
 The app is executed by LaunchServices with no shell in the path at all. The launcher
 remains for developers; it is not the supported way to run this.
 
+## If the build cannot find cargo
+
+`rustup` puts cargo on your PATH by editing shell startup files, so a script only
+sees it if the shell that ran the script is one of the shells that got edited. Both
+`desktop/build.sh` and `desktop/sign.sh` look for it themselves and check every tool
+they need up front — a signing script that fails four minutes in because something is
+missing has wasted four minutes and told you nothing it could not have said
+immediately.
+
 ## Signing it
 
 Unsigned, macOS will refuse to open it on any machine but the one that built it. With
