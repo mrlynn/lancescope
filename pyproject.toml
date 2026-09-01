@@ -1,7 +1,7 @@
 [project]
-name = "ctrl-f-for-video"
+name = "lancescope"
 version = "0.1.0"
-description = "Ctrl-F for Video — a LanceDB Blob V2 + multimodal search demo"
+description = "LanceScope — visibility into LanceDB data, and the Ctrl-F for Video demo it grew out of"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     # data layer
@@ -32,6 +32,12 @@ dev = ["ruff>=0.9"]
 
 [tool.ruff]
 line-length = 100
+
+# Pinned explicitly rather than left to ruff's defaults: CI runs a pinned ruff, and
+# an implicit ruleset means a ruff release can turn a green main red without anyone
+# changing a line of code.
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
 
 [tool.ruff.lint.per-file-ignores]
 # The server and scripts put ingest/ on sys.path before importing from it, so those

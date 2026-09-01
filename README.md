@@ -1,4 +1,20 @@
-# Ctrl-F for Video
+# LanceScope
+
+Tools for seeing what is actually inside a LanceDB dataset — and the conference demo
+that made the case for building them.
+
+- **[Ctrl-F for Video](#ctrl-f-for-video)** — the demo, below. Multimodal search over
+  a corpus of conference talks where the video and its index are the same table.
+- **[The console](docs/console-sprint-1.md)** — in progress. Point it at any Lance
+  directory and read its schema, versions, indices, fragments and rows, with the byte
+  cost of every read shown as you go.
+
+Licensed under Apache-2.0. See [CONTRIBUTING.md](CONTRIBUTING.md) for how the work is
+planned and landed.
+
+---
+
+## Ctrl-F for Video
 
 A ~10 minute conference demo of LanceDB, built around one claim:
 

@@ -1,0 +1,30 @@
+name: Sprint ticket
+description: A unit of planned work, tracked against a sprint milestone.
+labels: []
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: One or two sentences. What is true after this lands that isn't true now?
+    validations: { required: true }
+  - type: textarea
+    id: shape
+    attributes:
+      label: Shape
+      description: Files, endpoints, or components this touches. Enough for someone else to start.
+    validations: { required: true }
+  - type: textarea
+    id: done
+    attributes:
+      label: Done when
+      description: Checkable conditions. Include how the demo is proven not to have regressed.
+      value: |
+        - [ ] `make verify` passes
+        - [ ]
+    validations: { required: true }
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes and risks
+      description: Anything discovered while planning that the implementer shouldn't have to rediscover.

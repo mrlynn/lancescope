@@ -1,0 +1,21 @@
+name: Bug
+description: Something behaves differently from what it claims.
+labels: ["bug"]
+body:
+  - type: textarea
+    id: expected
+    attributes:
+      label: What should happen
+    validations: { required: true }
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happens instead
+      description: Paste the actual output or numbers, not a paraphrase.
+    validations: { required: true }
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: The exact commands, starting from a clean checkout where possible.
+    validations: { required: true }

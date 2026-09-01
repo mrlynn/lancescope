@@ -111,7 +111,9 @@ def merge_tail(segs: list[dict], outdir: Path) -> list[dict]:
     merged = outdir / "merged.mp4"
     ffmpeg(["-f", "concat", "-safe", "0", "-i", str(lst),
             "-c", "copy", "-movflags", "+faststart", str(merged)])
-    a["path"].unlink(); b["path"].unlink(); lst.unlink()
+    a["path"].unlink()
+    b["path"].unlink()
+    lst.unlink()
     merged.rename(a["path"])
     a.update(end_s=b["end_s"], bytes=a["path"].stat().st_size)
     return segs[:-1]
