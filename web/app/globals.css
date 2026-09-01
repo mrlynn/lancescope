@@ -291,6 +291,163 @@ body::before {
 .qin::placeholder { color: var(--dim); }
 .qin:focus { border-color: var(--video); }
 
+/* ---------------------------------------------------------------------------
+   The guide.
+
+   Long-form reading, which nothing else in this app is. A measure of roughly 72
+   characters, generous leading, and a scale that separates levels by weight and
+   space rather than by size alone — a documentation page with four heading sizes
+   competing for attention reads as a form, not as prose.
+   --------------------------------------------------------------------------- */
+
+.prose {
+  color: var(--body);
+  font-size: 15px;
+  line-height: 1.75;
+}
+
+.prose > * + * { margin-top: 1.1em; }
+
+.prose h1 {
+  font-size: 30px;
+  line-height: 1.2;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--bright);
+  margin-bottom: 0.6em;
+}
+
+.prose h2 {
+  font-size: 19px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--bright);
+  margin-top: 2.2em;
+  padding-top: 1.1em;
+  border-top: 1px solid var(--hairline);
+}
+
+.prose h3 {
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--bright);
+  margin-top: 1.8em;
+}
+
+/* The heading is the link. A visible chain glyph is one more thing on the page for
+   a behaviour most readers find by hovering anyway. */
+.prose .anchor { color: inherit; text-decoration: none; }
+.prose .anchor:hover { color: var(--video); }
+
+.prose p { max-width: 72ch; }
+.prose strong { color: var(--bright); font-weight: 650; }
+.prose em { color: var(--bright); font-style: italic; }
+
+.prose a:not(.anchor) {
+  color: var(--video);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+}
+
+.prose ul, .prose ol { padding-left: 1.3em; max-width: 72ch; }
+.prose ul { list-style: disc; }
+.prose ol { list-style: decimal; }
+.prose li { margin-top: 0.35em; }
+.prose li::marker { color: var(--dim); }
+
+.prose blockquote {
+  border-left: 2px solid rgb(var(--index-rgb) / 0.5);
+  padding: 0.1em 0 0.1em 1.1em;
+  color: var(--bright);
+}
+.prose blockquote p { margin-top: 0.5em; }
+.prose blockquote > :first-child { margin-top: 0; }
+
+/* Inline code sits inside a sentence, so it is toned rather than boxed — a border
+   on every identifier turns a paragraph into a fence. */
+.prose :not(pre) > code {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.86em;
+  color: var(--bright);
+  background: rgb(var(--index-rgb) / 0.09);
+  padding: 0.15em 0.4em;
+  border-radius: 3px;
+}
+
+.prose figure.code {
+  margin-top: 1.3em;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--ink-3);
+}
+.prose figure.code figcaption {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--haze);
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--hairline);
+}
+.prose figure.code figcaption:empty { display: none; }
+.prose figure.code pre {
+  margin: 0;
+  padding: 13px 14px;
+  overflow-x: auto;
+}
+.prose figure.code code {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--body);
+}
+
+/* Tables are how reference pages carry most of their content, so they get the same
+   care as the prose: no zebra striping, one hairline per row, numbers legible. */
+.prose table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13.5px;
+  margin-top: 1.3em;
+  display: block;
+  overflow-x: auto;
+}
+.prose thead th {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--haze);
+  font-weight: 400;
+  text-align: left;
+  padding: 0 14px 8px 0;
+  border-bottom: 1px solid var(--rule);
+  white-space: nowrap;
+}
+.prose tbody td {
+  padding: 9px 14px 9px 0;
+  border-bottom: 1px solid var(--hairline);
+  vertical-align: top;
+}
+.prose tbody tr:last-child td { border-bottom: none; }
+
+.prose hr {
+  border: 0;
+  border-top: 1px solid var(--hairline);
+  margin: 2.4em 0;
+}
+
+/* Syntax highlighting, in the app's own palette rather than a theme borrowed from
+   somewhere with different intentions. Coral for what a line does, amber for the
+   values it does it to, haze for everything that is punctuation. */
+.hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-section { color: var(--video); }
+.hljs-string, .hljs-number, .hljs-attr, .hljs-symbol { color: var(--index); }
+.hljs-title, .hljs-name, .hljs-built_in, .hljs-type { color: var(--bright); }
+.hljs-comment, .hljs-quote, .hljs-meta { color: var(--dim); font-style: italic; }
+.hljs-variable, .hljs-template-variable, .hljs-params { color: var(--body); }
+
 /* Focus that survives a projector. */
 :focus-visible {
   outline: 2px solid var(--video);

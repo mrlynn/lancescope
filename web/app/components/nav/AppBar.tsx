@@ -58,6 +58,12 @@ export default function AppBar({
 
       <div className="flex items-center gap-2.5">
         {children}
+        {/* On every screen, because the question a guide answers arrives while you
+            are looking at the thing you do not understand. */}
+        <Link href="/docs/index" className="iconbtn" data-tip="Guide"
+              data-tip-side="left" aria-label="Guide">
+          <Icon name="info" size={16} />
+        </Link>
         <ThemeToggle />
         {showSettings && (
           <Link href={settingsHref} className="iconbtn" data-tip="Settings" data-tip-side="left"
