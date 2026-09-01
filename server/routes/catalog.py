@@ -45,7 +45,13 @@ def _catalog() -> Catalog:
     return CATALOG
 
 
-def _open(name: str) -> Handle:
+def open_table(name: str) -> Handle:
+    """Open one table in the console's scope, or 404.
+
+    Public because the intelligence routes need the same handle — and they must get
+    it through the same LRU and the same per-scope IO accounting, not by opening a
+    second dataset object whose drains would steal the console's numbers.
+    """
     try:
         return _catalog().open(name, scope=SCOPE)
     except FileNotFoundError:
@@ -172,7 +178,7 @@ async def versions(name: str) -> JSONResponse:
 
     Read-only — no checkout, no restore. Those are sprint 2.
     """
-    h = _open(name)
+    h = open_table(name)
     h.drain()
     ds = h.ds
 
@@ -248,7 +254,7 @@ async def indices(name: str) -> JSONResponse:
     force scan. That absence is surfaced as a first-class field rather than left for
     the reader to notice by subtraction.
     """
-    h = _open(name)
+    h = open_table(name)
     h.drain()
     ds = h.ds
 
@@ -334,7 +340,7 @@ async def fragments(name: str) -> JSONResponse:
     Reports two byte figures per fragment because for a blob table they differ by
     three orders of magnitude, and only one of them is what Lance measures.
     """
-    h = _open(name)
+    h = open_table(name)
     h.drain()
     ds = h.ds
 
@@ -458,7 +464,7 @@ async def rows(
     refused rather than honoured; materialising one is the single thing this repo
     exists to show never happens.
     """
-    h = _open(name)
+    h = open_table(name)
     ds = h.ds
     schema = {f.name: f for f in ds.schema}
 
@@ -545,7 +551,7 @@ async def findings(name: str) -> JSONResponse:
     manifests the other panels read, which is why it costs a few kilobytes and works
     on a machine with nothing configured.
     """
-    h = _open(name)
+    h = open_table(name)
     h.drain()                                       # zero, so the cost below is ours
     analysis = intel_findings.analyse(h)
     d = h.drain()
@@ -570,7 +576,7 @@ async def table(name: str) -> JSONResponse:
     from the substring `video_blob` in the column name, and the storage version is
     reported per table rather than taking whichever table happened to be asked last.
     """
-    h = _open(name)
+    h = open_table(name)
     h.drain()                                       # zero, so the cost below is ours
     ds = h.ds
 

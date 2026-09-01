@@ -13,10 +13,13 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
 from server import settings as cfg
 from server.intel import config as intel_config
+from server.intel import tasks
 from server.intel.providers import NoProvider, ProviderError
+from server.routes import catalog as catalog_routes
 
 router = APIRouter(prefix="/intel")
 
@@ -91,3 +94,112 @@ async def selftest(role: str = "fast") -> JSONResponse:
         "error": None if honoured else "the model ignored the schema it was given",
         **out.as_dict(),
     })
+
+
+# ------------------------------------------------------------------- nl -> filter
+
+class FilterBody(BaseModel):
+    question: str = Field(min_length=1, max_length=500)
+    # None means "decide from where the prompt is going" — see `_should_send_values`.
+    include_values: bool | None = None
+
+
+def _is_local(resolved) -> bool:
+    """Whether the prompt stays on this machine.
+
+    Ollama on a loopback address, or an OpenAI-compatible endpoint pointed at one.
+    Anything else is somebody else's server, whatever it is called.
+    """
+    host = (resolved.host or "").lower()
+    loopback = ("localhost" in host or "127.0.0.1" in host or "::1" in host)
+    return loopback and resolved.provider in ("ollama", "openai-compat")
+
+
+def _should_send_values(requested: bool | None, resolved) -> bool:
+    """Distinct column values are the biggest measured accuracy win, and they are row
+    values leaving the process. Those two facts do not resolve into one default.
+
+    A local model gets them: nothing leaves the machine, so the only cost is the read.
+    A hosted one does not, unless the caller says so explicitly — and the response
+    reports which columns were sent either way, so it is never a surprise.
+    """
+    if requested is not None:
+        return requested
+    return _is_local(resolved)
+
+
+@router.post("/tables/{name:path}/filter")
+async def nl_filter(name: str, body: FilterBody) -> JSONResponse:
+    """English in, a Lance predicate out — as a draft, never as an action.
+
+    The predicate is returned for the user to read, edit and run. It is also dry-run
+    counted here, because "this matches 99 of 1,114 rows" is the evidence that tells
+    someone whether the translation understood them, and it costs one metadata read.
+    """
+    handle = catalog_routes.open_table(name)
+    settings = cfg.load()
+    resolved = intel_config.resolve(settings)
+    provider = intel_config.provider_for("fast", settings)
+
+    send_values = _should_send_values(body.include_values, resolved)
+    context = tasks.build_filter_context(handle, include_values=send_values)
+    system, user = tasks.filter_prompt(body.question, context)
+
+    try:
+        out = provider.complete(system=system, user=user,
+                                schema=tasks.FILTER_SCHEMA, effort="low",
+                                max_tokens=512)
+    except NoProvider as e:
+        return JSONResponse({"ok": False, "error": e.reason, "setup_hint": e.setup_hint,
+                             **context.as_dict()})
+    except ProviderError as e:
+        return JSONResponse({"ok": False, "error": str(e), "retryable": e.retryable,
+                             "model": getattr(provider, "model", None),
+                             **context.as_dict()})
+
+    data = out.data or {}
+    proposed = (data.get("filter") or "").strip()
+    confidence = data.get("confidence") or "low"
+
+    result: dict = {
+        "ok": True,
+        "question": body.question,
+        "filter": proposed,
+        "explanation": data.get("explanation") or "",
+        "confidence": confidence,
+        "valid": None,
+        "matched_rows": None,
+        "total_rows": None,
+        "error": None,
+        **context.as_dict(),
+        **out.as_dict(),
+    }
+
+    if confidence == "refuse" or not proposed:
+        result |= {"valid": False,
+                   "error": "the question cannot be expressed with these columns"}
+        return JSONResponse(result)
+
+    # A column that does not exist is the failure a small model makes most often, and
+    # catching it here means the message names the column rather than quoting a
+    # parser error at someone who did not write the predicate.
+    mentioned = tasks.referenced_columns(proposed, context.columns)
+    if not mentioned:
+        result |= {"valid": False,
+                   "error": "the proposed filter references no column of this table"}
+        return JSONResponse(result)
+
+    try:
+        handle.drain()
+        matched = handle.ds.count_rows(filter=proposed)
+        total = handle.ds.count_rows()
+        d = handle.drain()
+        result |= {"valid": True, "matched_rows": matched, "total_rows": total,
+                   "dry_run_read_bytes": d.read_bytes}
+    except (ValueError, OSError) as e:
+        # The draft is still returned: an almost-right predicate a user can fix beats
+        # an error message that throws the attempt away.
+        result |= {"valid": False, "error": f"Lance rejected this filter: "
+                                            f"{str(e).splitlines()[0][:160]}"}
+
+    return JSONResponse(result)

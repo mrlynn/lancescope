@@ -250,6 +250,87 @@ def intel_checks() -> None:
         os.environ.pop("LANCESCOPE_CONFIG", None)
 
 
+def nl_filter_checks() -> None:
+    """The translation surface, in the states that do not need a model.
+
+    Everything asserted here is policy and plumbing: what the prompt is allowed to
+    contain, what happens with no provider, and that a draft is never executed. The
+    quality of a translation is a property of the model and is measured separately.
+    """
+    import os
+    import tempfile
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from server.catalog import Catalog
+    from server.intel import config as intel_config
+    from server.intel import tasks
+    from server.routes import catalog as catalog_routes
+    from server.routes import intel as intel_routes
+
+    catalog = Catalog(LANCE)
+    catalog_routes.bind(catalog)
+    handle = catalog.open("moments", scope="verify")
+
+    ctx = tasks.build_filter_context(handle, include_values=True)
+    blob_or_heavy = [f.name for f in handle.ds.schema
+                     if str(f.type).startswith("fixed_size_list")
+                     or "binary" in str(f.type)]
+    # The prompt may name a heavy column so the model knows to leave it alone; what
+    # it may never carry is that column's contents.
+    check("no heavy column's values reach the prompt",
+          all(f"{c} values:" not in ctx.text for c in blob_or_heavy),
+          f"heavy columns: {', '.join(blob_or_heavy)}")
+
+    check("low-cardinality string columns are offered as values, prose is not",
+          "track" in ctx.faceted_columns and "transcript" not in ctx.faceted_columns,
+          f"faceted: {', '.join(ctx.faceted_columns) or 'none'}")
+
+    check("building the context costs kilobytes",
+          ctx.read_bytes < 200_000, f"{ctx.read_bytes:,} B")
+
+    bare = tasks.build_filter_context(handle, include_values=False)
+    check("values can be withheld entirely",
+          not bare.faceted_columns and "values:" not in bare.text
+          and "track" in bare.text)
+
+    # Where the prompt is going decides the default, not what would help most.
+    hosted = intel_config.Resolved("anthropic", "", True, {"fast": "claude-opus-5"}, [])
+    local = intel_config.Resolved("ollama", "", True, {"fast": "qwen3:8b"}, [],
+                                  host="http://localhost:11434")
+    check("row values default off for a hosted model and on for a local one",
+          intel_routes._should_send_values(None, hosted) is False
+          and intel_routes._should_send_values(None, local) is True)
+
+    check("an explicit choice overrides the default either way",
+          intel_routes._should_send_values(True, hosted) is True
+          and intel_routes._should_send_values(False, local) is False)
+
+    check("a filter naming no known column is rejected before Lance sees it",
+          tasks.referenced_columns("nonsense > 3", ctx.columns) == []
+          and "track" in tasks.referenced_columns("track = 'Go'", ctx.columns))
+
+    # With nothing configured the surface still answers, and says why not.
+    with tempfile.TemporaryDirectory() as tmp:
+        os.environ["LANCESCOPE_CONFIG"] = str(Path(tmp) / "settings.json")
+        os.environ.pop("ANTHROPIC_API_KEY", None)
+        real = intel_config.ollama_models
+        intel_config.ollama_models = lambda *_a, **_k: None
+        try:
+            app = FastAPI()
+            app.include_router(intel_routes.router)
+            app.include_router(catalog_routes.router)
+            r = TestClient(app).post("/intel/tables/moments/filter",
+                                     json={"question": "anything in the Go track"})
+        finally:
+            intel_config.ollama_models = real
+            os.environ.pop("LANCESCOPE_CONFIG", None)
+    body = r.json()
+    check("asking with no provider is answered, not thrown",
+          r.status_code == 200 and body["ok"] is False and bool(body["setup_hint"]))
+
+
 def settings_checks() -> None:
     """Connections move the catalog, and the settings surface keeps its promises.
 
@@ -537,6 +618,9 @@ def main() -> int:
 
     print("\n  intelligence")
     intel_checks()
+
+    print("\n  translation")
+    nl_filter_checks()
 
     print(f"\n{'ALL GOOD — go on stage' if ok else 'SOMETHING IS BROKEN'}")
     return 0 if ok else 1

@@ -22,7 +22,8 @@ import {
 } from "@/app/components/console/Findings";
 import { usePins, useRecents } from "@/app/lib/recents";
 import {
-  type SettingsState, activateConnection, getSettings,
+  type Capabilities, type SettingsState, activateConnection, getCapabilities,
+  getSettings,
 } from "@/app/lib/settings";
 
 // Each tab names what it reads, and carries the glyph for it — the row is
@@ -61,6 +62,9 @@ export default function Console() {
   const [rowsError, setRowsError] = useState<string | null>(null);
   const [cost, setCost] = useState<{ bytes: number; iops: number } | null>(null);
   const [settings, setSettings] = useState<SettingsState | null>(null);
+  // What the language layer can do right now, so the console offers it only when it
+  // is actually there — and stays exactly as useful when it is not.
+  const [ai, setAi] = useState<Capabilities | null>(null);
 
   // Pins and recents are scoped to the database, so they follow a connection
   // switch rather than showing the last database's history against this one.
@@ -99,6 +103,7 @@ export default function Console() {
   useEffect(() => {
     loadTables(wanted());
     getSettings().then(setSettings).catch(() => setSettings(null));
+    getCapabilities().then(setAi).catch(() => setAi(null));
   }, [loadTables]);
 
   // Switching connection repoints the catalog server-side, so everything below the
@@ -277,6 +282,8 @@ export default function Console() {
                   d={rows}
                   error={rowsError}
                   expanded={expanded}
+                  table={picked}
+                  ai={ai}
                   onPage={(off) => { setOffset(off); if (picked) loadRows(picked, off, filter, expanded); }}
                   onFilter={(f) => { setFilter(f); setOffset(0); if (picked) loadRows(picked, 0, f, expanded); }}
                   onExpand={(col) => {

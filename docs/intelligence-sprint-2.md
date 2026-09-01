@@ -240,7 +240,7 @@ findings into three sentences. Structured output, user-initiated.
 **Done when:** a second request for the same table version makes no API call and
 returns `cached: true, cost_usd: 0`, and a version bump invalidates it.
 
-### I5 — Natural language → filter
+### I5 — Natural language → filter  ✅ landed
 `POST /intel/tables/{name}/filter` takes English plus the table's schema and returns
 `{filter, explanation, confidence}` as strict structured output at low effort. The
 string lands in the existing Rows filter box for the user to read and run; `/rows`
