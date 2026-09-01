@@ -11,12 +11,19 @@ console is a tool for looking at byte costs, so it says what looking costs too.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pyarrow as pa
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 
-from server.catalog import Catalog, Handle, disk_usage, is_blob_field
+from server.catalog import (
+    Catalog,
+    Handle,
+    disk_usage,
+    fragment_blob_bytes,
+    is_blob_field,
+)
 
 router = APIRouter(prefix="/catalog")
 
@@ -316,6 +323,213 @@ async def indices(name: str) -> JSONResponse:
 
 
 # -------------------------------------------------------------------------- detail
+
+# ---------------------------------------------------------------------- fragments
+
+@router.get("/tables/{name:path}/fragments")
+async def fragments(name: str) -> JSONResponse:
+    """The physical layout: what each fragment holds and what it weighs.
+
+    Reports two byte figures per fragment because for a blob table they differ by
+    three orders of magnitude, and only one of them is what Lance measures.
+    """
+    h = _open(name)
+    h.drain()
+    ds = h.ds
+
+    blob_bytes_by_stem = fragment_blob_bytes(h.uri, generation=ds.version)
+    stats = ds.stats.dataset_stats()
+    has_blob_columns = any(is_blob_field(f) for f in ds.schema)
+
+    out = []
+    for frag in ds.get_fragments():
+        files = []
+        data_bytes = blob_bytes = blob_files = 0
+        for df in frag.data_files():
+            size = getattr(df, "file_size_bytes", 0) or 0
+            data_bytes += size
+            stem = Path(df.path).stem
+            b_bytes, b_files = blob_bytes_by_stem.get(stem, (0, 0))
+            blob_bytes += b_bytes
+            blob_files += b_files
+            files.append({
+                "path": df.path,
+                "size_bytes": size,
+                "blob_bytes": b_bytes,
+                "blob_files": b_files,
+                "columns": list(getattr(df, "fields", []) or []),
+                "file_version": f"{getattr(df, 'file_major_version', '?')}."
+                                f"{getattr(df, 'file_minor_version', '?')}",
+            })
+
+        out.append({
+            "id": frag.fragment_id,
+            "rows": frag.count_rows(),
+            "physical_rows": frag.physical_rows,
+            "deleted_rows": frag.num_deletions,
+            "data_files": files,
+            # What Lance measures, and what the fragment actually occupies.
+            "data_bytes": data_bytes,
+            "blob_bytes": blob_bytes,
+            "blob_files": blob_files,
+            "total_bytes": data_bytes + blob_bytes,
+        })
+
+    d = h.drain()
+    small = stats.get("num_small_files", 0)
+    return JSONResponse({
+        "name": name,
+        "uri": h.uri,
+        "rows": ds.count_rows(),
+        "fragments": out,
+        "stats": {
+            "num_fragments": stats.get("num_fragments", 0),
+            "num_small_files": small,
+            "num_deleted_rows": stats.get("num_deleted_rows", 0),
+        },
+        "has_blob_columns": has_blob_columns,
+        # The advisory, not just the count. Sprint 2 puts a compaction button next to
+        # this number, and on a blob table the number is misleading on its own.
+        "small_files_note": (
+            "num_small_files counts data files below Lance's size threshold. This "
+            "table stores its bytes in Blob V2 side files, so its data files are "
+            "small by design and this count does not by itself mean it needs "
+            "compacting — compare data_bytes with blob_bytes per fragment."
+            if has_blob_columns and small
+            else None
+        ),
+        "read_bytes": d.read_bytes,
+        "read_iops": d.read_iops,
+    })
+
+
+# --------------------------------------------------------------------------- rows
+
+# Materialising one of these per row is how a row browser quietly turns into a
+# bandwidth problem: 768 floats is ~3 KB a row, a thumbnail is tens of KB. They are
+# summarised from the schema unless asked for by name.
+def _is_heavy(field) -> bool:
+    return (
+        pa.types.is_binary(field.type)
+        or pa.types.is_large_binary(field.type)
+        or _vector_dim(field) is not None
+    )
+
+
+def _cell(value, field):
+    """Render one cell for JSON, without letting a column's weight into the page."""
+    if value is None:
+        return None
+    if is_blob_field(field):
+        # A projected Blob V2 column yields its descriptor, not its bytes — position
+        # and size, for 2.6 KB a page. The size here is measured, read off the
+        # descriptor; nothing opens the side file.
+        if isinstance(value, dict):
+            return {
+                "blob": True,
+                "size_bytes": value.get("size"),
+                "position": value.get("position"),
+                "materialised": False,
+            }
+        return {"blob": True, "materialised": False}
+    if isinstance(value, bytes):
+        return {"bytes": len(value), "materialised": True}
+    if isinstance(value, list) and _vector_dim(field):
+        return {"vector_dim": len(value), "head": [round(float(x), 5) for x in value[:8]]}
+    return value
+
+
+@router.get("/tables/{name:path}/rows")
+async def rows(
+    name: str,
+    offset: int = 0,
+    limit: int = 25,
+    columns: str | None = None,
+    filter: str | None = None,
+    expand: str | None = None,
+) -> JSONResponse:
+    """Browse rows, without ever materialising a blob.
+
+    Heavy columns — binary and vector — are described from the schema rather than
+    read, unless named in `expand`. Blob columns are always described: a projected
+    Blob V2 column returns a descriptor carrying the real size, so the page can say
+    `16.7 MB` truthfully while reading none of it. `expand` on a blob column is
+    refused rather than honoured; materialising one is the single thing this repo
+    exists to show never happens.
+    """
+    h = _open(name)
+    ds = h.ds
+    schema = {f.name: f for f in ds.schema}
+
+    requested = [c.strip() for c in columns.split(",") if c.strip()] if columns else None
+    if requested:
+        unknown = [c for c in requested if c not in schema]
+        if unknown:
+            raise HTTPException(400, f"no such column(s): {', '.join(unknown)}")
+
+    expanded = {c.strip() for c in expand.split(",") if c.strip()} if expand else set()
+    blob_expanded = [c for c in expanded if c in schema and is_blob_field(schema[c])]
+    if blob_expanded:
+        raise HTTPException(
+            400,
+            f"refusing to materialise blob column(s): {', '.join(sorted(blob_expanded))}. "
+            "A blob column is reported from its descriptor, which carries the real "
+            "size without reading the side file.",
+        )
+    unknown_expand = [c for c in expanded if c not in schema]
+    if unknown_expand:
+        raise HTTPException(400, f"no such column(s) to expand: {', '.join(unknown_expand)}")
+
+    names = requested if requested is not None else list(schema)
+    projected, omitted = [], []
+    for c in names:
+        f = schema[c]
+        if _is_heavy(f) and c not in expanded:
+            omitted.append({
+                "name": c,
+                "type": str(f.type),
+                "vector_dim": _vector_dim(f),
+                "reason": "heavy column — pass expand=" + c + " to read it",
+            })
+        else:
+            projected.append(c)
+
+    total = ds.count_rows()
+    limit = max(0, min(limit, 200))
+    offset = max(0, offset)
+
+    h.drain()                                       # zero, so the cost below is ours
+    try:
+        table = ds.scanner(
+            columns=projected, filter=filter or None, limit=limit, offset=offset
+        ).to_table()
+    except (ValueError, OSError) as e:
+        # A filter the user typed is user input, not a server fault.
+        raise HTTPException(400, f"bad query: {e}") from None
+    d = h.drain()
+
+    records = table.to_pylist()
+    out_rows = [
+        {c: _cell(rec.get(c), schema[c]) for c in projected}
+        for rec in records
+    ]
+
+    return JSONResponse({
+        "name": name,
+        "uri": h.uri,
+        "offset": offset,
+        "limit": limit,
+        "returned": len(out_rows),
+        "total_rows": total,
+        "filter": filter,
+        "columns": projected,
+        "omitted_columns": omitted,
+        "rows": out_rows,
+        # The whole point of the console: what did looking at this cost?
+        "read_bytes": d.read_bytes,
+        "read_iops": d.read_iops,
+    })
+
 
 # Registered last on purpose. `{name:path}` matches slashes, so this would swallow
 # `/tables/x/versions` if it came first; Starlette resolves in definition order.
