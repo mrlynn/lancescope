@@ -26,7 +26,10 @@ const MODE_LABEL: Record<string, string> = {
   scan: "filter",
   fts: "full text",
   vector: "vector",
+  hybrid: "hybrid",
 };
+
+const MODES = ["scan", "fts", "vector", "hybrid"] as const;
 
 export function QueryTab({ table }: { table: string }) {
   const [caps, setCaps] = useState<QueryCapabilities | null>(null);
@@ -67,8 +70,8 @@ export function QueryTab({ table }: { table: string }) {
       mode,
       filter: filter.trim() || null,
       limit: Number(limit) || 25,
-      ...(mode === "fts" ? { text } : {}),
-      ...(mode === "vector"
+      ...(mode === "fts" || mode === "hybrid" ? { text } : {}),
+      ...(mode === "vector" || mode === "hybrid"
         ? { vector_column: vectorColumn, like_row: Number(likeRow) || 0,
             k: Number(k) || 10, prefilter }
         : {}),
@@ -89,7 +92,7 @@ export function QueryTab({ table }: { table: string }) {
   return (
     <>
       <div className="seg mb-4 flex-wrap">
-        {(["scan", "fts", "vector"] as const).map((m) => {
+        {MODES.map((m) => {
           const c = capFor(m);
           return (
             <button
@@ -115,7 +118,7 @@ export function QueryTab({ table }: { table: string }) {
       )}
 
       <div className="flex flex-wrap items-end gap-2 mb-4">
-        {mode === "fts" && (
+        {(mode === "fts" || mode === "hybrid") && (
           <Field label="search for" grow>
             <input className="qin" value={text} onChange={(e) => setText(e.target.value)}
                    onKeyDown={(e) => e.key === "Enter" && run()}
@@ -123,7 +126,7 @@ export function QueryTab({ table }: { table: string }) {
           </Field>
         )}
 
-        {mode === "vector" && (
+        {(mode === "vector" || mode === "hybrid") && (
           <>
             <Field label="column">
               <select className="qin" value={vectorColumn}
@@ -152,12 +155,12 @@ export function QueryTab({ table }: { table: string }) {
                  placeholder="track = 'Go' and year = 2025" />
         </Field>
 
-        {mode !== "vector" && (
+        {mode === "scan" || mode === "fts" ? (
           <Field label="limit">
             <input className="qin" value={limit} inputMode="numeric"
                    onChange={(e) => setLimit(e.target.value)} />
           </Field>
-        )}
+        ) : null}
 
         <button className="btn btn-accent mono text-[10px] tracking-[0.14em] uppercase"
                 onClick={run} disabled={busy}>
@@ -166,7 +169,7 @@ export function QueryTab({ table }: { table: string }) {
         </button>
       </div>
 
-      {mode === "vector" && (
+      {(mode === "vector" || mode === "hybrid") && (
         <label className="flex items-center gap-2 mb-4 text-[12px] text-[var(--haze)]">
           <input type="checkbox" checked={prefilter}
                  onChange={(e) => setPrefilter(e.target.checked)} />
@@ -273,6 +276,31 @@ function Diagnosis({ d, onPlan, planOpen, onRepro, reproOpen }: {
         <Stat label="ios" value={String(d.read_iops)} />
         {d.plan.fragments !== null && <Stat label="fragments" value={String(d.plan.fragments)} />}
       </div>
+
+      {d.legs.length > 0 && (
+        <div className="mt-3 space-y-1.5 pl-3"
+             style={{ borderLeft: "2px solid var(--rule)" }}>
+          {d.legs.map((leg) => {
+            const b = fmtBytes(leg.read_bytes);
+            const paths = leg.plan.paths.map((p) => p.name).join(", ") || "plain read";
+            return (
+              <div key={leg.mode} className="mono text-[11px] text-[var(--haze)]">
+                <span style={{ color: "var(--bright)" }}>{leg.mode}</span>{" "}
+                {leg.returned} rows · {leg.ms} ms ·{" "}
+                <span style={{ color: leg.read_bytes > 1_000_000 ? "var(--video)" : "var(--index)" }}>
+                  {b.value} {b.unit}
+                </span>{" "}
+                · {paths}
+              </div>
+            );
+          })}
+          <p className="text-[11px] text-[var(--body)] leading-relaxed pt-1">
+            Two searches, fused by rank rather than by score — BM25 relevance and a
+            vector distance are different quantities, and one of them is better when
+            it is larger.
+          </p>
+        </div>
+      )}
 
       {d.plan.paths.length > 0 ? (
         <div className="mt-3 space-y-1.5">
