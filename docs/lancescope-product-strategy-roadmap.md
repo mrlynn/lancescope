@@ -189,6 +189,10 @@ silent; `make verify`, API contracts and UI smoke tests are green.
 
 - Build a Query workspace for scalar predicates plus vector, FTS and hybrid search;
   show editable generated syntax, parameters, result samples and cancellation.
+  *(Shipped for scalar, FTS and vector. Hybrid, saved queries, history and
+  cancellation are still open; vector search takes a literal vector or another row's,
+  because text-to-vector needs an embedder registry that knows which model produced
+  which column.)*
 - Add query history, named/saved queries, copyable CLI/Python equivalents, and safe
   export of result metadata (never blobs by default).
 - Add query explain/diagnostic cards: index coverage, candidate scan estimate,
