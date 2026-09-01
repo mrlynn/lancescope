@@ -226,7 +226,7 @@ re-deriving it. Zero tokens.
 **Done when:** the seed rules fire correctly on `moments` and `segments`, small-file
 caveat included.
 
-### I3 — Findings in the UI
+### I3 — Findings in the UI  ✅ landed
 Each finding renders where its evidence lives — the index warning in `IndicesTab`,
 the small-file caveat in `FragmentsTab` — plus a sixth **Insights** tab that collects
 them. Reuses `Cost` and `Empty` from `components/console/atoms.tsx` and the existing

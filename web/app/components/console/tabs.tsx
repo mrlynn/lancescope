@@ -69,13 +69,6 @@ export function SchemaTab({ d }: { d: TableDetail }) {
             <Bytes n={meta_bytes} tone="index" /> of everything a scan reads, against{" "}
             <Bytes n={blob_bytes} tone="video" /> a scan never opens — {ratio.toLocaleString()} to 1.
           </p>
-          <Caveat>
-            Lance&rsquo;s manifest reports{" "}
-            <span className="mono">{fmtBytes(d.manifest_bytes).value}{" "}
-            {fmtBytes(d.manifest_bytes).unit}</span> for this table. That figure excludes Blob
-            V2 side files entirely — it isn&rsquo;t wrong, it&rsquo;s answering a different
-            question. The split above comes from walking the directory.
-          </Caveat>
         </>
       ) : (
         <p className="text-[12px] text-[var(--haze)] leading-relaxed">
@@ -193,13 +186,7 @@ export function IndicesTab({ d }: { d: Indices }) {
                   ) : null}
                 </div>
               </div>
-              {i.coverage !== null && i.coverage < 1 && (
-                <Caveat>
-                  This index covers {(i.coverage * 100).toFixed(1)}% of rows. The rest are
-                  found by scanning — which is the quiet reason a query gets slower after
-                  an append.
-                </Caveat>
-              )}
+
             </div>
           ))}
         </div>
@@ -230,15 +217,9 @@ export function IndicesTab({ d }: { d: Indices }) {
         })}
       </div>
 
-      {bare.length > 0 && (
-        <Caveat>
-          <span style={{ color: "var(--video)" }}>{bare.join(", ")}</span>{" "}
-          {bare.length === 1 ? "is a vector column" : "are vector columns"} with no index, so
-          every similarity search reads all {d.rows.toLocaleString()} rows. At this corpus
-          size that is a deliberate choice, not an oversight — but it is where the bytes per
-          query come from.
-        </Caveat>
-      )}
+      {/* The unindexed-vector caveat that used to live here is now a finding —
+          same claim, computed rather than written, and rendered under this panel by
+          `PanelFindings`. Two voices saying it was one voice too many. */}
     </>
   );
 }
@@ -246,8 +227,6 @@ export function IndicesTab({ d }: { d: Indices }) {
 // ---------------------------------------------------------------- fragments
 
 export function FragmentsTab({ d }: { d: Fragments }) {
-  const totalData = d.fragments.reduce((a, f) => a + f.data_bytes, 0);
-  const totalBlob = d.fragments.reduce((a, f) => a + f.blob_bytes, 0);
   return (
     <>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
@@ -287,16 +266,8 @@ export function FragmentsTab({ d }: { d: Fragments }) {
         </tbody>
       </table>
 
-      {d.small_files_note && (
-        <Caveat>
-          Lance flags {d.stats.num_small_files} of these as small files, and by its own
-          measure they are — the data files total{" "}
-          <Bytes n={totalData} tone="index" />. They also hold{" "}
-          <Bytes n={totalBlob} tone="video" /> of blob data in side files the manifest does
-          not track. Compacting would rewrite the small half and leave the large half
-          exactly where it is.
-        </Caveat>
-      )}
+      {/* The small-file caveat is a finding now — the rule that reports the count
+          is the same rule that says why acting on it would be wrong. */}
     </>
   );
 }
