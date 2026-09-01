@@ -139,7 +139,11 @@ def transcode(src: Path, dst: Path) -> bool:
     with 10pt footnotes -- at about a third of the size, and Apple's hardware
     encoder does it faster than realtime.
     """
-    enc = ["h264_videotoolbox"] if _has_encoder("h264_videotoolbox") else ["libx264", "-preset", "veryfast"]
+    enc = (
+        ["h264_videotoolbox"]
+        if _has_encoder("h264_videotoolbox")
+        else ["libx264", "-preset", "veryfast"]
+    )
     res = subprocess.run(
         ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(src),
          "-vf", f"scale=-2:{TRANSCODE_HEIGHT}",
