@@ -193,3 +193,32 @@ export const askForFilter = (table: string, question: string, includeValues?: bo
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ question, include_values: includeValues ?? null }),
   });
+
+/* ------------------------------------------------------------------- summaries */
+
+/** A description of a table, written from its schema, statistics and findings —
+ *  never its rows. Cached against the dataset version: Lance versions are
+ *  immutable, so an answer about one stays true about it. */
+export type TableSummary = {
+  ok: boolean;
+  cached: boolean;
+  summary?: string;
+  most_notable?: string;
+  version?: number;
+  partial_analysis?: boolean;
+  provider?: string;
+  model?: string;
+  cost_usd?: number | null;
+  ms?: number;
+  context_read_bytes?: number;
+  usage?: { input_tokens: number; output_tokens: number; cache_read_tokens: number };
+  error?: string;
+  setup_hint?: string;
+};
+
+export const summariseTable = (table: string, refresh = false) =>
+  intel<TableSummary>(`/tables/${table}/summary`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ refresh }),
+  });

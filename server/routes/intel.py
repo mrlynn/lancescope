@@ -16,8 +16,9 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from server import settings as cfg
+from server.intel import cache, tasks
 from server.intel import config as intel_config
-from server.intel import tasks
+from server.intel import findings as intel_findings
 from server.intel.providers import NoProvider, ProviderError
 from server.routes import catalog as catalog_routes
 
@@ -203,3 +204,81 @@ async def nl_filter(name: str, body: FilterBody) -> JSONResponse:
                                             f"{str(e).splitlines()[0][:160]}"}
 
     return JSONResponse(result)
+
+
+# ---------------------------------------------------------------------- summaries
+
+class SummaryBody(BaseModel):
+    # A cached answer is the normal case and the point of the cache. This exists for
+    # the one time somebody wants to see the model try again.
+    refresh: bool = False
+
+
+@router.post("/tables/{name:path}/summary")
+async def summarise(name: str, body: SummaryBody | None = None) -> JSONResponse:
+    """Describe a table in a few sentences, and remember the answer.
+
+    Lance versions are immutable, so an answer about version 7 stays true about
+    version 7. The cache key is the table, the version, the task, the model and the
+    prompt — cost is the number of distinct table-versions somebody looked at, not
+    the number of times they looked.
+
+    The prompt carries schema, statistics and the console's own findings. No row
+    values, opt-in or otherwise: a description of what a table holds can be written
+    from its shape, and this is the task where sending contents would be easiest to
+    justify and hardest to defend.
+    """
+    refresh = bool(body and body.refresh)
+    handle = catalog_routes.open_table(name)
+    settings = cfg.load()
+    resolved = intel_config.resolve(settings)
+    provider = intel_config.provider_for("deep", settings)
+    model = getattr(provider, "model", "") or ""
+
+    key = cache.Key(uri=handle.uri, version=handle.ds.version, task="summary",
+                    model=model)
+
+    if not refresh and model and (hit := cache.get(key)) is not None:
+        return JSONResponse({
+            **hit, "ok": True, "cached": True, "cost_usd": 0.0, "ms": 0,
+            "version": handle.ds.version,
+        })
+
+    analysis = intel_findings.analyse(handle)
+    context, read_bytes = tasks.build_summary_context(handle, analysis.findings)
+    system, user = tasks.summary_prompt(context)
+
+    try:
+        out = provider.complete(system=system, user=user,
+                                schema=tasks.SUMMARY_SCHEMA, effort="low",
+                                max_tokens=600)
+    except NoProvider as e:
+        return JSONResponse({"ok": False, "cached": False, "error": e.reason,
+                             "setup_hint": e.setup_hint})
+    except ProviderError as e:
+        return JSONResponse({"ok": False, "cached": False, "error": str(e),
+                             "retryable": e.retryable, "model": model})
+
+    data = out.data or {}
+    result = {
+        "ok": True,
+        "cached": False,
+        "summary": data.get("summary") or "",
+        "most_notable": data.get("most_notable") or "",
+        "version": handle.ds.version,
+        "context_read_bytes": read_bytes,
+        "partial_analysis": analysis.partial,
+        "provider": resolved.provider,
+        **out.as_dict(),
+    }
+    if result["summary"]:
+        # Only a real answer is worth keeping. Caching an empty one would make a bad
+        # run permanent for that version.
+        cache.put(key, {k: v for k, v in result.items() if k not in ("cached", "ms")})
+    return JSONResponse(result)
+
+
+@router.delete("/cache")
+async def clear_cache(task: str | None = None) -> JSONResponse:
+    """Forget cached answers. Nothing here reads a dataset."""
+    return JSONResponse({"removed": cache.clear(task)})

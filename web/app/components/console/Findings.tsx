@@ -7,9 +7,12 @@
  *  So the same list renders in two places — inline under the panel that owns each
  *  finding, and collected in Insights — from one fetch. */
 
+import { useState } from "react";
 import Icon from "@/app/components/Icon";
 import { Empty } from "@/app/components/console/atoms";
+import { fmtBytes } from "@/app/lib/api";
 import type { Finding, Findings } from "@/app/lib/catalog";
+import { type Capabilities, type TableSummary, summariseTable } from "@/app/lib/settings";
 
 const TONE = {
   warn: { rgb: "var(--video-rgb)", color: "var(--video)", icon: "warning" },
@@ -122,12 +125,17 @@ export function PanelFindings({ d, panel }: { d: Findings | null; panel: Finding
 }
 
 /** Everything, in one place, for reading rather than for checking a number. */
-export function InsightsTab({ d }: { d: Findings | null }) {
+export function InsightsTab({ d, table, ai }: {
+  d: Findings | null;
+  table: string | null;
+  ai: Capabilities | null;
+}) {
   if (!d) return <Empty>working out what this table has to say…</Empty>;
 
   if (!d.findings.length) {
     return (
       <>
+        {table && <Summary table={table} ai={ai} partial={d.partial_analysis} />}
         <PartialAnalysis d={d} />
         <Empty>
           Nothing to report on <span className="mono text-[var(--bright)]">{d.name}</span>.
@@ -154,11 +162,128 @@ export function InsightsTab({ d }: { d: Findings | null }) {
           : ""}
       </p>
 
+      {table && <Summary table={table} ai={ai} partial={d.partial_analysis} />}
+
       <PartialAnalysis d={d} />
 
       <div className="space-y-3 mt-4">
         {d.findings.map((f) => <FindingCard key={f.id} f={f} />)}
       </div>
     </>
+  );
+}
+
+/** A description of the table in a few sentences, written from what the console
+ *  already knows and cached against the version it describes.
+ *
+ *  Not fetched on render. It costs a model call the first time, and a panel that
+ *  spends money because somebody clicked a tab is a panel that spends money nobody
+ *  asked to spend. After that it is a file read, and says so. */
+function Summary({ table, ai, partial }: {
+  table: string;
+  ai: Capabilities | null;
+  partial: boolean;
+}) {
+  const [state, setState] = useState<TableSummary | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  if (!ai?.available) {
+    return (
+      <p className="text-[12px] text-[var(--haze)] leading-relaxed mb-4">
+        A provider would add a written summary here — the findings below need none.
+        {ai?.setup_hint ? ` ${ai.setup_hint}` : ""}
+      </p>
+    );
+  }
+
+  const ask = async (refresh: boolean) => {
+    setBusy(true);
+    try {
+      setState(await summariseTable(table, refresh));
+    } catch (e) {
+      setState({ ok: false, cached: false,
+                 error: e instanceof Error ? e.message : "summary failed" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mb-5">
+      {!state && (
+        <div className="flex items-center gap-3 flex-wrap">
+          <button className="btn mono text-[10px] tracking-[0.14em] uppercase"
+                  onClick={() => ask(false)} disabled={busy}>
+            <Icon name="spark" size={14} />
+            {busy ? "writing…" : "Describe this table"}
+          </button>
+          <span className="mono text-[10px] text-[var(--haze)]">
+            {ai.models_by_role.deep.id}, from the schema and the findings below —
+            never the rows
+          </span>
+        </div>
+      )}
+
+      {busy && state === null && (
+        <p className="mono text-[10px] text-[var(--haze)] mt-2">
+          A large local model can take a minute. The answer is kept against this
+          table version, so it is asked once.
+        </p>
+      )}
+
+      {state && !state.ok && (
+        <div className="mono flex items-start gap-2 text-[12px] px-3.5 py-3 rounded-sm"
+             style={{ background: "rgb(var(--video-rgb) / 0.1)",
+                      border: "1px solid rgb(var(--video-rgb) / 0.4)",
+                      color: "var(--video)" }}>
+          <Icon name="warning" size={14} />
+          <span>{state.error}{state.setup_hint ? ` — ${state.setup_hint}` : ""}</span>
+        </div>
+      )}
+
+      {state?.ok && (
+        <div className="rounded-sm border px-4 py-3.5"
+             style={{ borderColor: "var(--rule)", background: "var(--ink-3)" }}>
+          <p className="text-[13px] text-[var(--body)] leading-relaxed">
+            {state.summary}
+          </p>
+          {state.most_notable && (
+            <p className="text-[13px] leading-relaxed mt-2.5"
+               style={{ color: "var(--bright)" }}>
+              {state.most_notable}
+            </p>
+          )}
+
+          {partial && (
+            <p className="text-[12px] leading-relaxed mt-2.5" style={{ color: "var(--video)" }}>
+              Written while one of the console&rsquo;s checks could not run, so it describes
+              an incomplete picture.
+            </p>
+          )}
+
+          <div className="mono text-[10px] text-[var(--haze)] mt-3 flex flex-wrap items-center gap-x-2">
+            {state.cached ? (
+              <>kept from an earlier answer about v{state.version} — no model was
+                asked, and nothing was spent</>
+            ) : (
+              <>
+                {state.model} · {((state.ms ?? 0) / 1000).toFixed(1)}s ·{" "}
+                {state.cost_usd === 0 ? "no cost, ran locally"
+                  : state.cost_usd == null ? "cost unknown"
+                  : `$${state.cost_usd.toFixed(5)}`}
+                {state.context_read_bytes ? (
+                  <> · {fmtBytes(state.context_read_bytes).value}{" "}
+                    {fmtBytes(state.context_read_bytes).unit} read to describe it</>
+                ) : null}
+              </>
+            )}
+            <button className="underline hover:text-[var(--bright)]"
+                    onClick={() => ask(true)} disabled={busy}>
+              {busy ? "…" : "ask again"}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
