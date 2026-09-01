@@ -39,6 +39,11 @@ line-length = 100
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
 
+# ingest/ is put on sys.path at runtime rather than being a package, so `embed` and
+# `config` are ours even though they resolve like third-party modules.
+[tool.ruff.lint.isort]
+known-first-party = ["server", "embed", "config"]
+
 [tool.ruff.lint.per-file-ignores]
 # The server and scripts put ingest/ on sys.path before importing from it, so those
 # imports genuinely cannot come first.
