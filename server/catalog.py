@@ -269,3 +269,45 @@ def disk_usage(path: Path | str, generation: object) -> DiskUsage:
     while len(_DISK_CACHE) > _DISK_CACHE_MAX:
         _DISK_CACHE.popitem(last=False)
     return usage
+
+
+# ------------------------------------------------------- per-fragment blob bytes
+
+def fragment_blob_bytes(uri: Path | str, generation: object) -> dict[str, tuple[int, int]]:
+    """Blob bytes and file count per data file, keyed by that file's stem.
+
+    Blob V2 lays a table out as `data/<stem>.lance` for the row data and a sibling
+    directory `data/<stem>/` holding one `.blob` per row. Nothing in the fragment
+    metadata points at that directory — `DataFile.file_size_bytes` reports only the
+    `.lance` file — so a fragment's real weight has to be assembled from the
+    filesystem.
+
+    This is what keeps the fragments view honest. Lance flags all 16 of this
+    corpus's `segments` fragments as small files, and by its own measure they are:
+    each `.lance` is about 2.7 KB. Each also owns roughly 16 MB of video. A view
+    that reported only what Lance measures would advise compacting a table that
+    needs nothing done to it.
+    """
+    key = ("fragblobs", str(uri), generation)
+    if key in _DISK_CACHE:
+        _DISK_CACHE.move_to_end(key)
+        return _DISK_CACHE[key]  # type: ignore[return-value]
+
+    out: dict[str, tuple[int, int]] = {}
+    data_dir = Path(uri) / "data"
+    if data_dir.is_dir():
+        for child in data_dir.iterdir():
+            if not child.is_dir():
+                continue
+            total = count = 0
+            for blob in child.glob("*.blob"):
+                total += blob.stat().st_size
+                count += 1
+            if count:
+                out[child.name] = (total, count)
+
+    _DISK_CACHE[key] = out  # type: ignore[assignment]
+    _DISK_CACHE.move_to_end(key)
+    while len(_DISK_CACHE) > _DISK_CACHE_MAX:
+        _DISK_CACHE.popitem(last=False)
+    return out
