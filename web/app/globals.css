@@ -1,38 +1,90 @@
 @import "tailwindcss";
 
+/* ---------------------------------------------------------------------------
+   Palette lifted from lancedb.com: a warm near-black, warm greys, coral accent.
+   Deliberately no cool tones anywhere — the whole instrument stays in one
+   temperature, which is what keeps it from reading as a generic dashboard.
+   --------------------------------------------------------------------------- */
 :root {
-  --bg: #08090c;
-  --panel: #101218;
-  --panel-2: #171a22;
-  --line: #262b37;
-  --text: #e9ecf2;
-  --muted: #8b93a7;
-  --index: #4cc9f0;   /* what search costs */
-  --video: #ffb238;   /* what playing costs */
-  --hot: #ff5d5d;
+  --ink:    #171513;   /* canvas */
+  --ink-2:  #1e1b19;   /* raised panel */
+  --ink-3:  #241f1c;   /* wells, inputs */
+  --rule:   #4c443f;   /* borders */
+  --haze:   #847770;   /* de-emphasised text */
+  --body:   #ad9e95;   /* body copy */
+  --bright: #f4ebe8;   /* headings, numbers */
+
+  --index:  #d9a05b;   /* what finding it costs */
+  --video:  #ff734a;   /* what playing it costs — LanceDB coral */
+
+  --stage-pad: 34px;
 }
+
+* { -webkit-font-smoothing: antialiased; }
 
 html, body {
-  background: var(--bg);
-  color: var(--text);
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  -webkit-font-smoothing: antialiased;
+  background: var(--ink);
+  color: var(--body);
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  overscroll-behavior: none;
 }
 
-.mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace; }
-
-/* Projector-friendly: never rely on hover, never rely on subtle contrast. */
-.card {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 10px;
+/* Ambient dot field, as on lancedb.com. Fixed so it reads as a backdrop the
+   content moves over rather than texture attached to the content. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image: radial-gradient(circle at 1px 1px, #2e2724 1px, transparent 0);
+  background-size: 26px 26px;
+  opacity: 0.55;
+  mask-image: radial-gradient(ellipse 120% 80% at 50% 0%, #000 20%, transparent 75%);
 }
 
-.tabular { font-variant-numeric: tabular-nums; }
+.mono {
+  font-family: var(--font-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+}
 
-@keyframes tick { from { opacity: .35; } to { opacity: 1; } }
-.ticking { animation: tick .18s ease-out; }
+/* Eyebrow labels. Martian Mono is already wide, so the tracking stays modest. */
+.eyebrow {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--haze);
+}
+
+.panel {
+  background: var(--ink-2);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+}
+
+/* Focus that survives a projector. */
+:focus-visible {
+  outline: 2px solid var(--video);
+  outline-offset: 2px;
+}
+
+@keyframes flash { from { opacity: .3; } to { opacity: 1; } }
+.flash { animation: flash .2s ease-out; }
+
+@keyframes breathe {
+  0%, 100% { opacity: .55; }
+  50%      { opacity: 1; }
+}
+.breathe { animation: breathe 2.4s ease-in-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    transition-duration: .01ms !important;
+  }
+}
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-thumb { background: #2b3240; border-radius: 6px; }
+::-webkit-scrollbar-thumb { background: #332c28; border-radius: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }

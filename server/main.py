@@ -6,11 +6,14 @@ through persistent Lance dataset handles so that Lance's own IO accounting
 """
 
 import asyncio
+import base64
 import json
 import sys
 import time
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
+from statistics import median
 
 import lance
 import numpy as np
@@ -59,6 +62,9 @@ class Meter:
             "corpus_video_bytes": STATE.corpus_video_bytes,
             "corpus_moments": STATE.n_moments,
             "corpus_talks": STATE.n_talks,
+            # reference points for the scale: what one talk and one segment weigh
+            "median_talk_bytes": STATE.median_talk_bytes,
+            "median_segment_bytes": STATE.median_segment_bytes,
             "rev": self._rev,
         }
 
@@ -68,10 +74,13 @@ class State:
     moments: lance.LanceDataset | None = None
     segments: lance.LanceDataset | None = None
     seg_index: dict[tuple[str, int], int] = field(default_factory=dict)
-    blob_cache: dict[int, object] = field(default_factory=dict)
+    blob_cache: "OrderedDict[int, object]" = field(default_factory=OrderedDict)
     n_moments: int = 0
     n_talks: int = 0
     corpus_video_bytes: int = 0
+    median_talk_bytes: int = 0
+    median_segment_bytes: int = 0
+    tracks: list[str] = field(default_factory=list)
 
 
 STATE = State()
@@ -105,14 +114,30 @@ app.add_middleware(
 
 @app.on_event("startup")
 def startup() -> None:
+    for uri in (MOMENTS_URI, SEGMENTS_URI):
+        if not Path(uri).exists():
+            raise SystemExit(
+                f"\n  No table at {uri}\n"
+                f"  Build the corpus first:  make ingest LIMIT=25\n"
+            )
     STATE.moments = lance.dataset(MOMENTS_URI)
     STATE.segments = lance.dataset(SEGMENTS_URI)
 
     rows = STATE.segments.to_table(columns=["talk_id", "segment_idx", "size_bytes"]).to_pylist()
     STATE.seg_index = {(r["talk_id"], r["segment_idx"]): i for i, r in enumerate(rows)}
     STATE.corpus_video_bytes = sum(r["size_bytes"] for r in rows)
+
+    per_talk: dict[str, int] = {}
+    for r in rows:
+        per_talk[r["talk_id"]] = per_talk.get(r["talk_id"], 0) + r["size_bytes"]
+    STATE.median_talk_bytes = int(median(per_talk.values())) if per_talk else 0
+    STATE.median_segment_bytes = (
+        int(median([r["size_bytes"] for r in rows])) if rows else 0
+    )
     STATE.n_moments = STATE.moments.count_rows()
     STATE.n_talks = len({t for t, _ in STATE.seg_index})
+    tracks = STATE.moments.to_table(columns=["track"]).column("track").to_pylist()
+    STATE.tracks = sorted({t for t in tracks if t})
 
     # Load SigLIP and run one query so the first search on stage is not the slow one.
     embed.load()
@@ -137,10 +162,15 @@ class SearchReq(BaseModel):
     limit: int = 24
     year: int | None = None
     speaker: str | None = None
+    track: str | None = None
 
 
-COLUMNS = ["moment_id", "talk_id", "title", "speaker", "year", "ts_s",
-           "segment_idx", "segment_offset_s", "transcript"]
+# thumb_jpeg rides along with the results on purpose. Fetching thumbnails as 24
+# separate requests afterwards kept adding to the index counter for seconds after
+# the number had been read out, and the honest cost of answering the question
+# includes handing back the frames. Lance only materialises these for the k hits.
+COLUMNS = ["moment_id", "talk_id", "title", "speaker", "track", "year", "ts_s",
+           "segment_idx", "segment_offset_s", "transcript", "thumb_jpeg"]
 
 
 def _where(req: SearchReq) -> str | None:
@@ -150,6 +180,9 @@ def _where(req: SearchReq) -> str | None:
     if req.speaker:
         safe = req.speaker.replace("'", "''")
         clauses.append(f"speaker = '{safe}'")
+    if req.track:
+        safe = req.track.replace("'", "''")
+        clauses.append(f"track = '{safe}'")
     return " AND ".join(clauses) if clauses else None
 
 
@@ -212,7 +245,11 @@ async def search(req: SearchReq) -> JSONResponse:
         drain_video()
         for h in hits:
             h.pop("vector", None)
-            h["thumb_url"] = f"/thumb/{h['moment_id']}"
+            raw = h.pop("thumb_jpeg", None)
+            h["thumb"] = (
+                "data:image/jpeg;base64," + base64.b64encode(bytes(raw)).decode()
+                if raw else None
+            )
             h["video_url"] = f"/video/{h['talk_id']}/{h['segment_idx']}"
         return JSONResponse({
             "hits": hits,
@@ -224,24 +261,12 @@ async def search(req: SearchReq) -> JSONResponse:
         })
 
 
-@app.get("/thumb/{moment_id}")
-async def thumb(moment_id: str) -> Response:
-    async with LOCK:
-        safe = moment_id.replace("'", "''")
-        t = STATE.moments.scanner(
-            columns=["thumb_jpeg"], filter=f"moment_id = '{safe}'", limit=1
-        ).to_table()
-        drain_index()
-        if t.num_rows == 0:
-            raise HTTPException(404, "no such moment")
-        return Response(
-            content=bytes(t.column("thumb_jpeg")[0].as_py()),
-            media_type="image/jpeg",
-            headers={"Cache-Control": "public, max-age=86400"},
-        )
-
-
 # ----------------------------------------------------------------------------- video
+
+# Enough to hold every segment a talk will touch, without growing without bound
+# across a long session.
+BLOB_CACHE_MAX = 64
+
 
 def _blob(talk_id: str, segment_idx: int):
     """Cache the BlobFile handle: opening one is free, and reusing it keeps every
@@ -249,9 +274,19 @@ def _blob(talk_id: str, segment_idx: int):
     key = STATE.seg_index.get((talk_id, segment_idx))
     if key is None:
         raise HTTPException(404, "no such segment")
-    if key not in STATE.blob_cache:
-        STATE.blob_cache[key] = STATE.segments.take_blobs("video_blob", indices=[key])[0]
-    return STATE.blob_cache[key]
+    cache = STATE.blob_cache
+    if key in cache:
+        cache.move_to_end(key)
+        return cache[key]
+    cache[key] = STATE.segments.take_blobs("video_blob", indices=[key])[0]
+    cache.move_to_end(key)
+    while len(cache) > BLOB_CACHE_MAX:
+        _, stale = cache.popitem(last=False)
+        try:
+            stale.close()
+        except Exception:                                   # noqa: BLE001
+            pass
+    return cache[key]
 
 
 @app.get("/video/{talk_id}/{segment_idx}")
@@ -324,3 +359,57 @@ async def meter_stream() -> StreamingResponse:
 async def health() -> dict:
     return {"ok": STATE.moments is not None, "moments": STATE.n_moments,
             "talks": STATE.n_talks}
+
+
+@app.get("/tracks")
+async def tracks() -> JSONResponse:
+    return JSONResponse({"tracks": STATE.tracks})
+
+
+def _dir_bytes(root: Path, blob: bool) -> int:
+    """Bytes on disk, split by whether they live in a Blob V2 side file."""
+    total = 0
+    for p in root.rglob("*"):
+        if p.is_file() and (p.suffix == ".blob") == blob:
+            total += p.stat().st_size
+    return total
+
+
+@app.get("/schema")
+async def schema() -> JSONResponse:
+    """The actual tables, read off disk — the Act 3 slide, live.
+
+    The point this makes is the file split: the video bytes sit in .blob side
+    files, and everything search touches is the small remainder."""
+    def fields(ds: lance.LanceDataset) -> list[dict]:
+        return [
+            {
+                "name": f.name,
+                "type": str(f.type),
+                # the one field the whole demo turns on
+                "blob": (f.metadata or {}).get(b"lance-encoding:blob") is not None
+                or "video_blob" in f.name,
+            }
+            for f in ds.schema
+        ]
+
+    lance_root = Path(MOMENTS_URI).parent
+    blob_bytes = _dir_bytes(lance_root, blob=True)
+    meta_bytes = _dir_bytes(lance_root, blob=False)
+
+    return JSONResponse({
+        "moments": {
+            "rows": STATE.moments.count_rows(),
+            "fields": fields(STATE.moments),
+        },
+        "segments": {
+            "rows": STATE.segments.count_rows(),
+            "fields": fields(STATE.segments),
+        },
+        "on_disk": {
+            "blob_bytes": blob_bytes,
+            "meta_bytes": meta_bytes,
+            "ratio": round(blob_bytes / max(meta_bytes, 1), 1),
+        },
+        "storage_version": STATE.segments.data_storage_version,
+    })

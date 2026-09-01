@@ -224,16 +224,25 @@ def prepare_talk(talk_dir: Path) -> dict | None:
     out = WORK / talk_id
     out.mkdir(parents=True, exist_ok=True)
 
-    info_files = list(talk_dir.glob("video.info.json"))
-    info = json.loads(info_files[0].read_text()) if info_files else {}
-    title = info.get("title") or talk_id
-    speaker = info.get("uploader") or ""
-    year = int((info.get("upload_date") or "0000")[:4] or 0)
-
-    # Titles in conference archives are usually 'Talk Title' by Speaker Name.
-    if '" by ' in title:
-        t, _, s = title.partition('" by ')
-        title, speaker = t.strip('"'), s.strip()
+    title, speaker, track, year = talk_id, "", "", 0
+    meta_p = talk_dir / "meta.json"
+    if meta_p.exists():
+        # FOSDEM: real title, speakers and devroom straight from the schedule.
+        meta = json.loads(meta_p.read_text())
+        title = meta.get("title") or talk_id
+        speaker = meta.get("speaker") or ""
+        track = meta.get("track") or ""
+        year = int(meta.get("year") or 0)
+    else:
+        # YouTube fallback: 'Talk Title' by Speaker Name, from yt-dlp's info json.
+        info_files = list(talk_dir.glob("video.info.json"))
+        info = json.loads(info_files[0].read_text()) if info_files else {}
+        title = info.get("title") or talk_id
+        speaker = info.get("uploader") or ""
+        year = int((info.get("upload_date") or "0000")[:4] or 0)
+        if '" by ' in title:
+            t, _, sp = title.partition('" by ')
+            title, speaker = t.strip('"'), sp.strip()
 
     duration = probe_duration(video)
     seg_seconds = segment_seconds_for(video, duration)
@@ -267,6 +276,7 @@ def prepare_talk(talk_dir: Path) -> dict | None:
         "talk_id": talk_id,
         "title": title,
         "speaker": speaker,
+        "track": track,
         "year": year,
         "duration_s": duration,
         "segments": [{k: (str(v) if k == "path" else v) for k, v in s.items()} for s in segs],
@@ -308,4 +318,5 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    sys.stdout.reconfigure(line_buffering=True)
     sys.exit(main())

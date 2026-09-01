@@ -18,11 +18,12 @@ from config import LANCE  # noqa: E402
 
 QUERIES = [
     ("a diagram with boxes and arrows", "vector"),
-    ("source code on screen", "vector"),
-    ("kubernetes containers", "fts"),
+    ("a terminal full of code", "vector"),
+    ("a benchmark chart with bars", "vector"),
+    ("kubernetes", "fts"),
 ]
 
-COLS = ["moment_id", "title", "ts_s", "talk_id", "segment_idx"]
+COLS = ["moment_id", "title", "ts_s", "talk_id", "track", "segment_idx"]
 ok = True
 
 
@@ -68,6 +69,26 @@ def main() -> int:
     print()
     # The load-bearing claim: searching never touches video.
     check("search reads ZERO video bytes", True)
+
+    # The SQL predicate has to run inside the search, not after it, or a narrow
+    # filter silently returns fewer than k results on stage.
+    tracks = sorted({t for t in moments.to_table(columns=["track"])
+                     .column("track").to_pylist() if t})
+    if tracks:
+        v = embed.embed_text(["a diagram with boxes and arrows"])[0]
+        narrow = moments.scanner(
+            columns=COLS,
+            nearest={"column": "vector", "q": v, "k": 8, "metric": "cosine"},
+            filter=f"track = '{tracks[0].replace(chr(39), chr(39) * 2)}'",
+            prefilter=True,
+        ).to_table().to_pylist()
+        check(
+            f"prefilter on track = {tracks[0]!r}",
+            len(narrow) > 0 and all(h["track"] == tracks[0] for h in narrow),
+            f"{len(narrow)} hits, all in track",
+        )
+        check("corpus spans multiple devrooms", len(tracks) >= 2,
+              f"{len(tracks)} tracks")
 
     top = hits[0] if hits else None
     if top:

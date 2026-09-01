@@ -1,12 +1,12 @@
-.PHONY: help setup download prepare embed build ingest verify api web demo clean
+.PHONY: help setup download prepare embed build ingest verify api web demo dev tidy bench clean
 
 PY := .venv/bin/python
 UVICORN := .venv/bin/uvicorn
-LIMIT ?= 5
+LIMIT ?= 36
 
 help:
 	@echo "make setup             install python deps + web deps"
-	@echo "make ingest LIMIT=25   download -> prepare -> embed -> build tables"
+	@echo "make ingest LIMIT=36   download -> prepare -> embed -> build -> verify"
 	@echo "make verify            green-room preflight (~15s)"
 	@echo "make demo              run API + web together"
 
@@ -27,6 +27,8 @@ build:
 	$(PY) ingest/build_lance.py
 
 ingest: download prepare embed build
+	@echo
+	@$(PY) scripts/verify.py
 
 verify:
 	$(PY) scripts/verify.py
@@ -40,11 +42,20 @@ api:
 web:
 	cd web && npm run dev
 
+# Stage mode: production web build, API warmed before the browser can reach it.
 demo:
-	@echo "starting API on :8000 and web on :3000  (ctrl-c stops both)"
+	@./scripts/demo.sh
+
+# Dev mode: hot reload, for building not presenting.
+dev:
 	@$(UVICORN) server.main:app --port 8000 --log-level warning & \
 	 cd web && npm run dev; \
 	 kill %1 2>/dev/null || true
+
+# Frees the working copies; the Lance tables keep the only copy of the video.
+tidy:
+	rm -rf data/work
+	@du -sh data/lance data/raw 2>/dev/null || true
 
 clean:
 	rm -rf data/work data/lance

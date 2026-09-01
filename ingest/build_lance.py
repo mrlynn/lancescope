@@ -10,9 +10,11 @@ Segments are appended per talk so we never hold the whole corpus in memory.
     uv run python ingest/build_lance.py
 """
 
+import argparse
 import json
 import shutil
 import sys
+from pathlib import Path
 
 import lance
 import lancedb
@@ -29,6 +31,7 @@ MOMENTS_SCHEMA = pa.schema([
     pa.field("talk_id", pa.string()),
     pa.field("title", pa.string()),
     pa.field("speaker", pa.string()),
+    pa.field("track", pa.string()),
     pa.field("year", pa.int32()),
     pa.field("ts_s", pa.float32()),
     pa.field("segment_idx", pa.int32()),
@@ -72,6 +75,7 @@ def build_moments(talks: list[dict]) -> pa.Table:
             cols["talk_id"].append(man["talk_id"])
             cols["title"].append(man["title"])
             cols["speaker"].append(man["speaker"])
+            cols["track"].append(man.get("track", ""))
             cols["year"].append(man["year"])
             cols["ts_s"].append(m["ts_s"])
             cols["segment_idx"].append(m["segment_idx"])
@@ -82,8 +86,12 @@ def build_moments(talks: list[dict]) -> pa.Table:
     return pa.table(cols, schema=MOMENTS_SCHEMA)
 
 
-def write_segments(talks: list[dict]) -> int:
-    """Append one talk at a time; the corpus is far larger than memory."""
+def write_segments(talks: list[dict], prune: bool = True) -> int:
+    """Append one talk at a time; the corpus is far larger than memory.
+
+    Each talk's segment files are deleted once they are in the blob column, so the
+    working copy and the stored copy never both exist for the whole corpus.
+    """
     shutil.rmtree(SEGMENTS_URI, ignore_errors=True)
     total = 0
     for n, man in enumerate(talks):
@@ -107,11 +115,19 @@ def write_segments(talks: list[dict]) -> int:
             data_storage_version="2.2",
         )
         total += len(segs)
-        print(f"    segments {total:4d}  ({man['title'][:44]})", end="\r", flush=True)
+        if prune:
+            for seg in segs:
+                Path(seg["path"]).unlink(missing_ok=True)
+        print(f"    segments {total:4d}  ({man['title'][:44]:44s})", end="\r", flush=True)
     return total
 
 
 def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--keep-segments", action="store_true",
+                    help="keep data/work segment files after writing the blob column")
+    args = ap.parse_args()
+
     talks = load_talks()
     if not talks:
         print(f"nothing embedded in {WORK}; run prepare.py then embed.py")
@@ -119,13 +135,13 @@ def main() -> int:
     print(f"{len(talks)} talks\n")
 
     print("  writing segments (Blob V2)...")
-    nseg = write_segments(talks)
+    nseg = write_segments(talks, prune=not args.keep_segments)
     print(f"    segments: {nseg} rows written        ")
 
     print("  writing moments...")
     mt = build_moments(talks)
     db = lancedb.connect(str(LANCE))
-    if "moments" in db.list_tables():
+    if "moments" in db.list_tables().tables:
         db.drop_table("moments")
     tbl = db.create_table("moments", mt)
     print(f"    moments: {tbl.count_rows()} rows")
@@ -147,4 +163,5 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    sys.stdout.reconfigure(line_buffering=True)
     sys.exit(main())

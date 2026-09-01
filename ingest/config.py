@@ -16,6 +16,12 @@ TARGET_SEGMENT_MB = 16
 MIN_SEGMENT_SECONDS = 90
 MAX_SEGMENT_SECONDS = 600
 
+# Source talks are 1080p at ~3 Mbps. Transcoding to this keeps slide text sharp at
+# roughly a third of the bytes, which is the difference between a corpus that fits
+# on a laptop and one that does not.
+TRANSCODE_HEIGHT = 720
+TRANSCODE_BITRATE = "700k"
+
 # Keyframes. Slide-heavy talks change slowly, so a coarse sample plus scene detection
 # gets us the slide transitions without drowning in near-duplicates.
 FRAME_INTERVAL_S = 3.0

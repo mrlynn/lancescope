@@ -1,13 +1,23 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { fmtClock, type Hit } from "@/app/lib/api";
+
+const LEAD_IN = 5;
 
 export default function Player({ hit, onClose }: { hit: Hit; onClose: () => void }) {
   const ref = useRef<HTMLVideoElement>(null);
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+      if (e.key === " ") {
+        e.preventDefault();
+        const v = ref.current;
+        if (v) v.paused ? v.play() : v.pause();
+      }
+    };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
@@ -15,12 +25,10 @@ export default function Player({ hit, onClose }: { hit: Hit; onClose: () => void
   useEffect(() => {
     const v = ref.current;
     if (!v) return;
-    // Seek inside the segment. The browser issues its own ranged requests to get
-    // here, and each one becomes a narrow read out of the Lance blob column.
+    setFailed(false);
+    // Start a few seconds early so the moment plays with a run-up rather than
+    // landing on the last frame of its segment.
     const seek = () => {
-      // Start a few seconds early so the moment plays with a run-up instead of
-      // landing on the last frame of the segment.
-      const LEAD_IN = 5;
       v.currentTime = Math.max(0, hit.segment_offset_s - LEAD_IN);
       v.play().catch(() => {});
     };
@@ -30,39 +38,58 @@ export default function Player({ hit, onClose }: { hit: Hit; onClose: () => void
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center p-8 pt-10"
-      style={{ background: "rgba(4,5,8,0.9)" }}
+      className="fixed inset-0 z-[55] flex items-start justify-center p-8 pt-12"
+      style={{ background: "rgba(12,11,10,0.94)" }}
       onClick={onClose}
     >
-      <div className="w-full max-w-4xl" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-end justify-between mb-3 gap-6">
+      <div
+        className="w-full"
+        style={{ maxWidth: "min(1100px, 74vw)" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-end justify-between mb-3 gap-8">
           <div className="min-w-0">
-            <div className="text-2xl font-semibold truncate">{hit.title}</div>
-            <div className="mono text-sm text-[var(--muted)] mt-1">
-              {hit.speaker} · {hit.year} · moment at {fmtClock(hit.ts_s)}
+            <div className="text-[22px] font-medium text-[var(--bright)] truncate">
+              {hit.title}
+            </div>
+            <div className="eyebrow mt-1.5 normal-case">
+              {hit.speaker} &middot; {hit.year} &middot; moment at {fmtClock(hit.ts_s)}
             </div>
           </div>
           <button
             onClick={onClose}
-            className="mono text-xs tracking-widest px-3 py-2 rounded border
-                       border-[var(--line)] text-[var(--muted)] shrink-0"
+            className="mono text-[10px] tracking-[0.16em] px-3 py-1.5 rounded-sm border
+                       border-[var(--rule)] text-[var(--haze)] shrink-0"
           >
-            ESC
+            CLOSE &middot; ESC
           </button>
         </div>
 
-        <video
-          ref={ref}
-          src={`/api${hit.video_url}`}
-          controls
-          autoPlay
-          className="w-full rounded-lg border border-[var(--line)] bg-black"
-        />
+        {failed ? (
+          <div className="panel aspect-video grid place-items-center text-center px-10">
+            <div>
+              <div className="text-[var(--video)] mono text-sm mb-2">
+                This segment did not load
+              </div>
+              <p className="text-sm text-[var(--haze)]">
+                The API may have restarted. Press Escape and run the search again.
+              </p>
+            </div>
+          </div>
+        ) : (
+          <video
+            ref={ref}
+            src={`/api${hit.video_url}`}
+            controls
+            autoPlay
+            onError={() => setFailed(true)}
+            className="w-full rounded-sm border border-[var(--rule)] bg-black"
+          />
+        )}
 
-        <div className="mono text-xs text-[var(--muted)] mt-3">
-          segment {hit.segment_idx} of {hit.talk_id} · seeking to +
-          {hit.segment_offset_s.toFixed(1)}s · streamed by HTTP Range out of a Blob V2
-          column — watch the VIDEO counter
+        <div className="eyebrow mt-3 normal-case">
+          segment {hit.segment_idx} &middot; seeking to +{hit.segment_offset_s.toFixed(1)}s
+          &middot; streamed by HTTP Range straight out of a Blob V2 column
         </div>
       </div>
     </div>

@@ -3,12 +3,13 @@ export type Hit = {
   talk_id: string;
   title: string;
   speaker: string;
+  track: string;
   year: number;
   ts_s: number;
   segment_idx: number;
   segment_offset_s: number;
   transcript: string;
-  thumb_url: string;
+  thumb: string | null;
   video_url: string;
   score?: number;
 };
@@ -21,6 +22,8 @@ export type MeterState = {
   corpus_video_bytes: number;
   corpus_moments: number;
   corpus_talks: number;
+  median_talk_bytes: number;
+  median_segment_bytes: number;
   rev: number;
 };
 
@@ -38,6 +41,7 @@ export async function search(body: {
   limit?: number;
   year?: number | null;
   speaker?: string | null;
+  track?: string | null;
 }): Promise<SearchResponse> {
   const res = await fetch("/api/search", {
     method: "POST",

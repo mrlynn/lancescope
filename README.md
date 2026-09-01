@@ -5,47 +5,78 @@ A ~10 minute conference demo of LanceDB, built around one claim:
 > **The video and its index are the same table.**
 
 You type *"a diagram with boxes and arrows"*, get back actual frames from a corpus of
-conference talks, click one, and the video plays at that exact second — while a counter
-in the corner shows how few bytes moved to make it happen.
+conference talks, click one, and the video plays at that exact second — while an
+instrument along the bottom of the screen shows how few bytes moved to make it happen.
 
 No OCR ran. Nobody captioned those frames. And searching the whole corpus reads
-**zero bytes** of video.
+**zero bytes** of video — not "very little", zero, because the video bytes are not in
+the files a search opens.
 
 ## Why this and not another RAG demo
 
 The interesting part of LanceDB in 2026 isn't vector search — it's that a Lance table
 can hold the MP4 *itself* in a Blob V2 column, in a side file, behind lazy handles.
-Search and filter cannot touch it. That is hard to do with S3 + Postgres + a vector DB,
-and it makes for a claim you can prove live rather than assert on a slide.
+Search and filter cannot touch it. That is hard to assemble out of S3 + Postgres + a
+vector DB, and it makes for a claim you can prove live rather than assert on a slide.
 
 ## Measured numbers
 
-From `make verify` on a 3-talk corpus (762 MB of video):
+Every figure comes from Lance's own IO accounting (`Dataset.io_stats_incremental()`),
+not from anything measured off to the side. Run `make verify` to reproduce:
 
 | operation | index bytes | video bytes |
 |---|---|---|
-| semantic search over all moments | 1.65 MB | **0** |
-| full-text search over transcripts | 0.10 MB | **0** |
-| open a blob handle | — | 2,978 |
-| start playback (cold segment) | — | ~17 MB (one segment) |
-| seek again inside it (warm) | — | 262,144 (byte-exact) |
+| semantic search over every moment | ~1.7 MB | **0** |
+| full-text search over transcripts | ~0.1 MB | **0** |
+| the same search, filtered to one devroom | ~1.7 MB | **0** |
+| open a blob handle | — | ~3 KB |
+| start playback (cold segment) | — | ~17 MB, one segment |
+| seek again inside it (warm) | — | 262,144 — byte-exact |
 
-Every figure comes from Lance's own IO accounting (`Dataset.io_stats_incremental()`),
-not from anything measured off to the side. See [FINDINGS.md](FINDINGS.md) for the
-measurements that shaped the design — including the one that forced videos to be stored
-as ~16 MB segments rather than whole files.
+See [FINDINGS.md](FINDINGS.md) for the measurements that shaped the design, including
+the one that forced videos to be stored as ~16 MB segments rather than whole files.
 
 ## Running it
 
 ```bash
 make setup                # uv sync + npm install
-make ingest LIMIT=25      # download, segment, embed, build tables (~10 min for 25 talks)
-make verify               # preflight — proves the claims in ~15s
+make ingest LIMIT=36      # download, transcode, segment, embed, build, verify
 make demo                 # API on :8000, UI on :3000
 ```
 
-Requires `ffmpeg` on PATH. Everything else lives in the venv. Once ingested, the demo
+Requires `ffmpeg` on PATH. Everything else lives in the venv. Once ingested the demo
 runs **fully offline** — no network, no services, no containers.
+
+`make verify` is the green-room check: it proves every claim above in about 15 seconds
+and exits non-zero if anything is broken.
+
+## On stage
+
+The interface is driven from the keyboard so you never hunt for a mouse:
+
+| key | does |
+|---|---|
+| `1`–`4` | run the four rehearsed queries |
+| `/` | focus the search box to type something the audience suggests |
+| `↵` | open the first result |
+| `S` | the schema, read live off disk — this is the Act 3 slide |
+| `R` | reset the byte instrument |
+| `Esc` | close whatever is open |
+
+### The ten minutes
+
+1. **The architecture isn't a triangle.** Every video search system is S3 + Postgres +
+   a vector DB + a queue. Replace that slide with one box.
+2. **Search.** `1` finds diagrams by what they look like. `2` and `3` show it holds up.
+   Switch to full text, then hybrid. Then pick a devroom — the SQL predicate runs
+   *inside* the vector search, not as a filter afterwards.
+3. **The schema** (`S`). `video_blob` sits in the same table as the embeddings. The
+   panel at the bottom is the point: gigabytes of video in `.blob` side files, and a
+   few megabytes of everything a search actually reads.
+4. **The instrument.** Press `R` to zero it. Run a search: the *playing it* needle
+   stays pinned at NONE. Then open a result and watch it move. That's the close.
+5. **The doors not walked through.** Branching and shallow clone, Geneva backfills,
+   DuckDB SQL over the same files.
 
 ## How it fits together
 
@@ -58,39 +89,33 @@ Next.js (:3000)  ──/api/*──>  FastAPI (:8000)  ──>  LanceDB on local
 Two tables, one format, one store, zero services:
 
 - **`moments`** — one row per keyframe: SigLIP embedding, transcript window, thumbnail,
-  and where the moment lives. This is all search ever touches.
-- **`segments`** — one row per ~16 MB playable MP4 chunk in a Blob V2 column, served to
-  the browser over HTTP Range straight out of the column.
+  speaker, devroom. This is all a search ever touches.
+- **`segments`** — one row per ~16 MB playable MP4 chunk in a Blob V2 column, streamed
+  to the browser over HTTP Range straight out of the column.
 
 The data layer is Python because `take_blobs` and multivector search are Python-only
-today; the TypeScript SDK covers vector, FTS, and hybrid but not blobs.
+today; the TypeScript SDK covers vector, FTS and hybrid but not blobs.
 
-## The ten minutes
+## The corpus
 
-1. **The architecture isn't a triangle** — every video search system is S3 + Postgres +
-   a vector DB + a queue. Replace that slide with one box.
-2. **Search** — semantic (`a diagram with boxes and arrows`), full-text, then hybrid,
-   then the same query with a SQL prefilter. Click a hit; it plays at that second.
-3. **The schema** — `blob_field("video_blob")` sits beside `vector` and `transcript`.
-   The MP4 is a column.
-4. **The byte meter** — reset it live. Search the whole corpus: the VIDEO counter stays
-   at **0**. Press play: it ticks up by one segment. That's the close.
-5. **The doors not walked through** — branching and shallow clone, Geneva backfills,
-   DuckDB SQL over the same files.
+`ingest/download.py` builds the corpus from the [FOSDEM](https://video.fosdem.org)
+video archive: direct MP4s over plain HTTP, official `.vtt` subtitles for every talk,
+and a schedule feed that supplies real titles, speakers and devrooms. Talks are
+transcoded to 720p on the way in, which keeps slide text sharp at about a third of the
+bytes.
 
-## Corpus and rights
+FOSDEM recordings are published under CC-BY. The videos are gitignored regardless —
+the repo ships the pipeline, not the corpus.
 
-`ingest/download.py` pulls a public conference playlist (Strange Loop by default) with
-`yt-dlp` for **local, view-only demo use**. The videos are gitignored and are not
-redistributed here — the repo ships the pipeline, not the corpus. Point `--playlist` at
-whatever you have the clearest right to use; slide-heavy talks demo far better than
-podium-and-headshot framing.
+A YouTube path survives in `ingest/download_youtube.py`, but YouTube rate-limits
+scraping hard and answers with bot checks. It is a bad thing to depend on the night
+before a talk, which is why it is not the default.
 
 ## Layout
 
 ```
-ingest/    download -> segment + keyframes -> SigLIP -> Lance tables
-server/    FastAPI: search, thumbnails, Range streaming, the meter
-web/       Next.js UI and the HUD
-scripts/   blob_bench.py (the evidence), verify.py (preflight)
+ingest/    download + transcode -> segment + keyframes -> SigLIP -> Lance tables
+server/    FastAPI: search, thumbnails, Range streaming, the byte meter, /schema
+web/       Next.js UI: search, results, player, and the byte instrument
+scripts/   blob_bench.py (the evidence), verify.py (green-room preflight)
 ```
