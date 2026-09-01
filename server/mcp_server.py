@@ -19,8 +19,6 @@ carry `readOnlyHint` so an agent knows before it calls rather than after.
 from __future__ import annotations
 
 import json
-import os
-from pathlib import Path
 from typing import Any
 
 from mcp.server.mcpserver import MCPServer
@@ -37,6 +35,11 @@ of a Lance table is how little of it a question has to touch. Heavy columns —
 vectors, images, and Blob V2 columns holding the large data — are never read into a
 result; they are described from the schema. A row browse over a table holding
 gigabytes of video costs kilobytes, and that is the point rather than a limitation.
+
+Which database this is comes from the console's own configuration, and list_tables
+reports the root path it resolved — say which database you are describing, because
+the person asking may have several and this server follows whichever one their
+console is pointed at.
 
 Start with list_tables, then table_findings for what the console has already worked
 out about a table: an unindexed vector column, small-file counts that would be
@@ -56,18 +59,40 @@ server = MCPServer(
 
 _catalog: Catalog | None = None
 
+NOT_CONFIGURED = {
+    "error": "no database is configured",
+    "detail": (
+        "LanceScope reads whichever connection its console is pointed at, and "
+        "nothing is selected. Either add a connection at /console/settings, or "
+        "start this server with LANCE_ROOT set to a directory holding .lance "
+        "tables — that pins it to one database regardless of the console."
+    ),
+}
 
-def catalog() -> Catalog:
-    """The same root the console would use: `LANCE_ROOT`, then the active connection.
 
-    Resolved lazily so the process starts even when nothing is configured — an agent
-    asking an empty database should be told it is empty, not fail to connect.
+def catalog() -> Catalog | None:
+    """Which database this is, resolved on every call.
+
+    The same ladder the console climbs: `LANCE_ROOT`, then the active saved
+    connection, then the ingest directory if it actually holds tables. Resolved per
+    call rather than once, because someone switching connections in the console
+    while an agent is mid-session should not have the agent quietly keep answering
+    about the database they just left.
+
+    There is no fallback to the working directory. It used to fall back to `cwd`,
+    which meant an unconfigured server pointed at this repository found
+    `data/lance/moments` and answered questions about a database nobody had chosen.
+    An agent cannot tell a wrong answer from a right one; the only safe unconfigured
+    state is one that says so.
     """
     global _catalog
-    if _catalog is None:
-        root = cfg.resolve_root(cfg.load()).root or Path(os.getcwd())
+    root = cfg.resolve_root(cfg.load()).root
+    if root is None:
+        _catalog = None
+        return None
+    if _catalog is None or _catalog.root != root:
         _catalog = Catalog(root)
-        routes.bind(_catalog)
+    routes.bind(_catalog)
     return _catalog
 
 
@@ -90,7 +115,8 @@ def _missing(name: str, error) -> dict:
                          "indices and columns, plus what listing them cost. Reads "
                          "manifests, never data.")
 async def list_tables() -> dict:
-    catalog()
+    if catalog() is None:
+        return NOT_CONFIGURED
     return await _body(await routes.tables())
 
 
@@ -99,7 +125,8 @@ async def list_tables() -> dict:
                          "is a blob column, dataset statistics, and the real on-disk "
                          "byte split between blob side files and everything else.")
 async def describe_table(name: str) -> dict:
-    catalog()
+    if catalog() is None:
+        return NOT_CONFIGURED
     try:
         return await _body(await routes.table(name))
     except Exception as e:                                   # noqa: BLE001
@@ -112,7 +139,8 @@ async def describe_table(name: str) -> dict:
                          "misleading to act on, tombstone debt — each with the "
                          "numbers it was derived from. No model wrote these.")
 async def table_findings(name: str) -> dict:
-    catalog()
+    if catalog() is None:
+        return NOT_CONFIGURED
     try:
         return await _body(await routes.findings(name))
     except Exception as e:                                   # noqa: BLE001
@@ -123,7 +151,8 @@ async def table_findings(name: str) -> dict:
              description="Version history: what each version did, when, and how the "
                          "row, fragment and byte counts moved between them.")
 async def table_versions(name: str) -> dict:
-    catalog()
+    if catalog() is None:
+        return NOT_CONFIGURED
     try:
         return await _body(await routes.versions(name))
     except Exception as e:                                   # noqa: BLE001
@@ -135,7 +164,8 @@ async def table_versions(name: str) -> dict:
                          "which columns have none. An unindexed vector column is why "
                          "a similarity search reads every row.")
 async def table_indices(name: str) -> dict:
-    catalog()
+    if catalog() is None:
+        return NOT_CONFIGURED
     try:
         return await _body(await routes.indices(name))
     except Exception as e:                                   # noqa: BLE001
@@ -148,7 +178,8 @@ async def table_indices(name: str) -> dict:
                          "actually occupies, which differ by orders of magnitude for "
                          "a blob table.")
 async def table_fragments(name: str) -> dict:
-    catalog()
+    if catalog() is None:
+        return NOT_CONFIGURED
     try:
         return await _body(await routes.fragments(name))
     except Exception as e:                                   # noqa: BLE001
@@ -162,7 +193,8 @@ async def table_fragments(name: str) -> dict:
                          "what the read cost.")
 async def read_rows(name: str, filter: str | None = None, limit: int = 25,
                     offset: int = 0, columns: str | None = None) -> dict:
-    catalog()
+    if catalog() is None:
+        return NOT_CONFIGURED
     try:
         # `expand` is deliberately not a parameter. The route refuses to materialise
         # a blob column even when asked; not offering the argument means an agent
