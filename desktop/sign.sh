@@ -22,6 +22,34 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# Credentials from a file, if there is one. Typing an app-specific password into a
+# terminal puts it in a history file; this keeps it in one place that .gitignore
+# knows about. `CRED_FILE` overrides, and the file is ordinary shell assignments:
+#
+#   APPLE_SIGNING_IDENTITY="Developer ID Application: Your Name (TEAMID)"
+#   APPLE_ID=you@example.com
+#   APPLE_TEAM_ID=TEAMID
+#   APPLE_PASSWORD=abcd-efgh-ijkl-mnop
+CRED_FILE=${CRED_FILE:-.cred}
+if [ -f "$CRED_FILE" ]; then
+  if grep -qE '^[[:space:]]*(export[[:space:]]+)?APPLE_[A-Z_]+=' "$CRED_FILE"; then
+    echo "==> reading credentials from $CRED_FILE"
+    set -a
+    # `.` searches PATH for a bare name, so an explicit path is required — and it
+    # has to be the path as given, since CRED_FILE may be absolute.
+    case "$CRED_FILE" in
+      /*) cred_path=$CRED_FILE ;;
+      *)  cred_path=./$CRED_FILE ;;
+    esac
+    # shellcheck disable=SC1090
+    . "$cred_path"
+    set +a
+  else
+    echo "==> $CRED_FILE exists but holds no APPLE_* assignments; ignoring it"
+    echo "    (it should be lines like APPLE_ID=you@example.com — see desktop/sign.sh)"
+  fi
+fi
+
 # Rust's installer puts cargo on PATH by editing shell startup files, so a script
 # only sees it if the shell that ran the script happened to be one of the shells
 # that got edited. This is the same fragility that broke the double-click launcher,
@@ -145,22 +173,42 @@ codesign --verify --deep --strict --verbose=2 "$APP"
 # until the app is notarised and stapled; anything else here is a real problem.
 spctl --assess --type execute --verbose=4 "$APP" || true
 
-if [ -n "${APPLE_ID:-}${NOTARY_PROFILE:-}" ]; then
-  # Tauri notarised the app during the bundle. The DMG is a separate artefact and
-  # needs its own trip, and both need stapling so they open offline on a machine
-  # that has never seen them.
-  echo "==> notarising the disk image (a few minutes)"
+notarise() {
   if [ -n "${NOTARY_PROFILE:-}" ]; then
-    xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait
+    xcrun notarytool submit "$1" --keychain-profile "$NOTARY_PROFILE" --wait
   else
-    xcrun notarytool submit "$DMG" \
+    xcrun notarytool submit "$1" \
       --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
       --password "$APPLE_PASSWORD" --wait
   fi
+}
 
-  echo "==> stapling"
+if [ -n "${APPLE_ID:-}${NOTARY_PROFILE:-}" ]; then
+  # Tauri notarises the app itself, but only when APPLE_ID and APPLE_PASSWORD are in
+  # the environment — it has no keychain-profile path for the app bundle. With a
+  # profile it signs and stops, so the app needs its own submission here.
+  #
+  # notarytool takes a zip, a disk image or an installer package, never a bare
+  # `.app`, so the app goes up inside a zip and the ticket is stapled to the app
+  # itself afterwards.
+  if [ -n "${NOTARY_PROFILE:-}" ]; then
+    echo "==> notarising the app (a few minutes)"
+    ZIP=$(mktemp -d)/LanceScope.zip
+    ditto -c -k --keepParent "$APP" "$ZIP"
+    notarise "$ZIP"
+    xcrun stapler staple "$APP"
+
+    # The disk image was assembled around an unstapled app, so it is rebuilt to
+    # carry the stapled one. Shipping a DMG whose contents were notarised after it
+    # was made is how an app gets refused on a machine with no network.
+    echo "==> rebuilding the disk image around the stapled app"
+    ./desktop/build.sh >/dev/null
+    DMG=$(ls desktop/src-tauri/target/release/bundle/dmg/*.dmg | head -1)
+  fi
+
+  echo "==> notarising the disk image (a few minutes)"
+  notarise "$DMG"
   xcrun stapler staple "$DMG"
-  xcrun stapler staple "$APP" || true
 
   echo "==> what Gatekeeper says now"
   spctl --assess --type execute --verbose=4 "$APP"
