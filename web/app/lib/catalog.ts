@@ -262,7 +262,7 @@ export function getRows(
  *  disabled control that explains itself beats a search that silently finds
  *  nothing. */
 export type QueryCapability = {
-  mode: "scan" | "fts" | "vector";
+  mode: "scan" | "fts" | "vector" | "hybrid";
   available: boolean;
   reason: string;
   columns: string[];
@@ -286,7 +286,7 @@ export type PlanReading = {
 };
 
 export type QuerySpec = {
-  mode: "scan" | "fts" | "vector";
+  mode: "scan" | "fts" | "vector" | "hybrid";
   filter?: string | null;
   columns?: string[] | null;
   limit?: number;
@@ -315,6 +315,16 @@ export type QueryResult = {
   total_rows: number | null;
   truncated: boolean;
   reproduction: string;
+  /** Only a hybrid search has legs. Reported separately because its cost is the sum
+   *  of two paths, and one of them may be a brute-force scan that dominates. */
+  legs: {
+    mode: string;
+    plan: PlanReading;
+    ms: number;
+    read_bytes: number;
+    read_iops: number;
+    returned: number;
+  }[];
 };
 
 export const getQueryCapabilities = (n: string) =>

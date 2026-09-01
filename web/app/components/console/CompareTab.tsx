@@ -44,9 +44,16 @@ export function CompareTab({ table }: { table: string }) {
       .catch((e) => setError(e instanceof Error ? e.message : "no version history"));
   }, [table]);
 
+  // A query comparison belongs to the pair of versions it ran against, so changing
+  // either side clears it — done where the change happens rather than in the effect,
+  // which would be a second render for a decision already made.
+  const pick = (side: "a" | "b") => (v: number) => {
+    (side === "a" ? setA : setB)(v);
+    setQcmp(null);
+  };
+
   useEffect(() => {
     if (a === null || b === null) return;
-    setQcmp(null);
     compareVersions(table, a, b)
       .then((c) => { setCmp(c); setError(null); })
       .catch((e) => { setCmp(null); setError(e instanceof ApiError ? e.message : "compare failed"); });
@@ -80,9 +87,9 @@ export function CompareTab({ table }: { table: string }) {
   return (
     <>
       <div className="flex flex-wrap items-end gap-3 mb-5">
-        <VersionPicker label="before" value={a} onChange={setA} d={versions} />
+        <VersionPicker label="before" value={a} onChange={pick("a")} d={versions} />
         <Icon name="arrowRight" size={16} />
-        <VersionPicker label="after" value={b} onChange={setB} d={versions} />
+        <VersionPicker label="after" value={b} onChange={pick("b")} d={versions} />
       </div>
 
       {error && (

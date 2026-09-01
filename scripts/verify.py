@@ -326,6 +326,29 @@ def query_checks() -> None:
             ok = False
         check(f"the {label} reproduction is runnable Python", ok)
 
+    # Hybrid is two searches fused, and the reason to show it here is that its cost
+    # is the sum of two paths — one of which is a brute-force scan on this corpus.
+    hy = run("moments", {"mode": "hybrid", "text": "kubernetes",
+                         "vector_column": "vector", "like_row": 0, "k": 8}).json()
+    legs = {leg["mode"]: leg for leg in hy["legs"]}
+    check("a hybrid search reports both legs separately",
+          set(legs) == {"fts", "vector"}
+          and legs["vector"]["read_bytes"] > 10 * legs["fts"]["read_bytes"],
+          f"fts {legs['fts']['read_bytes']:,} B, vector {legs['vector']['read_bytes']:,} B")
+    check("hybrid rows are fused by rank, not by score",
+          all("_rrf" in r for r in hy["rows"])
+          and any(r["_fts_rank"] and not r["_vector_rank"] for r in hy["rows"])
+          and any(r["_vector_rank"] and not r["_fts_rank"] for r in hy["rows"]),
+          f"{hy['returned']} fused rows")
+    check("hybrid costs what its legs cost",
+          hy["read_bytes"] == sum(leg["read_bytes"] for leg in hy["legs"]))
+
+    seg_caps = {c["mode"]: c for c in
+                api.get("/catalog/tables/segments/query/capabilities").json()["capabilities"]}
+    check("hybrid is unavailable where a leg is missing, with a reason",
+          not seg_caps["hybrid"]["available"] and "needs both legs" in seg_caps["hybrid"]["reason"],
+          seg_caps["hybrid"]["reason"])
+
     bad = run("moments", {"mode": "scan", "filter": "no_such_column = 1"})
     missing = run("moments", {"mode": "vector", "vector_column": "title", "like_row": 0})
     check("a query the user got wrong is a 400, not a 500",

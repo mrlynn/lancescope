@@ -25,14 +25,22 @@ from __future__ import annotations
 
 import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 import pyarrow as pa
 
 from server.catalog import Handle, is_blob_field
 
-MODES = ("scan", "fts", "vector")
+MODES = ("scan", "fts", "vector", "hybrid")
+
+# Reciprocal rank fusion. The two legs of a hybrid search return scores that cannot
+# be added together — BM25 relevance and a vector distance are different quantities
+# in different units, and one of them is better when it is larger. RRF throws the
+# scores away and fuses the *ranks*, which is why it needs no tuning and cannot be
+# skewed by one leg's scale. 60 is the constant from the original paper; it damps
+# the top of each list so a single leg cannot dominate the fusion.
+RRF_K = 60
 
 MAX_LIMIT = 200
 MAX_K = 200
@@ -115,6 +123,24 @@ def _is_heavy(f) -> bool:
             or _vector_dim(f) is not None)
 
 
+def _hybrid_capability(fts: Capability, vector: Capability) -> Capability:
+    """Hybrid needs both legs. Half a hybrid search is a different search.
+
+    Degrading silently to whichever leg happens to work would return results that
+    look like a hybrid search and are not — the failure mode a named state exists
+    to prevent.
+    """
+    if fts.available and vector.available:
+        return Capability(
+            "hybrid", True,
+            "full text and vector, fused by rank — costs both legs",
+            sorted(set(fts.columns) | set(vector.columns)))
+    missing = [name for name, cap in (("full text", fts), ("vector", vector))
+               if not cap.available]
+    return Capability("hybrid", False,
+                      f"needs both legs; no {' and no '.join(missing)} search here", [])
+
+
 def capabilities(handle: Handle) -> list[Capability]:
     """What this table can actually be asked, given its schema and its indices.
 
@@ -158,6 +184,9 @@ def capabilities(handle: Handle) -> list[Capability]:
     else:
         out.append(Capability("vector", False, "no vector column on this table", []))
 
+    fts_cap = next(c for c in out if c.mode == "fts")
+    vector_cap = next(c for c in out if c.mode == "vector")
+    out.append(_hybrid_capability(fts_cap, vector_cap))
     return out
 
 
@@ -362,6 +391,9 @@ class QueryOutcome:
     total_rows: int | None
     truncated: bool
     reproduction: str
+    # Only a hybrid search has legs; everything else took one path and reports it
+    # in `plan`.
+    legs: list[dict] = field(default_factory=list)
 
     def as_dict(self) -> dict:
         return {
@@ -376,13 +408,19 @@ class QueryOutcome:
             "total_rows": self.total_rows,
             "truncated": self.truncated,
             "reproduction": self.reproduction,
+            "legs": self.legs,
         }
 
 
-def build_scanner(handle: Handle, spec: QuerySpec, projected: list[str]):
+def build_scanner(handle: Handle, spec: QuerySpec, projected: list[str],
+                  *, with_row_id: bool = False):
     """One scanner from one spec. Every mode ends up here."""
     ds = handle.ds
     kwargs: dict = {"columns": projected, "filter": spec.filter or None}
+    if with_row_id:
+        # A hybrid search merges two result sets, and the row id is the only thing
+        # that identifies the same row in both.
+        kwargs["with_row_id"] = True
 
     if spec.mode == "vector":
         kwargs["nearest"] = _nearest(handle, spec)
@@ -414,6 +452,122 @@ def explain(handle: Handle, spec: QuerySpec) -> PlanReading:
         raise QueryError(_first_line(e)) from None
 
 
+@dataclass(frozen=True)
+class Leg:
+    """One half of a hybrid search, costed on its own.
+
+    Reported separately because the whole point of showing hybrid here is that its
+    cost is the sum of two paths, and one of them may be a brute-force scan that
+    dominates the total.
+    """
+
+    mode: str
+    plan: PlanReading
+    ms: int
+    read_bytes: int
+    read_iops: int
+    returned: int
+
+    def as_dict(self) -> dict:
+        return {"mode": self.mode, "plan": self.plan.as_dict(), "ms": self.ms,
+                "read_bytes": self.read_bytes, "read_iops": self.read_iops,
+                "returned": self.returned}
+
+
+def _run_leg(handle: Handle, spec: QuerySpec, projected: list[str]) -> tuple[list, Leg]:
+    """One leg, with row ids, costed alone."""
+    scanner = build_scanner(handle, spec, projected, with_row_id=True)
+    plan = read_plan(scanner.explain_plan(verbose=False))
+    handle.drain()
+    t0 = time.perf_counter()
+    table = scanner.to_table()
+    ms = int((time.perf_counter() - t0) * 1000)
+    d = handle.drain()
+    records = table.to_pylist()
+    return records, Leg(mode=spec.mode, plan=plan, ms=ms, read_bytes=d.read_bytes,
+                        read_iops=d.read_iops, returned=len(records))
+
+
+def run_hybrid(handle: Handle, spec: QuerySpec, *, cell) -> QueryOutcome:
+    """Full text and vector against the same filter, fused by rank.
+
+    Lance refuses a scanner carrying both a `nearest` and a `full_text_query`, so
+    the two legs are separate scans merged here. That is not a workaround to hide:
+    each leg is planned, run and costed on its own, and the result says what each
+    one contributed.
+    """
+    spec = spec.normalised()
+    ds = handle.ds
+    projected, omitted = _projection(ds, spec.columns, set())
+    schema = {f.name: f for f in ds.schema}
+
+    fts_spec = replace(spec, mode="fts", limit=max(spec.k, spec.limit))
+    vec_spec = replace(spec, mode="vector")
+
+    try:
+        fts_rows, fts_leg = _run_leg(handle, fts_spec, projected)
+        vec_rows, vec_leg = _run_leg(handle, vec_spec, projected)
+    except QueryError:
+        raise
+    except Exception as e:                                   # noqa: BLE001
+        raise QueryError(_first_line(e)) from None
+
+    # Fuse on rank, never on score: BM25 relevance and a vector distance are
+    # different quantities in different units, and one of them is better when it is
+    # larger. Ranks are comparable; the scores are not.
+    fused: dict[int, dict] = {}
+    for rank, rec in enumerate(fts_rows):
+        rid = rec.get("_rowid")
+        fused.setdefault(rid, {"rec": rec, "fts_rank": None, "vector_rank": None})
+        fused[rid]["fts_rank"] = rank + 1
+    for rank, rec in enumerate(vec_rows):
+        rid = rec.get("_rowid")
+        entry = fused.setdefault(rid, {"rec": rec, "fts_rank": None, "vector_rank": None})
+        entry["vector_rank"] = rank + 1
+        # Prefer whichever record carries a distance, so the column survives merging.
+        if "_distance" in rec:
+            entry["rec"] = {**entry["rec"], **rec}
+
+    scored = []
+    for rid, entry in fused.items():
+        score = sum(1 / (RRF_K + r) for r in
+                    (entry["fts_rank"], entry["vector_rank"]) if r is not None)
+        scored.append((score, rid, entry))
+    scored.sort(key=lambda x: -x[0])
+    scored = scored[:spec.k]
+
+    rows = []
+    for score, _rid, entry in scored:
+        rec = entry["rec"]
+        row = {c: cell(rec.get(c), schema[c]) for c in projected if c in schema}
+        for extra in ("_score", "_distance"):
+            if extra in rec:
+                row[extra] = rec[extra]
+        row["_rrf"] = round(score, 6)
+        row["_fts_rank"] = entry["fts_rank"]
+        row["_vector_rank"] = entry["vector_rank"]
+        rows.append(row)
+
+    columns = projected + [c for c in ("_score", "_distance", "_rrf",
+                                       "_fts_rank", "_vector_rank")
+                           if any(c in r for r in rows)]
+    legs = [fts_leg, vec_leg]
+    return QueryOutcome(
+        rows=rows,
+        columns=columns,
+        omitted_columns=omitted,
+        plan=read_plan("\n\n".join(leg.plan.text for leg in legs)),
+        ms=sum(leg.ms for leg in legs),
+        read_bytes=sum(leg.read_bytes for leg in legs),
+        read_iops=sum(leg.read_iops for leg in legs),
+        returned=len(rows),
+        total_rows=None,
+        truncated=False,
+        reproduction=reproduction(handle.uri, spec, projected),
+        legs=[leg.as_dict() for leg in legs],
+    )
+
+
 def run(handle: Handle, spec: QuerySpec, *, cell) -> QueryOutcome:
     """Execute, and account for it exactly.
 
@@ -421,6 +575,9 @@ def run(handle: Handle, spec: QuerySpec, *, cell) -> QueryOutcome:
     module stays a query service and the route keeps ownership of its wire format.
     """
     spec = spec.normalised()
+    if spec.mode == "hybrid":
+        return run_hybrid(handle, spec, cell=cell)
+
     ds = handle.ds
     projected, omitted = _projection(ds, spec.columns, set())
     schema = {f.name: f for f in ds.schema}
