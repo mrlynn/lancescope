@@ -1,4 +1,4 @@
-.PHONY: help setup download prepare prepare-force embed build ingest verify test api web demo dev tidy bench clean
+.PHONY: help setup download prepare prepare-force embed build ingest verify test api mcp web demo dev tidy bench clean
 
 PY := .venv/bin/python
 UVICORN := .venv/bin/uvicorn
@@ -49,6 +49,11 @@ bench:
 
 api:
 	$(UVICORN) server.main:app --port 8000
+
+# The read surface over stdio, for an agent host. Read-only, and it reads whichever
+# connection the console is pointed at.
+mcp:
+	$(PY) -m server.mcp_server
 
 web:
 	cd web && npm run dev

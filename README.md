@@ -37,6 +37,24 @@ Where the root comes from, in order:
 `LANCESCOPE_CONFIG` moves the settings file. Connections may be local directories or
 `s3://` / `db://` URIs; remote ones are saved unverified rather than falsely ticked.
 
+## Point an agent at it
+
+The console's read surface is also an MCP server, so Claude Code — or any agent host
+that speaks MCP — can inspect a LanceDB database directly:
+
+```bash
+claude mcp add lancescope -- uv --directory /path/to/lancescope run python -m server.mcp_server
+```
+
+It reads whichever connection the console is pointed at, and needs no key of its own:
+the intelligence is the agent's, and the tools are the same routes the console calls.
+Seven of them — list tables, describe one, its findings, versions, indices,
+fragments, and a page of rows — all declared read-only, and none able to materialise
+a blob column, because the routes underneath them cannot.
+
+Ask it *"what's in this database and what's wrong with it"* and it will come back
+with the unindexed vector column and what a search therefore costs.
+
 ## Intelligence
 
 Optional, and the console is useful without it. The settings page configures which

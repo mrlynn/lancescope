@@ -255,7 +255,7 @@ session at `GET /intel/meter`, rendered in the Insights tab in the same language
 the byte instrument. Enforces `LANCESCOPE_SPEND_CEILING`.
 **Done when:** a summary and an ask both move the meter, and a cache hit does not.
 
-### I7 — MCP server
+### I7 — MCP server  ✅ landed
 `server/mcp_server.py` over stdio: `list_tables`, `describe_table`, `versions`,
 `indices`, `fragments`, `rows`, `findings` — calling the catalog functions in-process,
 not over HTTP. The `rows` tool never projects a heavy or blob column. Ships with
