@@ -16,3 +16,5 @@ web/out/
 packaging/dist/
 packaging/build/
 web/out/
+desktop/src-tauri/target/
+desktop/src-tauri/gen/

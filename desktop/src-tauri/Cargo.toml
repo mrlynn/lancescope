@@ -1,0 +1,22 @@
+[package]
+name = "lancescope"
+version = "0.1.0"
+description = "A workbench for understanding a LanceDB database"
+edition = "2021"
+rust-version = "1.77"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+
+[profile.release]
+# A desktop app people download: size is a feature. These cost compile time and
+# nothing else.
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
