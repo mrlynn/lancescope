@@ -442,6 +442,23 @@ class QueryOutcome:
         }
 
 
+def _ask_for_score(kwargs: dict, column: str) -> None:
+    """Ask for the scoring column by name, and turn its free ride off.
+
+    Lance currently adds `_distance` and `_score` to a search result whether or not
+    the projection asked for them, and warns that it will stop. When it does, a
+    search here would quietly lose the column that makes it a search result — the
+    distance, the score, and the ranks the hybrid fusion is built on — with nothing
+    failing to say so.
+
+    Naming the column and passing `disable_scoring_autoprojection` adopts the future
+    behaviour now: the same result, obtained because we asked rather than because a
+    default has not been removed yet.
+    """
+    kwargs["columns"] = [*kwargs["columns"], column]
+    kwargs["disable_scoring_autoprojection"] = True
+
+
 def build_scanner(handle: Handle, spec: QuerySpec, projected: list[str],
                   *, with_row_id: bool = False):
     """One scanner from one spec. Every mode ends up here."""
@@ -457,12 +474,14 @@ def build_scanner(handle: Handle, spec: QuerySpec, projected: list[str],
         kwargs["prefilter"] = spec.prefilter
         # `nearest` already bounds the result at k; a second limit would silently
         # take the first k rows rather than the nearest ones.
+        _ask_for_score(kwargs, "_distance")
     elif spec.mode == "fts":
         if not spec.text:
             raise QueryError("give some text to search for")
         kwargs["full_text_query"] = spec.text
         kwargs["limit"] = spec.limit
         kwargs["offset"] = spec.offset
+        _ask_for_score(kwargs, "_score")
     else:
         kwargs["limit"] = spec.limit
         kwargs["offset"] = spec.offset
