@@ -6,6 +6,11 @@
 #   APPLE_PASSWORD=app-specific-password \
 #   ./desktop/sign.sh
 #
+# Or, having stored the credentials in the keychain once:
+#
+#   NOTARY_PROFILE=lancescope \
+#   APPLE_SIGNING_IDENTITY="Developer ID Application: …" ./desktop/sign.sh
+#
 # The app-specific password is generated at appleid.apple.com, not your Apple ID
 # password. Store it in the keychain rather than a shell history if you run this
 # more than once:
@@ -61,11 +66,57 @@ echo "==> checking the identity is present"
 security find-identity -v -p codesigning | grep -F "$APPLE_SIGNING_IDENTITY" \
   || { echo "that identity is not in the keychain"; exit 1; }
 
+# Notarisation credentials, checked before anything slow runs.
+#
+# Tauri notarises during the bundle when these are set, which means a wrong password
+# is discovered *after* a full Rust compile, a 428 MB copy and a signature — four
+# minutes to learn something Apple will tell us in three seconds. `notarytool
+# history` is the cheapest authenticated call there is.
+#
+# A keychain profile is the better way to hold these: `notarytool store-credentials`
+# puts them in the keychain instead of in a shell history file.
+if [ -n "${NOTARY_PROFILE:-}" ]; then
+  echo "==> checking the notarisation credentials (keychain profile $NOTARY_PROFILE)"
+  xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" --limit 1 >/dev/null \
+    || { echo "that keychain profile does not authenticate. Recreate it with:"
+         echo "  xcrun notarytool store-credentials $NOTARY_PROFILE \\"
+         echo "    --apple-id you@example.com --team-id TEAMID --password <app-specific>"
+         exit 1; }
+elif [ -n "${APPLE_ID:-}" ]; then
+  echo "==> checking the notarisation credentials"
+  if ! xcrun notarytool history \
+        --apple-id "$APPLE_ID" \
+        --team-id "${APPLE_TEAM_ID:?set APPLE_TEAM_ID}" \
+        --password "${APPLE_PASSWORD:?set APPLE_PASSWORD}" \
+        --limit 1 >/dev/null 2>&1; then
+    echo
+    echo "Apple rejected those credentials. The three usual reasons:"
+    echo
+    echo "  1. APPLE_PASSWORD is your Apple ID password. It has to be an"
+    echo "     app-specific password, generated at appleid.apple.com under"
+    echo "     Sign-In and Security. It looks like abcd-efgh-ijkl-mnop."
+    echo
+    echo "  2. APPLE_ID is not the address the developer account belongs to."
+    echo "     It is currently: $APPLE_ID"
+    echo
+    echo "  3. That Apple ID is not a member of team $APPLE_TEAM_ID."
+    echo
+    echo "Nothing was built. Fix the credentials and run this again."
+    exit 1
+  fi
+  echo "    authenticated as $APPLE_ID"
+else
+  echo "==> no notarisation credentials given; building signed but un-notarised"
+  echo "    (the app will run here and be refused on other machines)"
+fi
+
 echo "==> building the server"
 make sidecar
 
 echo "==> building and signing the app"
-# Tauri signs the bundle, including everything under Resources, when this is set.
+# Tauri signs the bundle, including everything under Resources, when this is set —
+# and notarises it too when the Apple credentials are in the environment, which is
+# why they are checked above rather than left to fail here.
 APPLE_SIGNING_IDENTITY="$APPLE_SIGNING_IDENTITY" ./desktop/build.sh
 
 APP="desktop/src-tauri/target/release/bundle/macos/LanceScope.app"
@@ -77,17 +128,22 @@ codesign --verify --deep --strict --verbose=2 "$APP"
 # until the app is notarised and stapled; anything else here is a real problem.
 spctl --assess --type execute --verbose=4 "$APP" || true
 
-if [ -n "${APPLE_ID:-}" ]; then
-  echo "==> notarising (this takes a few minutes)"
-  xcrun notarytool submit "$DMG" \
-    --apple-id "$APPLE_ID" \
-    --team-id "${APPLE_TEAM_ID:?set APPLE_TEAM_ID}" \
-    --password "${APPLE_PASSWORD:?set APPLE_PASSWORD (an app-specific password)}" \
-    --wait
+if [ -n "${APPLE_ID:-}${NOTARY_PROFILE:-}" ]; then
+  # Tauri notarised the app during the bundle. The DMG is a separate artefact and
+  # needs its own trip, and both need stapling so they open offline on a machine
+  # that has never seen them.
+  echo "==> notarising the disk image (a few minutes)"
+  if [ -n "${NOTARY_PROFILE:-}" ]; then
+    xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait
+  else
+    xcrun notarytool submit "$DMG" \
+      --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
+      --password "$APPLE_PASSWORD" --wait
+  fi
 
-  echo "==> stapling, so it opens offline and on a machine that has never seen it"
+  echo "==> stapling"
   xcrun stapler staple "$DMG"
-  xcrun stapler staple "$APP"
+  xcrun stapler staple "$APP" || true
 
   echo "==> what Gatekeeper says now"
   spctl --assess --type execute --verbose=4 "$APP"
