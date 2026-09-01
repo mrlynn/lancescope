@@ -58,7 +58,7 @@ def open_table(name: str) -> Handle:
     try:
         return _catalog().open(name, scope=SCOPE)
     except FileNotFoundError:
-        raise HTTPException(404, f"no table named {name!r} under {_catalog().root}") from None
+        raise HTTPException(404, f"no table named {name!r} under {_catalog().root_uri}") from None
 
 
 def _latest(ds) -> dict:
@@ -89,6 +89,21 @@ async def tables() -> JSONResponse:
     blob size — see `blob_columns` below and the note in the response.
     """
     cat = _catalog()
+    caps = cat.capabilities
+    if not caps.discover.ok:
+        # Named rather than empty. A remote connection that lists nothing looks
+        # exactly like a database with nothing in it, and one of those is a fact
+        # while the other is a limitation of this tool.
+        return JSONResponse({
+            "root": cat.root_uri,
+            "tables": [],
+            "unreadable": [],
+            "capabilities": caps.as_dict(),
+            "read_bytes": 0,
+            "read_iops": 0,
+            "note": caps.discover.reason,
+        })
+
     names = cat.discover()
     out: list[dict] = []
     unreadable: list[dict] = []
@@ -148,9 +163,10 @@ async def tables() -> JSONResponse:
         })
 
     return JSONResponse({
-        "root": str(cat.root),
+        "root": cat.root_uri,
         "tables": out,
         "unreadable": unreadable,
+        "capabilities": caps.as_dict(),
         "read_bytes": cost_bytes,
         "read_iops": cost_iops,
         # Stated in the payload rather than left for the reader to infer, because the

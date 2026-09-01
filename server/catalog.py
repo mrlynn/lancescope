@@ -85,6 +85,11 @@ class Catalog:
     """Opens and caches dataset handles under one root."""
 
     def __init__(self, root: Path | str, max_open: int = MAX_OPEN) -> None:
+        # Kept as given, because `Path` mangles a URI: `Path("s3://bucket/x")` is
+        # `s3:/bucket/x`, one slash short and no longer recognisable as remote. That
+        # is how a remote root was being treated as a local directory and reported
+        # back to the user in a form they never typed.
+        self.root_uri = str(root)
         self.root = Path(root)
         self.max_open = max_open
         # Keyed by (scope, name, version) — a version is a different dataset object
@@ -94,12 +99,23 @@ class Catalog:
 
     # ------------------------------------------------------------------ discovery
 
+    @property
+    def capabilities(self) -> RootCapabilities:
+        return capabilities_for(self.root_uri)
+
     def discover(self) -> list[str]:
         """Table names under the root, sorted.
 
         Reads directory entries only — no manifests, no data. Callers that want row
         counts or sizes open the table.
+
+        An empty list means the root holds no tables. It does not mean the root
+        could not be read — a caller that cannot tell those apart will report a
+        remote bucket as an empty database, which is what `capabilities` exists to
+        prevent. Check it first.
         """
+        if not self.capabilities.discover.ok:
+            return []
         if not self.root.is_dir():
             return []
         found: set[str] = set()
@@ -179,6 +195,7 @@ class Catalog:
 
         Returns the number of handles closed.
         """
+        self.root_uri = str(root) if root is not None else ""
         self.root = Path(root) if root is not None else Path()
         closed = len(self._open)
         for h in self._open.values():
@@ -197,7 +214,96 @@ def _looks_like_uri(s: str) -> bool:
     """`s3://bucket/t.lance` and `db://…` are opened as-is rather than joined to the
     root. One local root is all sprint 1 configures, but the signature takes a URI so
     remote roots are an addition later rather than a rewrite."""
-    return "://" in s
+    return "://" in str(s)
+
+
+# ---------------------------------------------------------------- capabilities
+
+# Three states, not two. "Unsupported" and "we have never tried this" are different
+# claims, and a console that reports the second as the first is guessing in the
+# direction that happens to be convenient.
+AVAILABLE = "available"
+UNSUPPORTED = "unsupported"
+UNVERIFIED = "unverified"
+
+
+@dataclass(frozen=True)
+class Capability:
+    state: str
+    reason: str = ""
+
+    @property
+    def ok(self) -> bool:
+        return self.state == AVAILABLE
+
+    def as_dict(self) -> dict:
+        return {"state": self.state, "reason": self.reason, "available": self.ok}
+
+
+@dataclass(frozen=True)
+class RootCapabilities:
+    """What can honestly be done with a root, before anything is attempted.
+
+    A connection is not a yes-or-no thing. Settings accepts `s3://` and `db://`
+    URIs, discovery walks a local directory, and until this existed the two facts
+    met in the worst possible place: a remote connection saved cleanly, activated
+    cleanly, and then reported an empty database — indistinguishable from a database
+    with nothing in it.
+
+    Reporting a capability rather than an outcome is what lets the UI say
+    "connected, and this cannot be browsed yet" instead of "no tables here".
+    """
+
+    remote: bool
+    discover: Capability
+    inspect: Capability
+    disk_split: Capability
+    io_meter: Capability
+
+    def as_dict(self) -> dict:
+        return {
+            "remote": self.remote,
+            "discover": self.discover.as_dict(),
+            "inspect": self.inspect.as_dict(),
+            "disk_split": self.disk_split.as_dict(),
+            "io_meter": self.io_meter.as_dict(),
+        }
+
+
+REMOTE_REASON = (
+    "This is a remote URI. Discovery walks a directory, so nothing here can list "
+    "what a bucket or a database endpoint holds — that needs an adapter which does "
+    "not exist yet. The connection is saved and is not broken; it cannot be browsed."
+)
+
+
+def capabilities_for(root: Path | str) -> RootCapabilities:
+    """What this root supports, decided from what it is rather than by trying."""
+    if _looks_like_uri(root):
+        return RootCapabilities(
+            remote=True,
+            discover=Capability(UNSUPPORTED, REMOTE_REASON),
+            # Lance can open a remote URI directly, so a named table might well work
+            # — but nothing in this repository has ever run against one, and claiming
+            # it works is the same kind of guess as claiming it does not.
+            inspect=Capability(UNVERIFIED,
+                               "Lance can open a remote URI directly, but this has "
+                               "never been exercised here and carries no guarantee."),
+            disk_split=Capability(UNSUPPORTED,
+                                  "The blob and metadata split comes from walking "
+                                  "the directory. There is nothing to walk."),
+            io_meter=Capability(UNVERIFIED,
+                                "Lance's IO counters are per handle and should still "
+                                "report, but the numbers have not been checked "
+                                "against a remote store."),
+        )
+    return RootCapabilities(
+        remote=False,
+        discover=Capability(AVAILABLE),
+        inspect=Capability(AVAILABLE),
+        disk_split=Capability(AVAILABLE),
+        io_meter=Capability(AVAILABLE),
+    )
 
 
 # ----------------------------------------------------------------- blob detection

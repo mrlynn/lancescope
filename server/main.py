@@ -31,7 +31,7 @@ from server.routes import intel as intel_routes
 from server.routes import settings as settings_routes
 
 ROOT = cfg.resolve_root(cfg.load())
-CATALOG = Catalog(ROOT.root or Path())
+CATALOG = Catalog(ROOT.uri or ROOT.root or Path())
 
 
 @asynccontextmanager
@@ -43,7 +43,7 @@ async def lifespan(app: FastAPI):
               f"/console/settings.")
     else:
         tables = CATALOG.discover()
-        print(f"catalog: {CATALOG.root} ({ROOT.source}) — {len(tables)} table(s): "
+        print(f"catalog: {CATALOG.root_uri} ({ROOT.source}) — {len(tables)} table(s): "
               f"{', '.join(tables) or 'none'}")
 
     if demo.load(CATALOG):

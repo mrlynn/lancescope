@@ -86,11 +86,12 @@ def catalog() -> Catalog | None:
     state is one that says so.
     """
     global _catalog
-    root = cfg.resolve_root(cfg.load()).root
-    if root is None:
+    resolved = cfg.resolve_root(cfg.load())
+    root = resolved.uri or resolved.root
+    if not root:
         _catalog = None
         return None
-    if _catalog is None or _catalog.root != root:
+    if _catalog is None or _catalog.root_uri != str(root):
         _catalog = Catalog(root)
     routes.bind(_catalog)
     return _catalog

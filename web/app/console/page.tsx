@@ -224,14 +224,36 @@ export default function Console() {
       {list && list.tables.length === 0 ? (
         <div className="mt-24 text-center">
           <Mark size={34} className="mx-auto mb-5 text-[var(--rule)]" />
-          <p className="text-[15px] text-[var(--haze)] max-w-lg mx-auto leading-relaxed">
-            No Lance tables under{" "}
-            <span className="mono text-[var(--bright)]">{list.root || "any configured path"}</span>.{" "}
-            <Link href="/console/settings" className="underline"
-                  style={{ color: "var(--video)" }}>Add a connection</Link>{" "}
-            pointing at a LanceDB directory, or build the demo corpus with{" "}
-            <span className="mono text-[var(--bright)]">make ingest</span>.
-          </p>
+          {/* Two different facts that used to render as the same sentence: a
+              database with nothing in it, and a connection this tool cannot read.
+              One is about the data; the other is about us. */}
+          {list.capabilities && !list.capabilities.discover.available ? (
+            <div className="max-w-xl mx-auto">
+              <p className="text-[15px] text-[var(--bright)] leading-relaxed">
+                Connected, and this cannot be browsed.
+              </p>
+              <p className="text-[14px] text-[var(--haze)] leading-relaxed mt-3">
+                {list.capabilities.discover.reason}
+              </p>
+              <p className="mono text-[12px] text-[var(--haze)] mt-4 break-all">
+                {list.root}
+              </p>
+              <p className="text-[13px] text-[var(--haze)] leading-relaxed mt-4">
+                <Link href="/console/settings" className="underline"
+                      style={{ color: "var(--video)" }}>Switch to a local directory</Link>{" "}
+                to browse a database here.
+              </p>
+            </div>
+          ) : (
+            <p className="text-[15px] text-[var(--haze)] max-w-lg mx-auto leading-relaxed">
+              No Lance tables under{" "}
+              <span className="mono text-[var(--bright)]">{list.root || "any configured path"}</span>.{" "}
+              <Link href="/console/settings" className="underline"
+                    style={{ color: "var(--video)" }}>Add a connection</Link>{" "}
+              pointing at a LanceDB directory, or build the demo corpus with{" "}
+              <span className="mono text-[var(--bright)]">make ingest</span>.
+            </p>
+          )}
         </div>
       ) : (
         <div className="flex flex-col lg:flex-row gap-6 items-stretch lg:items-start">

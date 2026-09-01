@@ -19,7 +19,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from server import settings as cfg
-from server.catalog import Catalog
+from server.catalog import Catalog, capabilities_for
 from server.intel import config as intel_config
 from server.intel.providers import ollama_host, ollama_models
 
@@ -39,7 +39,7 @@ def _apply_root(s: cfg.Settings) -> cfg.ResolvedRoot:
     cfg.save(s)
     resolved = cfg.resolve_root(s)
     if CATALOG is not None:
-        CATALOG.rebind(resolved.root)
+        CATALOG.rebind(resolved.uri or resolved.root)
         _arm_demo_if_present()
     return resolved
 
@@ -78,15 +78,24 @@ def _inspect(uri: str) -> dict:
     lie the settings page then shows as a green tick.
     """
     if "://" in uri:
-        return {"reachable": None, "tables": [], "note": "remote URI — not verified here"}
+        # Saved, and honestly labelled. The console can hold this connection; it
+        # cannot browse it, and a note saying "not verified" understated that —
+        # activating one used to produce an empty database rather than an
+        # explanation.
+        caps = capabilities_for(uri)
+        return {"reachable": None, "tables": [], "note": caps.discover.reason,
+                "capabilities": caps.as_dict()}
     p = Path(uri).expanduser()
     if not p.exists():
-        return {"reachable": False, "tables": [], "note": "no such directory"}
+        return {"reachable": False, "tables": [], "note": "no such directory",
+                "capabilities": capabilities_for(p).as_dict()}
     if not p.is_dir():
-        return {"reachable": False, "tables": [], "note": "not a directory"}
+        return {"reachable": False, "tables": [], "note": "not a directory",
+                "capabilities": capabilities_for(p).as_dict()}
     tables = Catalog(p).discover()
     note = "" if tables else "directory exists but holds no .lance tables"
-    return {"reachable": True, "tables": tables, "note": note}
+    return {"reachable": True, "tables": tables, "note": note,
+            "capabilities": capabilities_for(p).as_dict()}
 
 
 def _intel_view(intel: cfg.Intelligence) -> dict:
