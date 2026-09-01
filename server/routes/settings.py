@@ -22,7 +22,6 @@ from server import settings as cfg
 from server.catalog import Catalog
 from server.intel import config as intel_config
 from server.intel.providers import ollama_host, ollama_models
-from server.routes import demo
 
 router = APIRouter(prefix="/settings")
 
@@ -57,6 +56,12 @@ def _arm_demo_if_present() -> None:
     Anything that goes wrong means these two tables are not the demo's, which is an
     ordinary outcome when the connection is somebody else's database.
     """
+    # Imported here, not at module scope. The demo pulls in SigLIP and therefore
+    # torch; the console needs neither, and a settings page that cannot be imported
+    # without a gigabyte of machine learning is a settings page that cannot be
+    # tested without one either.
+    from server.routes import demo
+
     if CATALOG is None or demo.STATE.ready:
         return
     try:

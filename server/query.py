@@ -23,6 +23,7 @@ the one claim this repository exists to make.
 
 from __future__ import annotations
 
+import json
 import re
 import time
 from dataclasses import dataclass, field, replace
@@ -72,7 +73,10 @@ class QuerySpec:
     vector: list[float] | None = None
     like_row: int | None = None
     k: int = 10
-    metric: str = "cosine"
+    # None means "whatever the index was built with". Naming a metric the index does
+    # not use is not an error in Lance — it silently falls back to a brute-force
+    # scan, which is the most expensive way to be given the right answer.
+    metric: str | None = None
     prefilter: bool = True
 
     def normalised(self) -> QuerySpec:
@@ -161,6 +165,35 @@ def _hybrid_capability(fts: Capability, vector: Capability) -> Capability:
                if not cap.available]
     return Capability("hybrid", False,
                       f"needs both legs; no {' and no '.join(missing)} search here", [])
+
+
+def index_metrics(ds) -> dict[str, str]:
+    """The distance metric each vector index was built with, by column.
+
+    Lance stores it in the index statistics, and it matters more than it looks: a
+    search asking for a metric the index does not use does not fail and does not use
+    the index. It quietly scans every row and returns a correct answer at the price
+    of the thing the index was built to avoid.
+    """
+    out: dict[str, str] = {}
+    for idx in ds.list_indices():
+        columns = list(idx.get("fields") or [])
+        if not columns:
+            continue
+        stats = _index_stats(ds, str(idx.get("name")))
+        params = (stats.get("indices") or [{}])[0]
+        metric = params.get("metric_type")
+        if metric:
+            out[columns[0]] = str(metric).lower()
+    return out
+
+
+def _index_stats(ds, name: str) -> dict:
+    try:
+        raw = ds.index_statistics(name)
+        return json.loads(raw) if isinstance(raw, str) else dict(raw)
+    except Exception:                                        # noqa: BLE001
+        return {}
 
 
 def capabilities(handle: Handle) -> list[Capability]:
@@ -354,7 +387,11 @@ def _nearest(handle: Handle, spec: QuerySpec) -> dict:
     else:
         raise QueryError("give a vector to search with, or a row to search like")
 
-    return {"column": column, "q": q, "k": spec.k, "metric": spec.metric}
+    # Default to the index's own metric so a search actually uses the index. An
+    # explicit choice is honoured — and warned about, in `_metric_warning`, when it
+    # is the choice that turns an indexed search into a full scan.
+    metric = spec.metric or index_metrics(ds).get(column) or "cosine"
+    return {"column": column, "q": q, "k": spec.k, "metric": metric}
 
 
 def reproduction(uri: str, spec: QuerySpec, projected: list[str]) -> str:
@@ -418,6 +455,7 @@ class QueryOutcome:
     # numbers on screen true of something that is no longer current.
     version: int = 0
     latest_version: int = 0
+    warnings: list[str] = field(default_factory=list)
     # Only a hybrid search has legs; everything else took one path and reports it
     # in `plan`.
     legs: list[dict] = field(default_factory=list)
@@ -439,6 +477,7 @@ class QueryOutcome:
             "version": self.version,
             "latest_version": self.latest_version,
             "stale": self.latest_version > self.version,
+            "warnings": self.warnings,
         }
 
 
@@ -499,6 +538,30 @@ def explain(handle: Handle, spec: QuerySpec) -> PlanReading:
         raise
     except Exception as e:                                   # noqa: BLE001
         raise QueryError(_first_line(e)) from None
+
+
+def unused_index_warning(handle: Handle, spec: QuerySpec, plan: PlanReading) -> str | None:
+    """Say when an index exists and the query went round it.
+
+    This is the finding the console is for. Lance logs a line nobody reads, returns
+    the right rows, and charges a full scan for them; from the outside the only
+    symptom is that an index you built made no difference.
+    """
+    if spec.mode not in ("vector", "hybrid") or not spec.vector_column:
+        return None
+    if any(p["name"] == "ANN index" for p in plan.paths):
+        return None
+    built_with = index_metrics(handle.ds).get(spec.vector_column)
+    if not built_with:
+        return None                                  # no index; the scan is expected
+    asked_for = (spec.metric or built_with).lower()
+    if asked_for != built_with:
+        return (f"{spec.vector_column} has an index built for {built_with}, and this "
+                f"search asked for {asked_for}. Lance cannot use the index for a "
+                f"different metric, so it scanned every row instead — the same answer "
+                f"at the cost the index exists to avoid.")
+    return (f"{spec.vector_column} has an index, and this search did not use it. "
+            f"The plan is the evidence; the reason is Lance's to give.")
 
 
 @dataclass(frozen=True)
@@ -616,6 +679,8 @@ def run_hybrid(handle: Handle, spec: QuerySpec, *, cell) -> QueryOutcome:
         legs=[leg.as_dict() for leg in legs],
         version=ds.version,
         latest_version=_latest_version(ds),
+        warnings=[w for w in (unused_index_warning(handle, vec_spec, vec_leg.plan),)
+                  if w],
     )
 
 
@@ -683,4 +748,5 @@ def run(handle: Handle, spec: QuerySpec, *, cell) -> QueryOutcome:
         reproduction=reproduction(handle.uri, spec, projected),
         version=ds.version,
         latest_version=_latest_version(ds),
+        warnings=[w for w in (unused_index_warning(handle, spec, plan),) if w],
     )

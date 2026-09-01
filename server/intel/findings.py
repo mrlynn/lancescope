@@ -133,7 +133,11 @@ def _partial_index(facts: dict) -> list[Finding]:
 def _small_files(facts: dict) -> list[Finding]:
     """The one where Lance's own number needs a sentence attached to it."""
     small = facts["stats"].get("num_small_files", 0)
-    if not small:
+    fragments = facts["stats"].get("num_fragments", 0)
+    # A single-fragment table cannot have small-file debt: there is nothing to
+    # compact it with, and the file is small because the table is. Every small table
+    # tripped this rule, which is how a finding turns into noise people stop reading.
+    if not small or fragments < 2:
         return []
     blob = facts["has_blob_columns"]
     return [Finding(
@@ -142,7 +146,7 @@ def _small_files(facts: dict) -> list[Finding]:
         panel="fragments",
         title=f"{small} small data file{'s' if small != 1 else ''}",
         claim=(f"Lance counts {small} data file(s) below its size threshold across "
-               f"{facts['stats'].get('num_fragments', 0)} fragment(s)."),
+               f"{fragments} fragment(s)."),
         caveat=(
             "This table keeps its bytes in Blob V2 side files, which the manifest "
             "cannot see. Its data files are small because that is where the data "

@@ -40,14 +40,26 @@ Reference the issue in the PR body (`Closes #12`), not in every commit subject.
 
 ```bash
 uvx ruff check .              # python
+make test                     # contract tests, synthetic fixtures, seconds
 cd web && npx tsc --noEmit && npm run lint && npm run build
 make verify                   # needs a built corpus; this is the real test
 ```
 
-`make verify` is the one that matters. It reads the actual Lance IO counters and
-fails if any claim in `README.md` has stopped being true. CI cannot run it — the
-corpus is gigabytes of gitignored video — so it is on you to run it locally before
-asking for a merge.
+Two test layers, and they answer different questions.
+
+`make test` builds small Lance tables in a temp directory — an ordinary table, a
+vector table with and without an index, a Blob V2 table, a multi-version table, and a
+directory named like a table that holds nothing — and asserts the contracts against
+them. It needs no corpus and no torch, so **CI runs it on every push**. It is the
+layer that catches a change to the catalog, the query service, findings, compare or
+provider resolution.
+
+`make verify` is the one that matters most. It reads the actual Lance IO counters
+against the real corpus and fails if any claim in `README.md` has stopped being true.
+CI cannot run it — the corpus is gigabytes of gitignored video — so it is on you to
+run it locally before asking for a merge. It has already caught things no synthetic
+fixture would: a deprecated scoring projection that would silently have dropped
+`_distance` out of every search result.
 
 ## Configuration
 

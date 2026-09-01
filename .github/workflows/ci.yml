@@ -29,6 +29,21 @@ jobs:
       # which is gitignored; it runs locally as the green-room check.
       - run: uvx ruff@0.16.5 check .
 
+  tests:
+    name: python tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      # Only the `test` group: lance, pyarrow, fastapi and pytest. Deliberately not
+      # `uv sync`, which would pull torch and open-clip — gigabytes of machine
+      # learning to check that a filter is pushed down. The console does not import
+      # them, and the tests build their own Lance tables in a temp directory.
+      - run: uv sync --only-group test
+      - run: uv run --no-sync python -m pytest
+
   web:
     name: web build
     runs-on: ubuntu-latest

@@ -91,6 +91,7 @@ async def tables() -> JSONResponse:
     cat = _catalog()
     names = cat.discover()
     out: list[dict] = []
+    unreadable: list[dict] = []
     cost_bytes = cost_iops = 0
 
     for name in names:
@@ -98,6 +99,22 @@ async def tables() -> JSONResponse:
             h = cat.open(name, scope=SCOPE)
         except FileNotFoundError:
             # Raced with a directory disappearing between discover() and open().
+            continue
+        except Exception as e:                       # noqa: BLE001
+            # A directory named `*.lance` that Lance cannot open: an interrupted
+            # write, a half-copied dataset, a directory somebody made by hand.
+            # Discovery finds these by name and one of them used to take the whole
+            # listing down with it — every other table in the database invisible
+            # because of a directory nobody meant to create.
+            #
+            # Reported rather than skipped. A table that exists on disk and cannot
+            # be opened is information, and silently omitting it would leave someone
+            # looking for a table the console had quietly decided not to mention.
+            unreadable.append({
+                "name": name,
+                "uri": cat.uri_for(name),
+                "error": str(e).splitlines()[0][:160],
+            })
             continue
         h.drain()                                   # zero, so the cost below is ours
         ds = h.ds
@@ -133,6 +150,7 @@ async def tables() -> JSONResponse:
     return JSONResponse({
         "root": str(cat.root),
         "tables": out,
+        "unreadable": unreadable,
         "read_bytes": cost_bytes,
         "read_iops": cost_iops,
         # Stated in the payload rather than left for the reader to infer, because the
@@ -699,7 +717,7 @@ class QueryBody(BaseModel):
     vector: list[float] | None = None
     like_row: int | None = None
     k: int = 10
-    metric: str = "cosine"
+    metric: str | None = None
     prefilter: bool = True
     # How long the caller is prepared to wait. Not how long the query may run —
     # that is not ours to decide, and Lance would not honour it if it were.
