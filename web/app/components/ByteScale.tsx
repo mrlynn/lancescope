@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Icon from "@/app/components/Icon";
 import { fmtBytes, resetMeter, type MeterState } from "@/app/lib/api";
 
 /* The instrument the whole talk rests on.
@@ -124,12 +125,12 @@ export default function ByteScale({ meter }: { meter: MeterState | null }) {
             </span>
             <button
               onClick={() => resetMeter()}
-              className="mono text-[10px] tracking-[0.16em] px-3 py-1.5 rounded-sm border
-                         border-[var(--rule)] text-[var(--haze)]
-                         hover:text-[var(--bright)] hover:border-[var(--haze)]
-                         transition-colors"
+              className="btn mono !h-[26px] !px-2.5 text-[10px] tracking-[0.16em]"
+              data-tip="Reset the meter — R"
+              data-tip-side="left"
             >
-              RESET &middot; R
+              <Icon name="refresh" size={13} />
+              RESET
             </button>
           </div>
         </div>

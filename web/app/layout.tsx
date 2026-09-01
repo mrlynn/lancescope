@@ -17,8 +17,10 @@ const mono = Martian_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Ctrl-F for Video",
-  description: "Multimodal search over conference talks, on LanceDB",
+  // The app is the console. The demo is one screen inside it, and titling every
+  // tab after the demo was the same mistake as putting it at `/`.
+  title: { default: "LanceScope", template: "%s · LanceScope" },
+  description: "Read what is inside a LanceDB dataset, with the byte cost of every read.",
 };
 
 // Runs before first paint, so the page never renders in one theme and then

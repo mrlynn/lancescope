@@ -3,8 +3,8 @@
 Tools for seeing what is actually inside a LanceDB dataset — and the conference demo
 that made the case for building them.
 
-- **[Ctrl-F for Video](#ctrl-f-for-video)** — the demo, below. Multimodal search over
-  a corpus of conference talks where the video and its index are the same table.
+- **Home** at `/`. Says which database is attached, how many tables are in it and what
+  listing them cost, and gets you into the console, the demo, or settings from there.
 - **The console** at `/console`. Point it at any Lance directory — from the settings
   page, at runtime, no restart — and read its schema, versions, indices, fragments and
   rows, with the byte cost of every read shown as you go. Describing 2.65 GB of video
@@ -14,6 +14,10 @@ that made the case for building them.
   intelligence layer going on top of it — findings the console derives itself, an
   optional language layer that runs against Claude or a local Ollama model, and the
   catalog exposed to agents over MCP.
+- **[Ctrl-F for Video](#ctrl-f-for-video)** at `/demo`, and described below. Multimodal
+  search over a corpus of conference talks where the video and its index are the same
+  table. It is one thing this app does, not the thing it is — which is why it no longer
+  lives at `/`.
 
 ## Pointing it at your own data
 

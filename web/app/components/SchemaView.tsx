@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Icon from "@/app/components/Icon";
 import { fmtBytes } from "@/app/lib/api";
 
 type Field = { name: string; type: string; blob: boolean };
@@ -89,10 +90,12 @@ export default function SchemaView({ onClose }: { onClose: () => void }) {
           </div>
           <button
             onClick={onClose}
-            className="mono text-[10px] tracking-[0.16em] px-3 py-1.5 rounded-sm border
-                       border-[var(--rule)] text-[var(--haze)]"
+            className="iconbtn shrink-0"
+            data-tip="Close — S"
+            data-tip-side="left"
+            aria-label="Close"
           >
-            CLOSE &middot; S
+            <Icon name="close" size={16} />
           </button>
         </div>
 

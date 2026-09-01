@@ -139,8 +139,119 @@ body::before {
   border-radius: 4px;
 }
 
-/* Controls. The console had no forms until settings; these are the two shapes it
-   needs, in the same quiet language as everything else on the page. */
+/* ---------------------------------------------------------------------------
+   Controls.
+
+   Everything clickable is one of four shapes: `.btn` (icon + label), `.iconbtn`
+   (the square, label carried by a tooltip), `.seg` (a segmented group), and the
+   older `.pill` that the settings forms still use. They share a border, a radius
+   and a hover, so a row mixing them reads as one control strip rather than as
+   four widgets that happen to sit together.
+   --------------------------------------------------------------------------- */
+
+.btn, .iconbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 30px;
+  border-radius: 3px;
+  border: 1px solid var(--rule);
+  background: transparent;
+  color: var(--haze);
+  transition: color .15s, border-color .15s, background-color .15s;
+}
+.btn { padding: 0 11px; font-size: 12px; }
+.iconbtn { width: 30px; }
+
+.btn:hover:not(:disabled), .iconbtn:hover:not(:disabled) {
+  color: var(--bright);
+  border-color: var(--haze);
+  background: rgb(var(--index-rgb) / 0.06);
+}
+.btn:disabled, .iconbtn:disabled { opacity: .4; cursor: not-allowed; }
+
+/* The one control on a page that is the thing you came to do. Coral, filled, and
+   deliberately rare — two of these next to each other means neither is primary. */
+.btn-accent {
+  border-color: transparent;
+  background: var(--video);
+  color: var(--ink);
+  font-weight: 500;
+}
+.btn-accent:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--video);
+  color: var(--ink);
+  filter: brightness(1.08);
+}
+
+/* An active/selected control, wherever one is toggled on. */
+.btn-on, .iconbtn-on {
+  color: var(--video);
+  border-color: var(--video);
+  background: rgb(var(--video-rgb) / 0.09);
+}
+.btn-on:hover:not(:disabled), .iconbtn-on:hover:not(:disabled) {
+  color: var(--video);
+  border-color: var(--video);
+  background: rgb(var(--video-rgb) / 0.14);
+}
+
+/* Segmented groups: one border around the set, hairlines between. */
+.seg {
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.seg > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 100%;
+  padding: 0 9px;
+  color: var(--haze);
+  background: transparent;
+  transition: color .15s, background-color .15s;
+}
+.seg > button + button { border-left: 1px solid var(--rule); }
+.seg > button:hover { color: var(--bright); }
+.seg > button[aria-pressed="true"], .seg > button[data-on="true"] {
+  color: var(--video);
+  background: rgb(var(--video-rgb) / 0.11);
+}
+
+/* Tooltips, so an icon-only control still says what it does. Pure CSS: a title
+   attribute waits a second and renders in the OS's font, which on a projector is
+   both too slow and out of key with everything else here. */
+[data-tip] { position: relative; }
+[data-tip]::after {
+  content: attr(data-tip);
+  position: absolute;
+  top: calc(100% + 7px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 60;
+  padding: 4px 8px;
+  border-radius: 3px;
+  border: 1px solid var(--rule);
+  background: var(--ink-2);
+  color: var(--body);
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .12s ease-out;
+}
+[data-tip]:hover::after, [data-tip]:focus-visible::after { opacity: 1; }
+[data-tip-side="left"]::after { left: auto; right: 0; transform: none; }
+
 .pill {
   font-family: var(--font-mono), ui-monospace, monospace;
   font-size: 10px;

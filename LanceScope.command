@@ -82,7 +82,7 @@ open_browser() {
   # return until both servers answer, so wait for the web port rather than sleeping.
   for _ in $(seq 1 240); do
     if curl -sf "http://localhost:$WEB_PORT" >/dev/null 2>&1; then
-      open "http://localhost:$WEB_PORT/console"
+      open "http://localhost:$WEB_PORT"
       return
     fi
     sleep 1
