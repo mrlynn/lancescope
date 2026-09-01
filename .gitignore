@@ -18,3 +18,13 @@ packaging/build/
 web/out/
 desktop/src-tauri/target/
 desktop/src-tauri/gen/
+
+# Credentials, wherever somebody puts them. An app-specific password in the working
+# tree is one `git add -A` away from being in a public repository forever, and the
+# person who wrote the file is not the person who will run that command.
+.cred
+.cred.*
+.env
+.env.*
+*.p8
+*.p12

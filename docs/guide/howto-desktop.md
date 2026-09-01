@@ -58,6 +58,27 @@ immediately.
 
 ## Signing it
 
+Put the credentials in a file rather than typing them — a password typed into a
+terminal ends up in a history file. `.cred` in the repository root, which
+`.gitignore` covers:
+
+```bash
+APPLE_SIGNING_IDENTITY="Developer ID Application: Your Name (TEAMID)"
+APPLE_ID=you@example.com
+APPLE_TEAM_ID=TEAMID
+APPLE_PASSWORD=abcd-efgh-ijkl-mnop
+```
+
+Then:
+
+```bash
+./desktop/sign.sh
+```
+
+**Assignments, not commands.** A file holding a `store-credentials` command line is a
+note to yourself, not something the script can read, and it will say so rather than
+silently proceeding without credentials.
+
 Unsigned, macOS will refuse to open it on any machine but the one that built it. With
 an Apple Developer account:
 
