@@ -112,7 +112,7 @@ export default function ByteScale({ meter }: { meter: MeterState | null }) {
   return (
     <div
       className="fixed bottom-0 left-0 right-0 z-[60] border-t border-[var(--rule)]"
-      style={{ background: "rgba(23,21,19,0.97)", backdropFilter: "blur(10px)" }}
+      style={{ background: "var(--rail)", backdropFilter: "blur(10px)" }}
     >
       <div className="px-[var(--stage-pad)] pt-4 pb-6">
         <div className="flex items-center justify-between mb-1">

@@ -1,9 +1,10 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import Mark from "@/app/components/Mark";
+import Wordmark from "@/app/components/Wordmark";
+import ThemeToggle from "@/app/components/ThemeToggle";
 import { Cost, Empty } from "@/app/components/console/atoms";
 import {
   FragmentsTab, IndicesTab, RowsTab, SchemaTab, VersionsTab,
@@ -109,21 +110,21 @@ export default function Console() {
 
   return (
     <main className="relative z-10 min-h-screen px-[var(--stage-pad)] pt-7 pb-16">
-      <header className="flex items-center justify-between mb-8">
-        <div className="flex items-center gap-4">
+      <header className="flex items-center justify-between gap-4 flex-wrap mb-8">
+        <div className="flex items-center gap-4 min-w-0">
           <a href="https://lancedb.com" target="_blank" rel="noreferrer" title="LanceDB"
              className="shrink-0 opacity-90 hover:opacity-100 transition-opacity">
-            <Image src="/brand/lancedb-wordmark.png" alt="LanceDB" width={390} height={91}
-                   priority className="h-[19px] w-auto" />
+            <Wordmark />
           </a>
           <div className="w-px h-5 bg-[var(--rule)]" />
           <h1 className="text-[19px] font-bold tracking-tight text-[var(--bright)]">Console</h1>
-          <span className="eyebrow normal-case truncate max-w-[420px]" title={list?.root}>
+          <span className="eyebrow normal-case truncate min-w-0 hidden md:block" title={list?.root}>
             {list?.root ?? "…"}
           </span>
         </div>
         <div className="flex items-center gap-4">
           {cost && <Cost bytes={cost.bytes} iops={cost.iops} />}
+          <ThemeToggle />
           <Link href="/"
                 className="mono text-[10px] tracking-[0.14em] uppercase px-3 py-1.5 rounded-sm
                            border border-[var(--rule)] text-[var(--haze)]
@@ -135,8 +136,8 @@ export default function Console() {
 
       {listError && (
         <div className="mono text-[12px] px-3.5 py-3 rounded-sm mb-6"
-             style={{ background: "rgba(255,115,74,0.12)",
-                      border: "1px solid rgba(255,115,74,0.4)", color: "var(--video)" }}>
+             style={{ background: "rgb(var(--video-rgb) / 0.12)",
+                      border: "1px solid rgb(var(--video-rgb) / 0.4)", color: "var(--video)" }}>
           {listError}
         </div>
       )}
@@ -153,9 +154,9 @@ export default function Console() {
           </p>
         </div>
       ) : (
-        <div className="flex gap-6 items-start">
+        <div className="flex flex-col lg:flex-row gap-6 items-stretch lg:items-start">
           {/* ------------------------------------------------------------ rail */}
-          <nav className="w-[248px] shrink-0 space-y-1.5">
+          <nav className="w-full lg:w-[248px] shrink-0 space-y-1.5">
             <div className="eyebrow mb-3">
               {list ? `${list.tables.length} table${list.tables.length === 1 ? "" : "s"}` : "loading"}
             </div>
@@ -168,7 +169,7 @@ export default function Console() {
                   className="w-full text-left px-3.5 py-3 rounded-sm border transition-colors"
                   style={
                     on
-                      ? { borderColor: "var(--video)", background: "rgba(255,115,74,0.09)" }
+                      ? { borderColor: "var(--video)", background: "rgb(var(--video-rgb) / 0.09)" }
                       : { borderColor: "var(--rule)" }
                   }
                 >
@@ -211,7 +212,7 @@ export default function Console() {
                   style={
                     tab === t
                       ? { borderColor: "var(--video)", color: "var(--video)",
-                          background: "rgba(255,115,74,0.09)" }
+                          background: "rgb(var(--video-rgb) / 0.09)" }
                       : { borderColor: "var(--rule)", color: "var(--haze)" }
                   }
                 >
@@ -219,7 +220,8 @@ export default function Console() {
                 </button>
               ))}
               {current && (
-                <span className="eyebrow ml-2 normal-case">
+                <span className="eyebrow ml-2 normal-case truncate min-w-0 hidden xl:block"
+                      title={current.uri}>
                   {current.uri}
                 </span>
               )}

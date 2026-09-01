@@ -31,7 +31,7 @@ export function SchemaTab({ d }: { d: TableDetail }) {
             className="flex items-baseline gap-3 mono text-[12px] px-2.5 py-1.5 rounded-sm"
             style={
               f.blob
-                ? { background: "rgba(255,115,74,0.12)", border: "1px solid rgba(255,115,74,0.4)" }
+                ? { background: "rgb(var(--video-rgb) / 0.12)", border: "1px solid rgb(var(--video-rgb) / 0.4)" }
                 : { border: "1px solid transparent" }
             }
           >
@@ -42,7 +42,7 @@ export function SchemaTab({ d }: { d: TableDetail }) {
               {f.name}
             </span>
             <span className="text-[var(--haze)] truncate">{f.type}</span>
-            {!f.nullable && <span className="text-[10px] text-[#5c524c]">NOT NULL</span>}
+            {!f.nullable && <span className="text-[10px] text-[var(--dim)]">NOT NULL</span>}
             {f.blob && (
               <span className="ml-auto text-[10px] shrink-0" style={{ color: "var(--video)" }}>
                 BLOB — SIDE FILE
@@ -58,7 +58,7 @@ export function SchemaTab({ d }: { d: TableDetail }) {
           <div className="flex h-9 rounded-sm overflow-hidden border border-[var(--rule)]">
             <div style={{ width: `${Math.max(metaPct, 0.4)}%`, background: "var(--index)" }} />
             <div className="flex-1 grid place-items-center"
-                 style={{ background: "rgba(255,115,74,0.22)" }}>
+                 style={{ background: "rgb(var(--video-rgb) / 0.22)" }}>
               <span className="mono text-[11px]" style={{ color: "var(--video)" }}>
                 {fmtBytes(blob_bytes).value} {fmtBytes(blob_bytes).unit} in .blob side files
               </span>
@@ -98,7 +98,7 @@ function Stat({ label, value }: { label: string; value: string }) {
 // ----------------------------------------------------------------- versions
 
 function Delta({ n }: { n: number }) {
-  if (n === 0) return <span className="text-[#5c524c]">—</span>;
+  if (n === 0) return <span className="text-[var(--dim)]">—</span>;
   return (
     <span style={{ color: n > 0 ? "var(--index)" : "var(--video)" }}>
       {n > 0 ? "+" : ""}{n.toLocaleString()}
@@ -123,7 +123,7 @@ export function VersionsTab({ d }: { d: Versions }) {
         </thead>
         <tbody>
           {d.versions.map((v) => (
-            <tr key={v.version} style={{ borderBottom: "1px solid rgba(76,68,63,0.4)" }}>
+            <tr key={v.version} style={{ borderBottom: "1px solid var(--hairline)" }}>
               <Td>
                 <span style={{ color: v.version === d.current_version ? "var(--video)" : undefined }}>
                   {v.version}
@@ -216,9 +216,9 @@ export function IndicesTab({ d }: { d: Indices }) {
               style={
                 notable
                   ? { borderColor: "var(--video)", color: "var(--video)",
-                      background: "rgba(255,115,74,0.09)" }
+                      background: "rgb(var(--video-rgb) / 0.09)" }
                   : { borderColor: "var(--rule)",
-                      color: c.indexable ? "var(--haze)" : "#5c524c" }
+                      color: c.indexable ? "var(--haze)" : "var(--dim)" }
               }
             >
               {c.name}
@@ -267,7 +267,7 @@ export function FragmentsTab({ d }: { d: Fragments }) {
         </thead>
         <tbody>
           {d.fragments.map((f) => (
-            <tr key={f.id} style={{ borderBottom: "1px solid rgba(76,68,63,0.4)" }}>
+            <tr key={f.id} style={{ borderBottom: "1px solid var(--hairline)" }}>
               <Td>{f.id}</Td>
               <Td right>{f.rows.toLocaleString()}</Td>
               <Td right dim={f.deleted_rows === 0}>{f.deleted_rows}</Td>
@@ -303,7 +303,7 @@ export function FragmentsTab({ d }: { d: Fragments }) {
 // --------------------------------------------------------------------- rows
 
 function CellView({ v }: { v: Cell }) {
-  if (v === null) return <span className="text-[#5c524c]">null</span>;
+  if (v === null) return <span className="text-[var(--dim)]">null</span>;
   if (typeof v === "object") {
     if ("blob" in v) {
       const b = fmtBytes(v.size_bytes ?? 0);
@@ -351,7 +351,7 @@ export function RowsTab({
           placeholder="SQL predicate — track = 'Go' and year = 2025"
           className="flex-1 bg-[var(--ink-3)] border border-[var(--rule)] rounded-sm
                      px-3 py-2 mono text-[12px] text-[var(--bright)] outline-none
-                     focus:border-[var(--video)] transition-colors placeholder:text-[#5c524c]"
+                     focus:border-[var(--video)] transition-colors placeholder:text-[var(--dim)]"
         />
         <button
           type="submit"
@@ -366,7 +366,7 @@ export function RowsTab({
       {error && (
         <div
           className="mono text-[12px] px-3.5 py-3 rounded-sm mb-4"
-          style={{ background: "rgba(255,115,74,0.12)", border: "1px solid rgba(255,115,74,0.4)",
+          style={{ background: "rgb(var(--video-rgb) / 0.12)", border: "1px solid rgb(var(--video-rgb) / 0.4)",
                    color: "var(--video)" }}
         >
           {error}
@@ -397,7 +397,7 @@ export function RowsTab({
                   onClick={() => onExpand(c)}
                   className="mono text-[11px] px-2.5 py-1.5 rounded-sm border transition-colors"
                   style={{ borderColor: "var(--index)", color: "var(--index)",
-                           background: "rgba(217,160,91,0.09)" }}
+                           background: "rgb(var(--index-rgb) / 0.09)" }}
                 >
                   {c} ×
                 </button>
@@ -412,7 +412,7 @@ export function RowsTab({
               </thead>
               <tbody>
                 {d.rows.map((r, i) => (
-                  <tr key={i} style={{ borderBottom: "1px solid rgba(76,68,63,0.4)" }}>
+                  <tr key={i} style={{ borderBottom: "1px solid var(--hairline)" }}>
                     {d.columns.map((c) => (
                       <Td key={c} className="max-w-[280px] truncate">
                         <CellView v={r[c]} />
