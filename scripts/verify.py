@@ -333,6 +333,66 @@ def query_checks() -> None:
           f"{bad.status_code} and {missing.status_code}")
 
 
+def compare_checks() -> None:
+    """Two versions side by side, and the same query on both.
+
+    The corpus makes this testable for free: `moments` v1 has no inverted index and
+    v2 does, so a full-text query across that boundary is a real before and after.
+    """
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from server.catalog import Catalog
+    from server.routes import catalog as catalog_routes
+
+    app = FastAPI()
+    catalog_routes.bind(Catalog(LANCE))
+    app.include_router(catalog_routes.router)
+    api = TestClient(app)
+
+    r = api.get("/catalog/tables/moments/compare", params={"a": 1, "b": 2})
+    body = r.json()
+    check("two versions can be compared",
+          r.status_code == 200 and body["a"]["version"] == 1 and body["b"]["version"] == 2)
+
+    check("an index build shows up as an index build",
+          body["diff"]["indices"]["added"] == ["transcript_idx"]
+          and body["diff"]["rows"] == 0,
+          f"added {body['diff']['indices']['added']}, rows {body['diff']['rows']:+}")
+
+    # Both sides are read at pinned versions, and neither is the live table.
+    check("comparing costs a metadata read, not a scan",
+          body["read_bytes"] < 1_000_000, f"{body['read_bytes']:,} B")
+
+    check("the byte split says it describes the table, not the version",
+          "every version" in body["diff"]["on_disk_note"])
+
+    check("a version that is not there is a 400, not a 500",
+          api.get("/catalog/tables/moments/compare",
+                  params={"a": 1, "b": 999}).status_code == 400)
+
+    # The before/after that matters, and the one that would be thrown away by
+    # treating one side's refusal as a failure of the comparison.
+    q = api.post("/catalog/tables/moments/compare/query",
+                 json={"a": 1, "b": 2, "mode": "fts", "text": "kubernetes",
+                       "limit": 5}).json()
+    check("a query one version cannot answer is a result, not an error",
+          q["a"] is None and q["b"] is not None and bool(q["a_error"])
+          and "cannot answer" in q["verdict"],
+          q.get("verdict", "no verdict"))
+
+    check("a Lance error keeps the sentence and drops the source location",
+          ".rs:" not in q["a_error"], q["a_error"][:60])
+
+    both = api.post("/catalog/tables/moments/compare/query",
+                    json={"a": 1, "b": 2, "mode": "scan", "filter": "track = 'Go'",
+                          "limit": 5}).json()
+    check("a query both versions can answer is compared by bytes",
+          both["ran_both"] and both["a"]["returned"] == both["b"]["returned"] == 5
+          and "bytes_delta" in both,
+          f"{both['a']['read_bytes']:,} B then {both['b']['read_bytes']:,} B")
+
+
 def nl_filter_checks() -> None:
     """The translation surface, in the states that do not need a model.
 
@@ -698,6 +758,9 @@ def main() -> int:
 
     print("\n  query")
     query_checks()
+
+    print("\n  compare")
+    compare_checks()
 
     print("\n  findings")
     findings_checks()

@@ -70,11 +70,21 @@ class QueryError(ValueError):
     """A query that cannot be run, phrased for the person who wrote it."""
 
 
+# Lance appends where in its own source the error was raised — useful in a bug
+# report, noise on a screen: `..., /Users/runner/work/lance/.../query.rs:877:2`.
+_RUST_SITE = re.compile(r",?\s*/[^\s,]*\.rs:\d+:\d+\s*$")
+
+
 def _first_line(e: Exception) -> str:
-    """Lance errors carry a Rust backtrace. The first line is the part a person can
-    act on; the rest is where in Lance it happened."""
+    """The part of a Lance error a person can act on.
+
+    The first line, minus the source location Lance appends. What is left is the
+    sentence that says what is wrong with the query — which is the whole reason
+    these become 400s with a message rather than a generic failure.
+    """
     text = str(e).strip()
-    return (text.splitlines()[0] if text else type(e).__name__)[:200]
+    line = text.splitlines()[0] if text else type(e).__name__
+    return _RUST_SITE.sub("", line)[:200]
 
 
 # ------------------------------------------------------------------- capabilities

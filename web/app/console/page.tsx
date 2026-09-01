@@ -20,6 +20,7 @@ import {
 import {
   InsightsTab, PanelFindings, PartialAnalysis,
 } from "@/app/components/console/Findings";
+import { CompareTab } from "@/app/components/console/CompareTab";
 import { QueryTab } from "@/app/components/console/QueryTab";
 import { usePins, useRecents } from "@/app/lib/recents";
 import {
@@ -36,9 +37,11 @@ const TABS: { id: string; icon: IconName }[] = [
   { id: "fragments", icon: "fragments" },
   { id: "rows", icon: "rows" },
   { id: "query", icon: "search" },
+  { id: "compare", icon: "history" },
   { id: "insights", icon: "spark" },
 ];
-type Tab = "schema" | "versions" | "indices" | "fragments" | "rows" | "query" | "insights";
+type Tab = "schema" | "versions" | "indices" | "fragments" | "rows" | "query"
+  | "compare" | "insights";
 
 const PAGE = 25;
 
@@ -281,6 +284,9 @@ export default function Console() {
               {tab === "query" && (picked
                 ? <QueryTab key={picked} table={picked} />
                 : <Empty>pick a table to query</Empty>)}
+              {tab === "compare" && (picked
+                ? <CompareTab key={picked} table={picked} />
+                : <Empty>pick a table to compare</Empty>)}
               {tab === "insights" && <InsightsTab d={findings} />}
               {tab === "rows" && (
                 <RowsTab

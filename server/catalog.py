@@ -48,14 +48,20 @@ class IoDelta:
 class Handle:
     """One open dataset, owned by one scope, with its own IO counter."""
 
-    __slots__ = ("name", "uri", "scope", "pinned", "ds")
+    __slots__ = ("name", "uri", "scope", "pinned", "version", "ds")
 
-    def __init__(self, name: str, uri: str, scope: str, pinned: bool) -> None:
+    def __init__(self, name: str, uri: str, scope: str, pinned: bool,
+                 version: int | None = None) -> None:
         self.name = name
         self.uri = uri
         self.scope = scope
         self.pinned = pinned
-        self.ds = lance.dataset(uri)
+        # A pinned version is what makes comparing two of them coherent: a dataset
+        # written to while a comparison is on screen would otherwise produce a
+        # before from one moment and an after from another.
+        self.version = version
+        self.ds = (lance.dataset(uri) if version is None
+                   else lance.dataset(uri, version=version))
 
     def drain(self) -> IoDelta:
         """Bytes read through this handle since the last call, and reset.
@@ -71,7 +77,8 @@ class Handle:
         self.ds = None  # type: ignore[assignment]
 
     def __repr__(self) -> str:
-        return f"<Handle {self.scope}:{self.name}{' pinned' if self.pinned else ''}>"
+        at = f"@{self.version}" if self.version is not None else ""
+        return f"<Handle {self.scope}:{self.name}{at}{' pinned' if self.pinned else ''}>"
 
 
 class Catalog:
@@ -80,8 +87,10 @@ class Catalog:
     def __init__(self, root: Path | str, max_open: int = MAX_OPEN) -> None:
         self.root = Path(root)
         self.max_open = max_open
-        self._open: OrderedDict[tuple[str, str], Handle] = OrderedDict()
-        self._pinned: dict[tuple[str, str], Handle] = {}
+        # Keyed by (scope, name, version) — a version is a different dataset object
+        # with its own IO counter, and comparing two of them means holding both.
+        self._open: OrderedDict[tuple[str, str, int | None], Handle] = OrderedDict()
+        self._pinned: dict[tuple[str, str, int | None], Handle] = {}
 
     # ------------------------------------------------------------------ discovery
 
@@ -128,14 +137,15 @@ class Catalog:
 
     # ----------------------------------------------------------------------- open
 
-    def open(self, name: str, *, scope: str = "console", pin: bool = False) -> Handle:
+    def open(self, name: str, *, scope: str = "console", pin: bool = False,
+             version: int | None = None) -> Handle:
         """Open (or return the cached handle for) one table within one scope.
 
         Raises `FileNotFoundError` if there is no such table. Callers decide what
         that means for them — the server turns it into a 404 or a 503, and startup
         turns it into a warning rather than an exit.
         """
-        key = (scope, name)
+        key = (scope, name, version)
         if key in self._pinned:
             return self._pinned[key]
         if key in self._open:
@@ -146,7 +156,7 @@ class Catalog:
         if not _looks_like_uri(uri) and not Path(uri).is_dir():
             raise FileNotFoundError(uri)
 
-        handle = Handle(name=name, uri=uri, scope=scope, pinned=pin)
+        handle = Handle(name=name, uri=uri, scope=scope, pinned=pin, version=version)
         if pin:
             self._pinned[key] = handle
             return handle

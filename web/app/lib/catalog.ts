@@ -344,3 +344,69 @@ export const runQuery = (n: string, spec: QuerySpec) =>
 
 export const explainQuery = (n: string, spec: QuerySpec) =>
   post<{ plan: PlanReading; read_bytes: number }>(`/tables/${n}/query/explain`, spec);
+
+/* ----------------------------------------------------------------- compare */
+
+export type CompareSide = {
+  version: number;
+  timestamp: string | null;
+  operation: string | null;
+  rows: number;
+  fields: Record<string, string>;
+  indices: Record<string, { type: string; columns: string[]; fragments: number }>;
+  fragments: number;
+  small_files: number;
+  deleted_rows: number;
+  blob_bytes: number;
+  meta_bytes: number;
+};
+
+export type CompareDiff = {
+  schema: { added: string[]; removed: string[]; retyped: Record<string, { from: string; to: string }> };
+  indices: {
+    added: string[];
+    removed: string[];
+    changed: Record<string, { from: unknown; to: unknown }>;
+  };
+  rows: number;
+  fragments: number;
+  small_files: number;
+  deleted_rows: number;
+  blob_bytes: number;
+  meta_bytes: number;
+  unchanged: boolean;
+  on_disk_note: string;
+};
+
+export type Comparison = {
+  name: string;
+  a: CompareSide;
+  b: CompareSide;
+  diff: CompareDiff;
+  read_bytes: number;
+  read_iops: number;
+};
+
+/** Either side may have refused the query, and that is a result. A full-text search
+ *  against the version before its index existed cannot run at all — the most useful
+ *  before/after there is, and one thrown away by treating a refusal as an error. */
+export type QueryComparison = {
+  name: string;
+  versions: { a: number; b: number };
+  a: QueryResult | null;
+  b: QueryResult | null;
+  a_error: string | null;
+  b_error: string | null;
+  ran_both: boolean;
+  verdict?: string;
+  bytes_delta?: number;
+  ms_delta?: number;
+  paths_changed?: boolean;
+  bytes_ratio?: number | null;
+};
+
+export const compareVersions = (n: string, a: number, b: number) =>
+  get<Comparison>(`/tables/${n}/compare?a=${a}&b=${b}`);
+
+export const compareQuery = (n: string, a: number, b: number, spec: QuerySpec) =>
+  post<QueryComparison>(`/tables/${n}/compare/query`, { ...spec, a, b });
