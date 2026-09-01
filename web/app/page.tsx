@@ -1,7 +1,9 @@
 "use client";
 
+import Image from "next/image";
 import { useCallback, useEffect, useRef, useState } from "react";
 import ByteScale from "@/app/components/ByteScale";
+import Mark from "@/app/components/Mark";
 import Player from "@/app/components/Player";
 import Results from "@/app/components/Results";
 import SchemaView from "@/app/components/SchemaView";
@@ -133,8 +135,25 @@ export default function Page() {
 
   return (
     <main className="relative z-10 min-h-screen px-[var(--stage-pad)] pt-7 pb-[210px]">
-      <header className="flex items-baseline justify-between mb-8">
-        <div className="flex items-baseline gap-4">
+      <header className="flex items-center justify-between mb-8">
+        <div className="flex items-center gap-4">
+          <a
+            href="https://lancedb.com"
+            target="_blank"
+            rel="noreferrer"
+            title="LanceDB"
+            className="shrink-0 opacity-90 hover:opacity-100 transition-opacity"
+          >
+            <Image
+              src="/brand/lancedb-wordmark.png"
+              alt="LanceDB"
+              width={390}
+              height={91}
+              priority
+              className="h-[19px] w-auto"
+            />
+          </a>
+          <div className="w-px h-5 bg-[var(--rule)]" />
           <h1 className="text-[19px] font-bold tracking-tight text-[var(--bright)]">
             Ctrl&#8209;F for Video
           </h1>
@@ -293,6 +312,7 @@ export default function Page() {
 
       {!hits.length && !busy && (
         <div className="mt-24 text-center">
+          <Mark size={34} className="mx-auto mb-5 text-[var(--rule)]" />
           <p className="text-[15px] text-[var(--haze)] max-w-lg mx-auto leading-relaxed">
             No moments loaded. Build the corpus with{" "}
             <span className="mono text-[var(--bright)]">make ingest</span>, then reload.
