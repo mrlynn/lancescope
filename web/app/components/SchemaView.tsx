@@ -28,7 +28,7 @@ function Table({ name, rows, fields, note }: {
             className="flex items-baseline gap-3 mono text-[12px] px-2.5 py-1.5 rounded-sm"
             style={
               f.blob
-                ? { background: "rgba(255,115,74,0.12)", border: "1px solid rgba(255,115,74,0.4)" }
+                ? { background: "rgb(var(--video-rgb) / 0.12)", border: "1px solid rgb(var(--video-rgb) / 0.4)" }
                 : undefined
             }
           >
@@ -74,7 +74,7 @@ export default function SchemaView({ onClose }: { onClose: () => void }) {
     <div
       // pb clears the byte rail, which stays visible on top of this view.
       className="fixed inset-0 z-[58] overflow-y-auto px-[var(--stage-pad)] pt-10 pb-[250px]"
-      style={{ background: "rgba(12,11,10,0.97)" }}
+      style={{ background: "var(--scrim)" }}
       onClick={onClose}
     >
       <div className="max-w-[1180px] mx-auto" onClick={(e) => e.stopPropagation()}>
@@ -117,7 +117,7 @@ export default function SchemaView({ onClose }: { onClose: () => void }) {
             />
             <div
               className="flex-1 grid place-items-center"
-              style={{ background: "rgba(255,115,74,0.22)" }}
+              style={{ background: "rgb(var(--video-rgb) / 0.22)" }}
             >
               <span className="mono text-[11px]" style={{ color: "var(--video)" }}>
                 {blob.value} {blob.unit} of video, in .blob side files

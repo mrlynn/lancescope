@@ -62,10 +62,10 @@ export default function SettingsPage() {
 }
 
 function Banner({ tone, children }: { tone: "video" | "index"; children: React.ReactNode }) {
-  const c = tone === "video" ? "255,115,74" : "217,160,91";
   return (
     <div className="mono text-[12px] px-3.5 py-3 rounded-sm mb-6"
-         style={{ background: `rgba(${c},0.12)`, border: `1px solid rgba(${c},0.4)`,
+         style={{ background: `rgb(var(--${tone}-rgb) / 0.12)`,
+                  border: `1px solid rgb(var(--${tone}-rgb) / 0.4)`,
                   color: `var(--${tone})` }}>
       {children}
     </div>
@@ -122,7 +122,7 @@ function Connections({ state, onChange, onError }: {
               <div key={c.id}
                    className="flex items-start gap-4 px-4 py-3 rounded-sm border"
                    style={c.active
-                     ? { borderColor: "var(--video)", background: "rgba(255,115,74,0.09)" }
+                     ? { borderColor: "var(--video)", background: "rgb(var(--video-rgb) / 0.09)" }
                      : { borderColor: "var(--rule)" }}>
                 <div className="min-w-0 flex-1">
                   <div className="mono text-[13px]"
@@ -378,7 +378,7 @@ function Intelligence({ intel, probe, onProbe, onSaved, onError }: {
 function Status({ on, title, detail }: { on: boolean; title: string; detail: string }) {
   return (
     <div className="px-4 py-3 rounded-sm border"
-         style={{ borderColor: on ? "rgba(217,160,91,0.4)" : "var(--rule)" }}>
+         style={{ borderColor: on ? "rgb(var(--index-rgb) / 0.4)" : "var(--rule)" }}>
       <div className="mono text-[12px]" style={{ color: on ? "var(--index)" : "var(--haze)" }}>
         {on ? "●" : "○"} {title}
       </div>

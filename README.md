@@ -108,6 +108,13 @@ make ingest LIMIT=36      # download, transcode, segment, embed, build, verify
 make demo                 # API on :8000, UI on :3000
 ```
 
+Once set up, **double-click `LanceScope.command`** in Finder instead — it runs the
+same thing, checks the handful of conditions that otherwise fail silently, and opens
+the console for you. Closing the window stops both servers.
+
+Both surfaces have a light theme; the toggle is in the header, `T` from the keyboard,
+and your choice is remembered. It follows the OS until you pick one.
+
 Requires `ffmpeg` on PATH. Everything else lives in the venv. Once ingested the demo
 runs **fully offline** — no network, no services, no containers.
 
@@ -125,6 +132,7 @@ The interface is driven from the keyboard so you never hunt for a mouse:
 | `↵` | open the first result |
 | `S` | the schema, read live off disk — this is the Act 3 slide |
 | `R` | reset the byte instrument |
+| `T` | light / dark — dark is the default, and the right one for a projector |
 | `Esc` | close whatever is open |
 
 ### The ten minutes

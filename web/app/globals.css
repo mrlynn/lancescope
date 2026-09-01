@@ -4,6 +4,13 @@
    Palette lifted from lancedb.com: a warm near-black, warm greys, coral accent.
    Deliberately no cool tones anywhere — the whole instrument stays in one
    temperature, which is what keeps it from reading as a generic dashboard.
+
+   Dark is the identity and the default. Light is an override, for reading
+   tables in a lit room rather than projecting them.
+
+   Accent tints are expressed as `rgb(var(--video-rgb) / <alpha>)` rather than as
+   a token per opacity. There were eight of those hardcoded across the app and
+   every one of them would have stayed dark.
    --------------------------------------------------------------------------- */
 :root {
   --ink:    #171513;   /* canvas */
@@ -13,11 +20,80 @@
   --haze:   #847770;   /* de-emphasised text */
   --body:   #ad9e95;   /* body copy */
   --bright: #f4ebe8;   /* headings, numbers */
+  --dim:    #5c524c;   /* the quietest text that is still text */
 
   --index:  #d9a05b;   /* what finding it costs */
   --video:  #ff734a;   /* what playing it costs — LanceDB coral */
+  --index-rgb: 217 160 91;
+  --video-rgb: 255 115 74;
+
+  --hairline: rgb(76 68 63 / 0.4);      /* table row separators */
+  --scrim:    rgb(12 11 10 / 0.97);     /* full-screen overlays */
+  --scrim-2:  rgb(12 11 10 / 0.94);
+  --rail:     rgb(23 21 19 / 0.97);     /* the byte instrument's own ground */
+  --rail-2:   rgb(23 21 19 / 0.9);      /* chips over a thumbnail */
+  --dots:     #2e2724;                  /* the ambient field */
+  --scrollbar: #332c28;
 
   --stage-pad: 34px;
+}
+
+/* The light palette, defined twice on purpose: once for "the OS says light and
+   nobody has chosen otherwise", once for an explicit choice. CSS cannot share one
+   declaration block between a media query and an attribute selector, and a
+   preprocessor for fifteen lines would cost more than it saves. Keep them in
+   step — changing one without the other is the bug this comment exists to catch. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --ink:    #faf7f5;
+    --ink-2:  #ffffff;
+    --ink-3:  #f2ede9;
+    --rule:   #ddd2ca;
+    --haze:   #8a7d74;
+    --body:   #4a423c;
+    --bright: #1a1614;
+    --dim:    #a89a90;
+
+    /* Both accents are darkened for a light ground. The stage values sit at about
+       2:1 against white, which is unreadable; these clear 4.5:1 while staying
+       recognisably the same two colours. */
+    --index:  #9c5f14;
+    --video:  #cc3d10;
+    --index-rgb: 156 95 20;
+    --video-rgb: 204 61 16;
+
+    --hairline: rgb(74 66 60 / 0.16);
+    --scrim:    rgb(250 247 245 / 0.97);
+    --scrim-2:  rgb(250 247 245 / 0.94);
+    --rail:     rgb(255 255 255 / 0.97);
+    --rail-2:   rgb(255 255 255 / 0.92);
+    --dots:     #e7ded7;
+    --scrollbar: #ded4cc;
+  }
+}
+
+:root[data-theme="light"] {
+  --ink:    #faf7f5;
+  --ink-2:  #ffffff;
+  --ink-3:  #f2ede9;
+  --rule:   #ddd2ca;
+  --haze:   #8a7d74;
+  --body:   #4a423c;
+  --bright: #1a1614;
+  --dim:    #a89a90;
+
+  --index:  #9c5f14;
+  --video:  #cc3d10;
+  --index-rgb: 156 95 20;
+  --video-rgb: 204 61 16;
+
+  --hairline: rgb(74 66 60 / 0.16);
+  --scrim:    rgb(250 247 245 / 0.97);
+  --scrim-2:  rgb(250 247 245 / 0.94);
+  --rail:     rgb(255 255 255 / 0.97);
+  --rail-2:   rgb(255 255 255 / 0.92);
+  --dots:     #e7ded7;
+  --scrollbar: #ded4cc;
 }
 
 * { -webkit-font-smoothing: antialiased; }
@@ -37,7 +113,7 @@ body::before {
   inset: 0;
   pointer-events: none;
   z-index: 0;
-  background-image: radial-gradient(circle at 1px 1px, #2e2724 1px, transparent 0);
+  background-image: radial-gradient(circle at 1px 1px, var(--dots) 1px, transparent 0);
   background-size: 26px 26px;
   opacity: 0.55;
   mask-image: radial-gradient(ellipse 120% 80% at 50% 0%, #000 20%, transparent 75%);
@@ -84,11 +160,11 @@ body::before {
   font-size: 12px;
   padding: 7px 10px;
   border-radius: 2px;
-  background: var(--ink);
+  background: var(--ink-3);
   border: 1px solid var(--rule);
   color: var(--bright);
 }
-.inp::placeholder { color: #5c524c; }
+.inp::placeholder { color: var(--dim); }
 .inp:focus { border-color: var(--haze); }
 
 /* Focus that survives a projector. */
@@ -114,5 +190,5 @@ body::before {
 }
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-thumb { background: #332c28; border-radius: 6px; }
+::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
