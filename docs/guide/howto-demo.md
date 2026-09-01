@@ -30,6 +30,11 @@ make demo      # production build, API warmed before the browser can reach it
 make dev       # hot reload, for building rather than presenting
 ```
 
+After a `git pull`, run `make setup` before either. A pull updates `package.json` and
+`uv.lock`; it does not install anything, so a newly added dependency arrives declared
+and absent. The launcher checks for this and stops with a sentence rather than
+failing in the middle of a production build.
+
 The demo is at `/demo`, the console at `/console`.
 
 ## Check the claims

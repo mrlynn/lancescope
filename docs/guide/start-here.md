@@ -16,6 +16,9 @@ make setup     # python deps and web deps
 make dev       # API on :8000, console on :3000
 ```
 
+Run `make setup` again after any `git pull`. A pull updates the dependency manifests
+without installing anything.
+
 Open **http://localhost:3000/console**. On a machine with nothing configured it will
 tell you there is no database yet, and point at settings — which is where to go next.
 
