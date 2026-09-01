@@ -158,3 +158,38 @@ export const getCapabilities = () => intel<Capabilities>("/capabilities");
 
 export const runSelfTest = (role = "fast") =>
   intel<SelfTest>(`/selftest?role=${role}`, { method: "POST" });
+
+/* --------------------------------------------------------------- nl -> filter */
+
+/** A translation is a draft: the predicate is returned for the user to read, edit
+ *  and run — never applied for them. `matched_rows` is the evidence that says
+ *  whether it understood the question, and it costs one metadata read. */
+export type FilterDraft = {
+  ok: boolean;
+  question?: string;
+  filter?: string;
+  explanation?: string;
+  confidence?: "high" | "medium" | "low" | "refuse";
+  valid?: boolean | null;
+  matched_rows?: number | null;
+  total_rows?: number | null;
+  error?: string | null;
+  setup_hint?: string;
+  columns?: string[];
+  faceted_columns?: string[];
+  values_included?: boolean;
+  context_read_bytes?: number;
+  dry_run_read_bytes?: number;
+  model?: string;
+  provider?: string;
+  cost_usd?: number | null;
+  ms?: number;
+  usage?: { input_tokens: number; output_tokens: number; cache_read_tokens: number };
+};
+
+export const askForFilter = (table: string, question: string, includeValues?: boolean) =>
+  intel<FilterDraft>(`/tables/${table}/filter`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ question, include_values: includeValues ?? null }),
+  });
