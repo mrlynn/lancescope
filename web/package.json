@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "export": "NEXT_OUTPUT=export next build"
   },
   "dependencies": {
     "highlight.js": "^11.12.0",

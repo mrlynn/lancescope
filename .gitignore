@@ -10,3 +10,9 @@ __pycache__/
 web/node_modules/
 web/.next/
 web/out/
+
+# Desktop build outputs. The sidecar is 428 MB and the static export is derived
+# from the source beside it; both are rebuilt by `make sidecar`.
+packaging/dist/
+packaging/build/
+web/out/
