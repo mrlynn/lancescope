@@ -187,8 +187,68 @@ APPLE_SIGNING_IDENTITY="$APPLE_SIGNING_IDENTITY" \
 APP="desktop/src-tauri/target/release/bundle/macos/LanceScope.app"
 DMG=$(ls desktop/src-tauri/target/release/bundle/dmg/*.dmg | head -1)
 
+# Tauri signs the app it builds. It does not sign what we put inside it, and the
+# sidecar is a PyInstaller bundle carrying 81 Mach-O files — every compiled
+# extension module in Lance, PyArrow, aiohttp and the rest. PyInstaller ad-hoc signs
+# those, and an ad-hoc signature is a real signature with no identity behind it: no
+# team, no timestamp, no hardened runtime.
+#
+# Apple requires Developer ID on every Mach-O in the bundle, so this signs them
+# deepest-first and then re-signs the app around them, because signing a container
+# seals what it holds and doing it in the other order would invalidate the outer
+# seal immediately.
+echo "==> signing the sidecar's own binaries"
+machos=$(find "$APP" -type f -print0 | xargs -0 file 2>/dev/null \
+         | grep "Mach-O" | cut -d: -f1 | awk '{print length"\t"$0}' | sort -rn | cut -f2-)
+count=0
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  codesign --force --options runtime --timestamp \
+    --sign "$APPLE_SIGNING_IDENTITY" "$f" >/dev/null 2>&1 || {
+      echo "    could not sign $f"; exit 1; }
+  count=$((count + 1))
+done <<EOF
+$machos
+EOF
+echo "    signed $count binaries"
+
+codesign --force --options runtime --timestamp \
+  --entitlements desktop/src-tauri/entitlements.plist \
+  --sign "$APPLE_SIGNING_IDENTITY" "$APP"
+
 echo "==> verifying the signature before spending a notarisation round trip"
 codesign --verify --deep --strict --verbose=2 "$APP"
+
+# The check above is not enough on its own, and this is the lesson of a four-hour
+# wait: `--deep --strict` asks whether nested code is *validly* signed, and ad-hoc
+# is valid. It never asks who signed it. It passed on a bundle whose every nested
+# binary was anonymous, so the bundle went to Apple looking fine from here.
+#
+# This asks the question that was actually meant: does every Mach-O carry our team,
+# and is the hardened runtime on. A control app built to mirror this bundle — same
+# shape, executables under Resources, but deep-signed — notarised in thirty seconds,
+# which is how the difference was found.
+echo "==> checking every binary carries the identity, not just a signature"
+bad=0
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  desc=$(codesign -dv --verbose=4 "$f" 2>&1)
+  case "$desc" in
+    *"TeamIdentifier=$APPLE_TEAM_ID"*) ;;
+    *) echo "    not signed by $APPLE_TEAM_ID: ${f#"$APP/"}"; bad=$((bad + 1)); continue ;;
+  esac
+  case "$desc" in
+    *runtime*) ;;
+    *) echo "    hardened runtime missing: ${f#"$APP/"}"; bad=$((bad + 1)) ;;
+  esac
+done <<EOF
+$machos
+EOF
+if [ "$bad" -gt 0 ]; then
+  echo "    $bad binaries would have been rejected; not submitting" >&2
+  exit 1
+fi
+echo "    all $count binaries signed by $APPLE_TEAM_ID with the hardened runtime"
 # Gatekeeper's own answer, which is the one that matters. It will say "rejected"
 # until the app is notarised and stapled; anything else here is a real problem.
 spctl --assess --type execute --verbose=4 "$APP" || true
