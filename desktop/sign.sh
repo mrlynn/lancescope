@@ -105,7 +105,7 @@ security find-identity -v -p codesigning | grep -F "$APPLE_SIGNING_IDENTITY" \
 # puts them in the keychain instead of in a shell history file.
 if [ -n "${NOTARY_PROFILE:-}" ]; then
   echo "==> checking the notarisation credentials (keychain profile $NOTARY_PROFILE)"
-  xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" --limit 1 >/dev/null \
+  xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null \
     || { echo "that keychain profile does not authenticate. Recreate it with:"
          echo "  xcrun notarytool store-credentials $NOTARY_PROFILE \\"
          echo "    --apple-id you@example.com --team-id TEAMID --password <app-specific>"
@@ -129,24 +129,35 @@ elif [ -n "${APPLE_ID:-}" ]; then
   esac
 
   echo "==> checking the notarisation credentials"
-  if ! xcrun notarytool history \
+  # Apple's own message, never a guess in place of it. An earlier version of this
+  # swallowed the output and printed three likely causes instead — and then a
+  # `--limit` flag this Xcode does not accept produced a usage error, which was
+  # reported as "Apple rejected those credentials" for credentials Apple had never
+  # been asked about. A tool that invents an explanation is worse than one that
+  # says nothing.
+  if ! reply=$(xcrun notarytool history \
         --apple-id "$APPLE_ID" \
         --team-id "${APPLE_TEAM_ID:?set APPLE_TEAM_ID}" \
-        --password "${APPLE_PASSWORD:?set APPLE_PASSWORD}" \
-        --limit 1 >/dev/null 2>&1; then
+        --password "${APPLE_PASSWORD:?set APPLE_PASSWORD}" 2>&1); then
     echo
-    echo "Apple rejected those credentials. The three usual reasons:"
+    # Redacted, because this goes on a terminal somebody may paste from.
+    echo "${reply//$APPLE_PASSWORD/[redacted]}" | head -20
     echo
-    echo "  1. APPLE_PASSWORD is your Apple ID password. It has to be an"
-    echo "     app-specific password, generated at appleid.apple.com under"
-    echo "     Sign-In and Security. It looks like abcd-efgh-ijkl-mnop."
+    case "$reply" in
+      *"Invalid credentials"*|*401*)
+        echo "That is an authentication failure. Usually one of:"
+        echo "  - APPLE_PASSWORD is an Apple ID password rather than an"
+        echo "    app-specific one from appleid.apple.com."
+        echo "  - $APPLE_ID is not the address the developer account uses."
+        echo "  - that address is not on team $APPLE_TEAM_ID."
+        ;;
+      *"Unknown option"*|*Usage:*)
+        echo "That is this script calling notarytool wrongly, not a problem with"
+        echo "your credentials. Please report it."
+        ;;
+    esac
     echo
-    echo "  2. APPLE_ID is not the address the developer account belongs to."
-    echo "     It is currently: $APPLE_ID"
-    echo
-    echo "  3. That Apple ID is not a member of team $APPLE_TEAM_ID."
-    echo
-    echo "Nothing was built. Fix the credentials and run this again."
+    echo "Nothing was built."
     exit 1
   fi
   echo "    authenticated as $APPLE_ID"
