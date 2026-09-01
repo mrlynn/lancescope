@@ -20,9 +20,8 @@ import lance
 import lancedb
 import numpy as np
 import pyarrow as pa
-from lance import blob_array, blob_field
-
 from config import EMBED_DIM, LANCE, WORK
+from lance import blob_array, blob_field
 
 SEGMENTS_URI = str(LANCE / "segments.lance")
 

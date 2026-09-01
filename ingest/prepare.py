@@ -17,8 +17,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-from PIL import Image
-
 from config import (
     FRAME_INTERVAL_S,
     MAX_SEGMENT_SECONDS,
@@ -30,6 +28,7 @@ from config import (
     TRANSCRIPT_WINDOW_S,
     WORK,
 )
+from PIL import Image
 
 
 def ffmpeg(args: list[str]) -> None:
@@ -142,9 +141,11 @@ def extract_frames(video: Path, outdir: Path) -> list[dict]:
 
 # ----------------------------------------------------------------------- transcripts
 
-VTT_TIME = re.compile(
-    r"(\d{2}):(\d{2}):(\d{2})[.,](\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2})[.,](\d{3})"
-)
+# WebVTT allows both HH:MM:SS.mmm and MM:SS.mmm. FOSDEM emits the short form, which
+# an HH:MM:SS-only pattern silently skips — you get a corpus with zero transcripts
+# and no error to tell you why.
+VTT_STAMP = r"(?:(\d{1,3}):)?(\d{1,2}):(\d{2})[.,](\d{3})"
+VTT_TIME = re.compile(VTT_STAMP + r"\s*-->\s*" + VTT_STAMP)
 VTT_TAG = re.compile(r"<[^>]+>")
 
 
@@ -164,7 +165,7 @@ def parse_vtt(path: Path) -> list[Cue]:
         if not m:
             i += 1
             continue
-        h1, m1, s1, ms1, h2, m2, s2, ms2 = (int(x) for x in m.groups())
+        h1, m1, s1, ms1, h2, m2, s2, ms2 = (int(x or 0) for x in m.groups())
         start = h1 * 3600 + m1 * 60 + s1 + ms1 / 1000
         end = h2 * 3600 + m2 * 60 + s2 + ms2 / 1000
         i += 1
@@ -300,7 +301,7 @@ def main() -> int:
     for d in talks:
         try:
             man = prepare_talk(d)
-        except Exception as exc:                      # noqa: BLE001 - report and continue
+        except Exception as exc:
             print(f"  ! {d.name}: {exc}")
             continue
         if not man:

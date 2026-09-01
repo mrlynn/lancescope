@@ -24,8 +24,8 @@ from pydantic import BaseModel
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "ingest"))
 
-import embed  # noqa: E402
-from config import LANCE  # noqa: E402
+import embed
+from config import LANCE
 
 MOMENTS_URI = str(LANCE / "moments.lance")
 SEGMENTS_URI = str(LANCE / "segments.lance")
@@ -284,7 +284,7 @@ def _blob(talk_id: str, segment_idx: int):
         _, stale = cache.popitem(last=False)
         try:
             stale.close()
-        except Exception:                                   # noqa: BLE001
+        except Exception:
             pass
     return cache[key]
 
@@ -359,6 +359,30 @@ async def meter_stream() -> StreamingResponse:
 async def health() -> dict:
     return {"ok": STATE.moments is not None, "moments": STATE.n_moments,
             "talks": STATE.n_talks}
+
+
+@app.get("/sample")
+async def sample(n: int = 40) -> JSONResponse:
+    """A spread of moments from across the corpus, for the opening screen.
+
+    Scale is easier to feel than to read: forty real frames from forty different
+    talks says more than a row of counters does."""
+    async with LOCK:
+        total = STATE.moments.count_rows()
+        if not total:
+            return JSONResponse({"hits": []})
+        step = max(1, total // max(n, 1))
+        idx = list(range(0, total, step))[:n]
+        t = STATE.moments.take(idx, columns=COLUMNS).to_pylist()
+        drain_index()
+        for h in t:
+            raw = h.pop("thumb_jpeg", None)
+            h["thumb"] = (
+                "data:image/jpeg;base64," + base64.b64encode(bytes(raw)).decode()
+                if raw else None
+            )
+            h["video_url"] = f"/video/{h['talk_id']}/{h['segment_idx']}"
+        return JSONResponse({"hits": t})
 
 
 @app.get("/tracks")

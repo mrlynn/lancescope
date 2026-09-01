@@ -13,8 +13,8 @@ import lance
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "ingest"))
 
-import embed  # noqa: E402
-from config import LANCE  # noqa: E402
+import embed
+from config import LANCE
 
 QUERIES = [
     ("a diagram with boxes and arrows", "vector"),

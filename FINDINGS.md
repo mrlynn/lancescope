@@ -66,3 +66,52 @@ With ~150 talks (~35 GB of video):
 
 Framed for stage: *35 GB of video. That question moved a few megabytes to find the
 answer and 16 to play it.* No cache warming required, no caveats to swallow.
+
+---
+
+# Pipeline failures worth knowing about
+
+These all produced a corpus that *looked* fine and was quietly broken. Each one is
+now guarded in code; they are written down because every one of them would have
+surfaced on stage instead.
+
+### WebVTT has two timestamp formats and FOSDEM uses the short one
+
+`HH:MM:SS.mmm` and `MM:SS.mmm` are both legal. A pattern that only matches the long
+form parses **zero cues** from a valid subtitle file and raises nothing — you get a
+corpus with no transcripts, no full-text search, and no error explaining why.
+
+### "The file exists" is not "the download finished"
+
+A transcode killed part-way leaves a plausible MP4 with no `moov` atom. Resume logic
+that checks for the filename skips it forever, and the failure only appears later as
+an ffprobe error during frame extraction. Resume now requires the video to *decode*
+and its metadata sidecar to be present, and deletes anything else so it is refetched.
+
+### The default mirror is the slow one
+
+`video.fosdem.org` redirects round-robin across mirrors. Measured on the same file:
+
+| mirror | throughput |
+|---|---|
+| mirror.as35701.net | 8.1 MB/s |
+| ftp.fau.de | 6.0 MB/s |
+| ftp2.osuosl.org | 0.9 MB/s |
+| mirrors.dotsrc.org | 0.03 MB/s |
+
+Nine times the speed for picking a host. The downloader asks a fast mirror directly
+and falls back down the list.
+
+### Three copies of the corpus will fill a laptop
+
+Every talk exists as the download, the segment files, and the blob column. FOSDEM
+publishes 1080p at ~3 Mbps — 546 MB per talk, so 36 talks would want ~59 GB across
+the three. Transcoding to 720p at 700 kbps on the way in (slide text stays sharp;
+checked against 10pt footnotes) and deleting each talk's segments as its blobs are
+written keeps the whole thing near 6 GB.
+
+### Scene-change thresholds do not transfer between corpora
+
+A threshold tuned on one conference's framing produced 13 keyframes for a 52-minute
+talk on another. Measure the delta distribution on the actual corpus and pick from
+the percentiles rather than carrying a constant across sources.

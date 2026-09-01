@@ -25,8 +25,12 @@ TRANSCODE_BITRATE = "700k"
 # Keyframes. Slide-heavy talks change slowly, so a coarse sample plus scene detection
 # gets us the slide transitions without drowning in near-duplicates.
 FRAME_INTERVAL_S = 3.0
-SCENE_THRESHOLD = 0.02      # mean abs pixel delta (0-1) that counts as a new scene
-                            # (p85 of observed deltas; ~3 moments/min on slide talks)
+# Mean absolute pixel delta (0-1) that counts as a new scene. Measured on the actual
+# corpus rather than carried over: FOSDEM's fixed slide-plus-inset framing produces
+# deltas about 2.4x smaller than a full-frame slide deck, and a threshold tuned
+# elsewhere silently yields a handful of keyframes per talk. 0.006 sits just above
+# p75 here and gives ~4 moments a minute.
+SCENE_THRESHOLD = 0.006
 THUMB_WIDTH = 384
 
 # SigLIP: image+text in one embedding space, small enough to run on stage.

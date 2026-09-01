@@ -30,10 +30,24 @@ export default function Page() {
   const [busy, setBusy] = useState(false);
   const [picked, setPicked] = useState<Hit | null>(null);
   const [showSchema, setShowSchema] = useState(false);
+  const [browsing, setBrowsing] = useState(false);
   const [offline, setOffline] = useState(false);
   const [tracks, setTracks] = useState<string[]>([]);
   const [track, setTrack] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Open on a wall of real moments rather than an empty page.
+  useEffect(() => {
+    fetch("/api/sample?n=40")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.hits?.length) {
+          setHits(d.hits);
+          setBrowsing(true);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     fetch("/api/tracks")
@@ -73,6 +87,7 @@ export default function Page() {
     try {
       const res = await search({ q: query, mode: m, limit: 24, track: t ?? null });
       setHits(res.hits);
+      setBrowsing(false);
       setMeta(res);
       setMeter(res.meter);
       setOffline(false);
@@ -238,7 +253,17 @@ export default function Page() {
         </div>
       )}
 
-      {meta && !busy && (
+      {browsing && !busy && (
+        <div className="mono text-[11px] mb-5 text-[var(--haze)]">
+          {meter
+            ? `${meter.corpus_moments.toLocaleString()} moments across ${meter.corpus_talks} talks — a sample`
+            : "loading the corpus"}
+          <span className="mx-3 text-[var(--rule)]">&middot;</span>
+          press 1, or describe something you want to see
+        </div>
+      )}
+
+      {meta && !busy && !browsing && (
         <div className="mono text-[11px] mb-5 text-[var(--haze)]">
           {hits.length} moments in {meta.ms}ms
           {track && (
@@ -269,8 +294,8 @@ export default function Page() {
       {!hits.length && !busy && (
         <div className="mt-24 text-center">
           <p className="text-[15px] text-[var(--haze)] max-w-lg mx-auto leading-relaxed">
-            Describe a moment and it will be found by what is on screen, not by anything
-            anyone typed about it. Press 1 to start.
+            No moments loaded. Build the corpus with{" "}
+            <span className="mono text-[var(--bright)]">make ingest</span>, then reload.
           </p>
         </div>
       )}

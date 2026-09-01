@@ -32,3 +32,9 @@ dev = ["ruff>=0.9"]
 
 [tool.ruff]
 line-length = 100
+
+[tool.ruff.lint.per-file-ignores]
+# The server and scripts put ingest/ on sys.path before importing from it, so those
+# imports genuinely cannot come first.
+"server/main.py" = ["E402"]
+"scripts/*.py" = ["E402"]

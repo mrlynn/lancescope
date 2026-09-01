@@ -11,9 +11,8 @@ import sys
 
 import numpy as np
 import torch
-from PIL import Image
-
 from config import EMBED_DIM, MODEL_NAME, MODEL_PRETRAINED, WORK
+from PIL import Image
 
 _model = None
 _preprocess = None

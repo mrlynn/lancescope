@@ -13,10 +13,10 @@ import argparse
 import concurrent.futures as cf
 import json
 import re
-import threading
 import shutil
 import subprocess
 import sys
+import threading
 import urllib.request
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -33,7 +33,6 @@ MIRRORS = [
     "https://mirror.as35701.net/video.fosdem.org",
     "https://ftp.fau.de/fosdem",
     "https://ftp2.osuosl.org/pub/fosdem",
-    VIDEO_ROOT,
 ]
 
 # Refuse to keep going once the disk gets tight; a filled disk is a worse outcome
@@ -159,6 +158,23 @@ def _has_encoder(name: str) -> bool:
     return name in out
 
 
+def is_complete(dest: Path) -> bool:
+    """A talk counts as downloaded only if the video decodes and metadata is there.
+
+    Existence is not enough: a transcode killed part-way leaves a plausible-looking
+    MP4 with no moov atom.
+    """
+    video, meta = dest / "video.mp4", dest / "meta.json"
+    if not (video.exists() and meta.exists() and video.stat().st_size > 1_000_000):
+        return False
+    probe = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+         "-of", "default=nw=1:nk=1", str(video)],
+        capture_output=True, text=True,
+    )
+    return probe.returncode == 0 and probe.stdout.strip() not in ("", "N/A")
+
+
 def free_gb() -> float:
     return shutil.disk_usage(RAW).free / 1e9
 
@@ -171,19 +187,27 @@ def say(msg: str) -> None:
         print(msg, flush=True)
 
 
-def download(meta: dict) -> bool:
+def download(meta: dict, shard: int = 0) -> bool:
     dest = RAW / meta["talk_id"]
     video = dest / "video.mp4"
     label = f"{meta['track'][:18]:18s} {meta['title'][:48]}"
-    if video.exists() and video.stat().st_size > 1_000_000:
+    if is_complete(dest):
         say(f"  =  {label}")
         return True
+    # Anything half-written from an interrupted run has to go, or we resume onto a
+    # file ffprobe cannot open and only find out during prepare.
+    video.unlink(missing_ok=True)
 
     dest.mkdir(parents=True, exist_ok=True)
     tmp = dest / "video.src.mp4"
 
+    # Mirrors throttle per client, so five workers hammering one host share its
+    # limit. Starting each talk on a different mirror measured 15.7 MB/s aggregate
+    # against 2.5 MB/s when they all piled onto the fastest single host.
+    order = MIRRORS[shard % len(MIRRORS):] + MIRRORS[:shard % len(MIRRORS)]
+
     last: Exception | None = None
-    for mirror in MIRRORS:
+    for mirror in order:
         try:
             with urllib.request.urlopen(
                 urllib.request.Request(f"{mirror}/{meta['path']}",
@@ -193,7 +217,7 @@ def download(meta: dict) -> bool:
                 while chunk := r.read(1 << 20):
                     fh.write(chunk)
             break
-        except Exception as exc:                          # noqa: BLE001
+        except Exception as exc:
             last = exc
             tmp.unlink(missing_ok=True)
     else:
@@ -207,7 +231,7 @@ def download(meta: dict) -> bool:
         return False
     tmp.unlink(missing_ok=True)                           # free the original at once
 
-    for mirror in MIRRORS:
+    for mirror in order:
         try:
             (dest / "video.vtt").write_bytes(fetch(f"{mirror}/{meta['vtt_path']}"))
             break
@@ -238,7 +262,7 @@ def main() -> int:
     stop = threading.Event()
     lock = threading.Lock()
 
-    def worker(pk: dict) -> bool:
+    def worker(pk: dict, shard: int) -> bool:
         if stop.is_set():
             return False
         with lock:
@@ -250,10 +274,11 @@ def main() -> int:
                           f"(need {MIN_FREE_GB} GB headroom)")
                 stop.set()
                 return False
-        return download(pk)
+        return download(pk, shard)
 
     with cf.ThreadPoolExecutor(max_workers=args.workers) as pool:
-        for done in cf.as_completed([pool.submit(worker, pk) for pk in picks]):
+        futures = [pool.submit(worker, pk, i) for i, pk in enumerate(picks)]
+        for done in cf.as_completed(futures):
             ok += bool(done.result())
     have = len(list(RAW.glob("*/video.mp4")))
     print(f"\nthis run: {ok}/{len(picks)}   on disk: {have} talks -> {RAW}")
