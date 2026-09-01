@@ -18,6 +18,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
+from PIL import Image
+
 from config import (
     FRAME_INTERVAL_S,
     MAX_SEGMENT_SECONDS,
@@ -29,7 +31,6 @@ from config import (
     TRANSCRIPT_WINDOW_S,
     WORK,
 )
-from PIL import Image
 
 
 def ffmpeg(args: list[str]) -> None:
