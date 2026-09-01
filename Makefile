@@ -1,4 +1,4 @@
-.PHONY: help setup download prepare prepare-force embed build ingest verify api web demo dev tidy bench clean
+.PHONY: help setup download prepare prepare-force embed build ingest verify test api web demo dev tidy bench clean
 
 PY := .venv/bin/python
 UVICORN := .venv/bin/uvicorn
@@ -7,7 +7,8 @@ LIMIT ?= 36
 help:
 	@echo "make setup             install python deps + web deps"
 	@echo "make ingest LIMIT=36   download -> prepare -> embed -> build -> verify"
-	@echo "make verify            green-room preflight (~15s)"
+	@echo "make test              contract tests, synthetic fixtures (~3s)"
+	@echo "make verify            green-room preflight, real corpus (~15s)"
 	@echo "make demo              run API + web together"
 
 setup:
@@ -36,6 +37,12 @@ ingest: download prepare embed build
 
 verify:
 	$(PY) scripts/verify.py
+
+# Contract tests over synthetic Lance tables. Seconds, no corpus, no torch — this is
+# what CI runs. `make verify` is the integration gate on the real corpus and stays
+# the one that has to pass before a demo.
+test:
+	uv run --only-group test python -m pytest
 
 bench:
 	$(PY) scripts/blob_bench.py

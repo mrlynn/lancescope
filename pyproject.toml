@@ -34,6 +34,20 @@ dependencies = [
 [dependency-groups]
 dev = ["ruff>=0.9"]
 
+# What the contract tests need, and nothing else. Deliberately excludes torch and
+# open-clip: the console does not import them, and a test job that pulls a gigabyte
+# of machine learning to check that a filter is pushed down is a test job nobody
+# will keep green. `make verify` remains the integration gate, on the real corpus.
+test = [
+    "pytest>=8.3",
+    "pylance>=0.38",
+    "pyarrow>=18",
+    "numpy>=2.0",
+    "fastapi>=0.115",
+    "httpx>=0.28",
+    "pydantic>=2.9",
+]
+
 [tool.ruff]
 line-length = 100
 
