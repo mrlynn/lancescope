@@ -19,13 +19,13 @@ Two sources, one rule: **the environment wins.** A deployment that pins a root o
 | variable | what it does |
 | --- | --- |
 | `LANCE_ROOT` | the database to read. Wins over any saved connection |
-| `LANCESCOPE_CONFIG` | where the settings file lives (default `/Users/michael.lynn/.config/lancescope/settings.json`) |
+| `LANCESCOPE_CONFIG` | where the settings file lives (default `~/.config/lancescope/settings.json`) |
 | `ANTHROPIC_API_KEY` | enables the Claude path; beats a stored key |
 | `LANCESCOPE_LLM_PROVIDER` | `auto` · `anthropic` · `ollama` · `openai-compat` · `none` (default: auto-detect) |
 | `OLLAMA_HOST` | as Ollama itself defines it (default `http://localhost:11434`) |
 | `LANCESCOPE_LLM_BASE_URL` | for an OpenAI-compatible endpoint |
 | `LANCESCOPE_LLM_API_KEY` | for an OpenAI-compatible endpoint |
-| `LANCESCOPE_CACHE` | cached answers (default `/Users/michael.lynn/.cache/lancescope`) |
+| `LANCESCOPE_CACHE` | cached answers (default `~/.cache/lancescope`) |
 | `LANCESCOPE_SPEND_CEILING` | dollars, per process. Refuses before spending past it |
 | `API_ORIGIN` | where the web app proxies `/api/*` |
 
