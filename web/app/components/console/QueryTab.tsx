@@ -45,6 +45,11 @@ export function QueryTab({ table }: { table: string }) {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<QueryResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Cancellation is client-side by necessity: Lance exposes no way to interrupt a
+  // running scan, so this abandons the wait and says so rather than implying the
+  // work stopped.
+  const [aborter, setAborter] = useState<AbortController | null>(null);
+  const [cancelled, setCancelled] = useState(false);
   const [showPlan, setShowPlan] = useState(false);
   const [showRepro, setShowRepro] = useState(false);
 
@@ -65,7 +70,9 @@ export function QueryTab({ table }: { table: string }) {
     caps?.capabilities.find((c) => c.mode === m);
 
   const run = useCallback(async () => {
-    setBusy(true); setError(null);
+    const controller = new AbortController();
+    setAborter(controller);
+    setBusy(true); setError(null); setCancelled(false);
     const spec: QuerySpec = {
       mode,
       filter: filter.trim() || null,
@@ -77,13 +84,18 @@ export function QueryTab({ table }: { table: string }) {
         : {}),
     };
     try {
-      setResult(await runQuery(table, spec));
+      setResult(await runQuery(table, spec, controller.signal));
     } catch (e) {
       setResult(null);
-      // A query someone typed is theirs to fix; say what Lance said about it.
-      setError(e instanceof ApiError ? e.message : "the query could not be run");
+      if (e instanceof DOMException && e.name === "AbortError") {
+        setCancelled(true);
+      } else {
+        // A query someone typed is theirs to fix; say what Lance said about it.
+        setError(e instanceof ApiError ? e.message : "the query could not be run");
+      }
     } finally {
       setBusy(false);
+      setAborter(null);
     }
   }, [table, mode, filter, limit, text, vectorColumn, likeRow, k, prefilter]);
 
@@ -167,6 +179,13 @@ export function QueryTab({ table }: { table: string }) {
           <Icon name="search" size={14} />
           {busy ? "running…" : "Run"}
         </button>
+        {busy && aborter && (
+          <button className="btn mono text-[10px] tracking-[0.14em] uppercase"
+                  onClick={() => aborter.abort()}>
+            <Icon name="close" size={14} />
+            Stop waiting
+          </button>
+        )}
       </div>
 
       {(mode === "vector" || mode === "hybrid") && (
@@ -178,6 +197,17 @@ export function QueryTab({ table }: { table: string }) {
         </label>
       )}
 
+      {cancelled && (
+        <div className="text-[12px] leading-relaxed px-3.5 py-3 rounded-sm mb-4"
+             style={{ background: "rgb(var(--index-rgb) / 0.08)",
+                      border: "1px solid rgb(var(--index-rgb) / 0.35)",
+                      color: "var(--body)" }}>
+          <span className="mono" style={{ color: "var(--index)" }}>stopped waiting.</span>{" "}
+          The scan is still running on the server until it finishes — Lance offers no
+          way to interrupt one, so this abandoned the wait, not the work.
+        </div>
+      )}
+
       {error && (
         <div className="mono flex items-center gap-2.5 text-[12px] px-3.5 py-3 rounded-sm mb-4"
              style={{ background: "rgb(var(--video-rgb) / 0.12)",
@@ -185,6 +215,20 @@ export function QueryTab({ table }: { table: string }) {
                       color: "var(--video)" }}>
           <Icon name="warning" size={15} />
           {error}
+        </div>
+      )}
+
+      {result?.stale && (
+        <div className="text-[12px] leading-relaxed px-3.5 py-3 rounded-sm mb-4"
+             style={{ background: "rgb(var(--video-rgb) / 0.08)",
+                      border: "1px solid rgb(var(--video-rgb) / 0.35)",
+                      color: "var(--body)" }}>
+          <span className="mono" style={{ color: "var(--video)" }}>
+            this describes v{result.version}.
+          </span>{" "}
+          The table has moved to v{result.latest_version} since. Everything below is
+          still true of the version it was read from, and no longer describes the
+          table as it is now — run it again to catch up.
         </div>
       )}
 

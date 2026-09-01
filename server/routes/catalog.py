@@ -10,6 +10,7 @@ console is a tool for looking at byte costs, so it says what looking costs too.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
@@ -700,9 +701,12 @@ class QueryBody(BaseModel):
     k: int = 10
     metric: str = "cosine"
     prefilter: bool = True
+    # How long the caller is prepared to wait. Not how long the query may run —
+    # that is not ours to decide, and Lance would not honour it if it were.
+    timeout_s: float | None = None
 
     def spec(self) -> query.QuerySpec:
-        return query.QuerySpec(**self.model_dump())
+        return query.QuerySpec(**self.model_dump(exclude={"timeout_s"}))
 
 
 @router.post("/tables/{name:path}/query/explain")
@@ -740,7 +744,7 @@ async def compare_query(name: str, body: CompareQueryBody) -> JSONResponse:
         raise HTTPException(400, f"cannot open both versions: "
                                  f"{str(e).splitlines()[0][:160]}") from None
 
-    spec = query.QuerySpec(**body.model_dump(exclude={"a", "b"}))
+    spec = query.QuerySpec(**body.model_dump(exclude={"a", "b", "timeout_s"}))
     result = compare.compare_query(left, right, spec, cell=_cell)
     if result.a is None and result.b is None:
         raise HTTPException(400, result.a_error or "the query could not be run")
@@ -755,12 +759,29 @@ async def run_query(name: str, body: QueryBody) -> JSONResponse:
     Read-only, like everything else here, and heavy columns stay out of the
     projection: a query workspace that could materialise a blob would undo the claim
     this repository is built on.
+
+    Run on a worker thread so a long scan does not block every other request against
+    this server — including the one the browser sends to give up on it.
     """
     h = open_table(name)
+    timeout = body.timeout_s or query.DEFAULT_TIMEOUT_S
     try:
-        outcome = query.run(h, body.spec(), cell=_cell)
+        outcome = await asyncio.wait_for(
+            asyncio.to_thread(query.run, h, body.spec(), cell=_cell),
+            timeout=timeout,
+        )
     except query.QueryError as e:
         # A query someone typed is theirs to fix, not a server fault.
         raise HTTPException(400, str(e)) from None
+    except TimeoutError:
+        # 408 rather than 500: nothing is broken, the wait ran out. The wording is
+        # deliberate — the scan is still going, because Lance gives us no way to
+        # stop it, and a message implying otherwise would be false.
+        raise HTTPException(
+            408,
+            f"still running after {timeout:g}s, so this request stopped waiting. "
+            f"The scan continues on the server until it finishes — Lance offers no "
+            f"way to interrupt one. Narrow the query, or raise the timeout.",
+        ) from None
     return JSONResponse({"name": name, "uri": h.uri, "mode": body.mode,
                          **outcome.as_dict()})
