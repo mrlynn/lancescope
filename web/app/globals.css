@@ -278,6 +278,19 @@ body::before {
 .inp::placeholder { color: var(--dim); }
 .inp:focus { border-color: var(--haze); }
 
+/* Query workspace inputs: same shape as `.inp`, sized for a row of controls. */
+.qin {
+  width: 100%;
+  font-size: 12px;
+  padding: 6px 9px;
+  border-radius: 2px;
+  background: var(--ink-3);
+  border: 1px solid var(--rule);
+  color: var(--bright);
+}
+.qin::placeholder { color: var(--dim); }
+.qin:focus { border-color: var(--video); }
+
 /* Focus that survives a projector. */
 :focus-visible {
   outline: 2px solid var(--video);

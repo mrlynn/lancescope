@@ -16,7 +16,9 @@ from pathlib import Path
 import pyarrow as pa
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
+from server import query
 from server.catalog import (
     Catalog,
     Handle,
@@ -565,6 +567,26 @@ async def findings(name: str) -> JSONResponse:
     })
 
 
+@router.get("/tables/{name:path}/query/capabilities")
+async def query_capabilities(name: str) -> JSONResponse:
+    """What this table can be asked, and why not where it cannot.
+
+    Read before the workspace offers a mode, so full-text search on a table with no
+    inverted index is a disabled control with a reason rather than a search that
+    silently finds nothing.
+    """
+    h = open_table(name)
+    h.drain()
+    caps = query.capabilities(h)
+    d = h.drain()
+    return JSONResponse({
+        "name": name,
+        "capabilities": [c.as_dict() for c in caps],
+        "read_bytes": d.read_bytes,
+        "read_iops": d.read_iops,
+    })
+
+
 # Registered last on purpose. `{name:path}` matches slashes, so this would swallow
 # `/tables/x/versions` if it came first; Starlette resolves in definition order.
 @router.get("/tables/{name:path}")
@@ -625,3 +647,57 @@ async def table(name: str) -> JSONResponse:
         "read_bytes": d.read_bytes,
         "read_iops": d.read_iops,
     })
+
+
+# -------------------------------------------------------------------------- query
+
+class QueryBody(BaseModel):
+    """One query as the workspace sends it."""
+
+    mode: str = "scan"
+    filter: str | None = None
+    columns: list[str] | None = None
+    limit: int = 25
+    offset: int = 0
+    text: str | None = None
+    vector_column: str | None = None
+    vector: list[float] | None = None
+    like_row: int | None = None
+    k: int = 10
+    metric: str = "cosine"
+    prefilter: bool = True
+
+    def spec(self) -> query.QuerySpec:
+        return query.QuerySpec(**self.model_dump())
+
+
+@router.post("/tables/{name:path}/query/explain")
+async def query_explain(name: str, body: QueryBody) -> JSONResponse:
+    """The plan, without running the query. Often the whole diagnosis."""
+    h = open_table(name)
+    h.drain()
+    try:
+        plan = query.explain(h, body.spec())
+    except query.QueryError as e:
+        raise HTTPException(400, str(e)) from None
+    d = h.drain()
+    return JSONResponse({"name": name, "plan": plan.as_dict(),
+                         "read_bytes": d.read_bytes, "read_iops": d.read_iops})
+
+
+@router.post("/tables/{name:path}/query")
+async def run_query(name: str, body: QueryBody) -> JSONResponse:
+    """Run it, and report what it cost and which path it took.
+
+    Read-only, like everything else here, and heavy columns stay out of the
+    projection: a query workspace that could materialise a blob would undo the claim
+    this repository is built on.
+    """
+    h = open_table(name)
+    try:
+        outcome = query.run(h, body.spec(), cell=_cell)
+    except query.QueryError as e:
+        # A query someone typed is theirs to fix, not a server fault.
+        raise HTTPException(400, str(e)) from None
+    return JSONResponse({"name": name, "uri": h.uri, "mode": body.mode,
+                         **outcome.as_dict()})

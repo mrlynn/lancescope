@@ -250,6 +250,89 @@ def intel_checks() -> None:
         os.environ.pop("LANCESCOPE_CONFIG", None)
 
 
+def query_checks() -> None:
+    """The query workspace: every mode runs, and says what it cost and how.
+
+    This is the section that guards the claim the workspace makes — that you can
+    diagnose a slow query here without a model and without guessing.
+    """
+    import ast
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from server.catalog import Catalog
+    from server.routes import catalog as catalog_routes
+
+    app = FastAPI()
+    catalog_routes.bind(Catalog(LANCE))
+    app.include_router(catalog_routes.router)
+    api = TestClient(app)
+
+    caps = {c["mode"]: c for c in
+            api.get("/catalog/tables/moments/query/capabilities").json()["capabilities"]}
+    seg = {c["mode"]: c for c in
+           api.get("/catalog/tables/segments/query/capabilities").json()["capabilities"]}
+    check("a table says which modes it can answer",
+          caps["fts"]["available"] and caps["vector"]["available"]
+          and not seg["fts"]["available"] and not seg["vector"]["available"])
+    check("an unavailable mode says why, rather than finding nothing",
+          bool(seg["fts"]["reason"]) and bool(seg["vector"]["reason"]),
+          seg["vector"]["reason"])
+
+    def run(table, spec):
+        return api.post(f"/catalog/tables/{table}/query", json=spec)
+
+    scan = run("moments", {"mode": "scan", "filter": "track = 'Go'", "limit": 5}).json()
+    fts = run("moments", {"mode": "fts", "text": "kubernetes", "limit": 5}).json()
+    vec = run("moments", {"mode": "vector", "vector_column": "vector",
+                          "like_row": 0, "k": 5}).json()
+
+    check("every mode runs and counts what it returned",
+          scan["returned"] == 5 and fts["returned"] == 5 and vec["returned"] == 5)
+
+    check("a filter is reported as pushed into the scan",
+          scan["plan"]["pushed_down_filter"] is not None,
+          scan["plan"]["pushed_down_filter"] or "not reported")
+
+    # The diagnosis the workspace exists to give: the same table, searched two ways,
+    # costs two very different amounts and the reason is named rather than implied.
+    paths = {m: [p["name"] for p in r["plan"]["paths"]]
+             for m, r in (("fts", fts), ("vector", vec))}
+    check("the access path is named for a search",
+          "inverted index" in paths["fts"]
+          and "brute-force vector scan" in paths["vector"],
+          f"fts={paths['fts']}, vector={paths['vector']}")
+    check("an unindexed vector search costs visibly more than an indexed text one",
+          vec["read_bytes"] > 10 * fts["read_bytes"],
+          f"{vec['read_bytes']:,} B vs {fts['read_bytes']:,} B")
+
+    # The claim the repository is built on, now that queries exist to threaten it.
+    blob = run("segments", {"mode": "scan", "limit": 25}).json()
+    check("a query never materialises a blob column",
+          "video_blob" in [c["name"] for c in blob["omitted_columns"]]
+          + [c for c in blob["columns"]]
+          and blob["read_bytes"] < 1_000_000,
+          f"{blob['read_bytes']:,} B for 25 rows of a 2.65 GB table")
+    check("heavy columns stay out of every result",
+          all("thumb_jpeg" not in r["columns"] and "vector" not in r["columns"]
+              for r in (scan, fts, vec)))
+
+    for label, r in (("scan", scan), ("fts", fts), ("vector", vec)):
+        try:
+            ast.parse(r["reproduction"])
+            ok = "lance.dataset" in r["reproduction"]
+        except SyntaxError:
+            ok = False
+        check(f"the {label} reproduction is runnable Python", ok)
+
+    bad = run("moments", {"mode": "scan", "filter": "no_such_column = 1"})
+    missing = run("moments", {"mode": "vector", "vector_column": "title", "like_row": 0})
+    check("a query the user got wrong is a 400, not a 500",
+          bad.status_code == 400 and missing.status_code == 400,
+          f"{bad.status_code} and {missing.status_code}")
+
+
 def nl_filter_checks() -> None:
     """The translation surface, in the states that do not need a model.
 
@@ -612,6 +695,9 @@ def main() -> int:
 
     print("\n  settings")
     settings_checks()
+
+    print("\n  query")
+    query_checks()
 
     print("\n  findings")
     findings_checks()

@@ -255,3 +255,92 @@ export function getRows(
   if (opts.expand?.length) q.set("expand", opts.expand.join(","));
   return get<Rows>(`/tables/${n}/rows?${q}`);
 }
+
+/* ------------------------------------------------------------------- query */
+
+/** What a table can be asked. A mode that cannot run carries a reason, because a
+ *  disabled control that explains itself beats a search that silently finds
+ *  nothing. */
+export type QueryCapability = {
+  mode: "scan" | "fts" | "vector";
+  available: boolean;
+  reason: string;
+  columns: string[];
+};
+
+export type QueryCapabilities = {
+  name: string;
+  capabilities: QueryCapability[];
+  read_bytes: number;
+  read_iops: number;
+};
+
+/** The access path Lance chose, lifted out of the plan. The raw plan travels with
+ *  it: Lance owns that format, so a partial reading beside the real thing degrades
+ *  into "we recognised less of it" rather than into being wrong. */
+export type PlanReading = {
+  text: string;
+  paths: { operator: string; name: string; meaning: string }[];
+  pushed_down_filter: string | null;
+  fragments: number | null;
+};
+
+export type QuerySpec = {
+  mode: "scan" | "fts" | "vector";
+  filter?: string | null;
+  columns?: string[] | null;
+  limit?: number;
+  offset?: number;
+  text?: string | null;
+  vector_column?: string | null;
+  vector?: number[] | null;
+  like_row?: number | null;
+  k?: number;
+  metric?: string;
+  prefilter?: boolean;
+};
+
+export type QueryResult = {
+  name: string;
+  uri: string;
+  mode: string;
+  rows: Record<string, Cell>[];
+  columns: string[];
+  omitted_columns: { name: string; type: string; vector_dim: number | null; reason: string }[];
+  plan: PlanReading;
+  ms: number;
+  read_bytes: number;
+  read_iops: number;
+  returned: number;
+  total_rows: number | null;
+  truncated: boolean;
+  reproduction: string;
+};
+
+export const getQueryCapabilities = (n: string) =>
+  get<QueryCapabilities>(`/tables/${n}/query/capabilities`);
+
+async function post<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`/api/catalog${path}`, {
+    method: "POST",
+    cache: "no-store",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    let detail = `${res.status}`;
+    try {
+      detail = (await res.json()).detail ?? detail;
+    } catch {
+      /* non-JSON error body */
+    }
+    throw new ApiError(res.status, String(detail));
+  }
+  return res.json();
+}
+
+export const runQuery = (n: string, spec: QuerySpec) =>
+  post<QueryResult>(`/tables/${n}/query`, spec);
+
+export const explainQuery = (n: string, spec: QuerySpec) =>
+  post<{ plan: PlanReading; read_bytes: number }>(`/tables/${n}/query/explain`, spec);

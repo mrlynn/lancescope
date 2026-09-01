@@ -277,7 +277,7 @@ export function FragmentsTab({ d }: { d: Fragments }) {
 
 // --------------------------------------------------------------------- rows
 
-function CellView({ v }: { v: Cell }) {
+export function CellView({ v }: { v: Cell }) {
   if (v === null) return <span className="text-[var(--dim)]">null</span>;
   if (typeof v === "object") {
     if ("blob" in v) {

@@ -20,6 +20,7 @@ import {
 import {
   InsightsTab, PanelFindings, PartialAnalysis,
 } from "@/app/components/console/Findings";
+import { QueryTab } from "@/app/components/console/QueryTab";
 import { usePins, useRecents } from "@/app/lib/recents";
 import {
   type Capabilities, type SettingsState, activateConnection, getCapabilities,
@@ -34,9 +35,10 @@ const TABS: { id: string; icon: IconName }[] = [
   { id: "indices", icon: "index" },
   { id: "fragments", icon: "fragments" },
   { id: "rows", icon: "rows" },
+  { id: "query", icon: "search" },
   { id: "insights", icon: "spark" },
 ];
-type Tab = "schema" | "versions" | "indices" | "fragments" | "rows" | "insights";
+type Tab = "schema" | "versions" | "indices" | "fragments" | "rows" | "query" | "insights";
 
 const PAGE = 25;
 
@@ -276,6 +278,9 @@ export default function Console() {
               {tab === "fragments" && (fragments
                 ? <><FragmentsTab d={fragments} /><PanelFindings d={findings} panel="fragments" /></>
                 : <Empty>reading fragments…</Empty>)}
+              {tab === "query" && (picked
+                ? <QueryTab key={picked} table={picked} />
+                : <Empty>pick a table to query</Empty>)}
               {tab === "insights" && <InsightsTab d={findings} />}
               {tab === "rows" && (
                 <RowsTab
