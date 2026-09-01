@@ -13,9 +13,11 @@ import {
 } from "@/app/components/console/tabs";
 import {
   ApiError,
-  type Fragments, type Indices, type Rows, type TableDetail, type TableList, type Versions,
-  getFragments, getIndices, getRows, getTable, getVersions, listTables,
+  type Findings, type Fragments, type Indices, type Rows, type TableDetail,
+  type TableList, type Versions,
+  getFindings, getFragments, getIndices, getRows, getTable, getVersions, listTables,
 } from "@/app/lib/catalog";
+import { InsightsTab, PanelFindings } from "@/app/components/console/Findings";
 import { usePins, useRecents } from "@/app/lib/recents";
 import {
   type SettingsState, activateConnection, getSettings,
@@ -29,8 +31,9 @@ const TABS: { id: string; icon: IconName }[] = [
   { id: "indices", icon: "index" },
   { id: "fragments", icon: "fragments" },
   { id: "rows", icon: "rows" },
+  { id: "insights", icon: "spark" },
 ];
-type Tab = "schema" | "versions" | "indices" | "fragments" | "rows";
+type Tab = "schema" | "versions" | "indices" | "fragments" | "rows" | "insights";
 
 const PAGE = 25;
 
@@ -46,6 +49,9 @@ export default function Console() {
   const [indices, setIndices] = useState<Indices | null>(null);
   const [fragments, setFragments] = useState<Fragments | null>(null);
   const [rows, setRows] = useState<Rows | null>(null);
+  // Fetched once per table rather than per tab: the same list is rendered inline
+  // under four panels and collected in Insights, and it is one cheap metadata read.
+  const [findings, setFindings] = useState<Findings | null>(null);
 
   const [offset, setOffset] = useState(0);
   const [filter, setFilter] = useState("");
@@ -66,6 +72,7 @@ export default function Console() {
   const selectTable = useCallback((name: string | null) => {
     setPicked(name);
     setDetail(null); setVersions(null); setIndices(null); setFragments(null);
+    setFindings(null);
     setRows(null); setOffset(0); setFilter(""); setExpanded([]); setRowsError(null);
   }, []);
 
@@ -124,6 +131,15 @@ export default function Console() {
     },
     [],
   );
+
+  useEffect(() => {
+    if (!picked) return;
+    let alive = true;
+    getFindings(picked)
+      .then((d) => { if (alive) setFindings(d); })
+      .catch(() => { if (alive) setFindings(null); });
+    return () => { alive = false; };
+  }, [picked]);
 
   useEffect(() => {
     if (!picked) return;
@@ -231,15 +247,28 @@ export default function Console() {
                 >
                   <Icon name={t.icon} size={14} />
                   {t.id}
+                  <TabBadge
+                    findings={findings}
+                    panel={t.id === "insights" ? null : t.id}
+                  />
                 </button>
               ))}
             </div>
 
             <div className="panel p-6 min-h-[380px]">
-              {tab === "schema" && (detail ? <SchemaTab d={detail} /> : <Empty>reading schema…</Empty>)}
-              {tab === "versions" && (versions ? <VersionsTab d={versions} /> : <Empty>reading history…</Empty>)}
-              {tab === "indices" && (indices ? <IndicesTab d={indices} /> : <Empty>reading indices…</Empty>)}
-              {tab === "fragments" && (fragments ? <FragmentsTab d={fragments} /> : <Empty>reading fragments…</Empty>)}
+              {tab === "schema" && (detail
+                ? <><SchemaTab d={detail} /><PanelFindings d={findings} panel="schema" /></>
+                : <Empty>reading schema…</Empty>)}
+              {tab === "versions" && (versions
+                ? <><VersionsTab d={versions} /><PanelFindings d={findings} panel="versions" /></>
+                : <Empty>reading history…</Empty>)}
+              {tab === "indices" && (indices
+                ? <><IndicesTab d={indices} /><PanelFindings d={findings} panel="indices" /></>
+                : <Empty>reading indices…</Empty>)}
+              {tab === "fragments" && (fragments
+                ? <><FragmentsTab d={fragments} /><PanelFindings d={findings} panel="fragments" /></>
+                : <Empty>reading fragments…</Empty>)}
+              {tab === "insights" && <InsightsTab d={findings} />}
               {tab === "rows" && (
                 <RowsTab
                   d={rows}
@@ -261,6 +290,28 @@ export default function Console() {
         </div>
       )}
     </main>
+  );
+}
+
+/** How many findings a panel has, when it has any. Zero renders nothing rather than
+ *  a zero — a badge that is always there stops being a signal — and the colour is
+ *  that panel's own worst severity, not the table's, so a tab holding two notes does
+ *  not borrow the alarm from a warning three tabs away. */
+function TabBadge({ findings, panel }: { findings: Findings | null; panel: string | null }) {
+  const mine = (findings?.findings ?? []).filter((f) => panel === null || f.panel === panel);
+  const n = mine.length;
+  const warn = mine.some((f) => f.severity === "warn");
+  if (!n) return null;
+  return (
+    <span
+      className="mono text-[9px] leading-none px-1.5 py-0.5 rounded-full ml-0.5"
+      style={{
+        background: warn ? "rgb(var(--video-rgb) / 0.18)" : "rgb(var(--index-rgb) / 0.18)",
+        color: warn ? "var(--video)" : "var(--index)",
+      }}
+    >
+      {n}
+    </span>
   );
 }
 

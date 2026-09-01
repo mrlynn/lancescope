@@ -173,6 +173,34 @@ export type Rows = {
   read_iops: number;
 };
 
+/** A finding is derived, never generated: `evidence` holds the literal numbers the
+ *  claim was computed from, and `panel` names where those numbers are on screen. */
+export type Finding = {
+  id: string;
+  severity: "warn" | "note";
+  panel: "schema" | "versions" | "indices" | "fragments" | "rows";
+  title: string;
+  claim: string;
+  evidence: Record<string, unknown>;
+  caveat: string;
+  suggested_action: string;
+  columns: string[];
+};
+
+export type Findings = {
+  name: string;
+  uri: string;
+  findings: Finding[];
+  summary: {
+    total: number;
+    warn: number;
+    note: number;
+    by_panel: Record<string, number>;
+  };
+  read_bytes: number;
+  read_iops: number;
+};
+
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -203,6 +231,7 @@ export const getTable = (n: string) => get<TableDetail>(`/tables/${n}`);
 export const getVersions = (n: string) => get<Versions>(`/tables/${n}/versions`);
 export const getIndices = (n: string) => get<Indices>(`/tables/${n}/indices`);
 export const getFragments = (n: string) => get<Fragments>(`/tables/${n}/fragments`);
+export const getFindings = (n: string) => get<Findings>(`/tables/${n}/findings`);
 
 export function getRows(
   n: string,
