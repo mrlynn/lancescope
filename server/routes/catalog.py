@@ -24,6 +24,7 @@ from server.catalog import (
     fragment_blob_bytes,
     is_blob_field,
 )
+from server.intel import findings as intel_findings
 
 router = APIRouter(prefix="/catalog")
 
@@ -529,6 +530,31 @@ async def rows(
         "omitted_columns": omitted,
         "rows": out_rows,
         # The whole point of the console: what did looking at this cost?
+        "read_bytes": d.read_bytes,
+        "read_iops": d.read_iops,
+    })
+
+
+# ---------------------------------------------------------------------- findings
+
+@router.get("/tables/{name:path}/findings")
+async def findings(name: str) -> JSONResponse:
+    """What is worth saying about this table, derived rather than generated.
+
+    No model, no key, no network: every claim here is computed from the same
+    manifests the other panels read, which is why it costs a few kilobytes and works
+    on a machine with nothing configured.
+    """
+    h = _open(name)
+    h.drain()                                       # zero, so the cost below is ours
+    found = intel_findings.findings_for(h)
+    d = h.drain()
+
+    return JSONResponse({
+        "name": name,
+        "uri": h.uri,
+        "findings": [f.as_dict() for f in found],
+        "summary": intel_findings.summarise(found),
         "read_bytes": d.read_bytes,
         "read_iops": d.read_iops,
     })
