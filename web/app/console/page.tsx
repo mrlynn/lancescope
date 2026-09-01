@@ -287,7 +287,7 @@ export default function Console() {
               {tab === "compare" && (picked
                 ? <CompareTab key={picked} table={picked} />
                 : <Empty>pick a table to compare</Empty>)}
-              {tab === "insights" && <InsightsTab d={findings} />}
+              {tab === "insights" && <InsightsTab d={findings} table={picked} ai={ai} />}
               {tab === "rows" && (
                 <RowsTab
                   d={rows}

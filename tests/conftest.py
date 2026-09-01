@@ -191,3 +191,18 @@ def settings_file(tmp_path, monkeypatch):
     monkeypatch.delenv("LANCE_ROOT", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     return path
+
+
+@pytest.fixture
+def api_intel(catalog):
+    """The intelligence routes, which need the catalog bound for table lookups."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from server.routes import catalog as catalog_routes
+    from server.routes import intel as intel_routes
+
+    app = FastAPI()
+    catalog_routes.bind(catalog)
+    app.include_router(intel_routes.router)
+    return TestClient(app)

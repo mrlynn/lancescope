@@ -233,7 +233,7 @@ them. Reuses `Cost` and `Empty` from `components/console/atoms.tsx` and the exis
 coral/amber palette.
 **Done when:** the console explains its two known findings with nothing configured.
 
-### I4 — Version-keyed artifact cache, and table summaries
+### I4 — Version-keyed artifact cache, and table summaries  ✅ landed
 `server/intel/cache.py` (content-addressed JSON under `LANCESCOPE_CACHE`, never inside
 a Lance directory) and `POST /intel/tables/{name}/summary`, narrating schema plus
 findings into three sentences. Structured output, user-initiated.
