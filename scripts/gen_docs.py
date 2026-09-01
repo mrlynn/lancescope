@@ -45,6 +45,19 @@ def _first_paragraph(text: str | None) -> str:
     return " ".join(line.strip() for line in para.splitlines() if line.strip())
 
 
+def _home_relative(path) -> str:
+    """A default path as a reader should see it.
+
+    The generator would otherwise write the home directory of whichever machine ran
+    it into the documentation — wrong for every other reader, and different on every
+    machine, so the drift check fails on CI over a difference that means nothing.
+    Derived from the code either way; only the rendering is normalised.
+    """
+    text = str(path)
+    home = str(Path.home())
+    return text.replace(home, "~") if text.startswith(home) else text
+
+
 def _summary(text: str | None) -> str:
     """The first sentence, for a table cell."""
     para = _first_paragraph(text)
@@ -266,7 +279,7 @@ def configuration_reference() -> str:
            "| variable | what it does |", "| --- | --- |",
            "| `LANCE_ROOT` | the database to read. Wins over any saved connection |",
            "| `LANCESCOPE_CONFIG` | where the settings file lives "
-           f"(default `{cfg.settings_path()}`) |",
+           f"(default `{_home_relative(cfg.settings_path())}`) |",
            "| `ANTHROPIC_API_KEY` | enables the Claude path; beats a stored key |",
            "| `LANCESCOPE_LLM_PROVIDER` | `"
            + "` · `".join(cfg.PROVIDERS) + "` (default: auto-detect) |",
@@ -275,7 +288,7 @@ def configuration_reference() -> str:
            "| `LANCESCOPE_LLM_BASE_URL` | for an OpenAI-compatible endpoint |",
            "| `LANCESCOPE_LLM_API_KEY` | for an OpenAI-compatible endpoint |",
            "| `LANCESCOPE_CACHE` | cached answers "
-           f"(default `{cache.cache_dir()}`) |",
+           f"(default `{_home_relative(cache.cache_dir())}`) |",
            "| `LANCESCOPE_SPEND_CEILING` | dollars, per process. Refuses before "
            "spending past it |",
            "| `API_ORIGIN` | where the web app proxies `/api/*` |", "",

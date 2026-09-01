@@ -32,6 +32,18 @@ echo
 
 # --- the things that make a launcher useless if they fail silently -------------
 
+# Same question for Python, but as a warning rather than a stop. `uv sync --check`
+# reports any difference from the lockfile, including a venv that has *more* than
+# the lock asks for — which is what an environment looks like after somebody
+# installed something by hand, and is not a reason to refuse to start.
+if [ -x .venv/bin/python ] && command -v uv >/dev/null 2>&1; then
+  if ! uv sync --check >/dev/null 2>&1; then
+    warn "The Python environment does not match uv.lock. If something fails on an"
+    warn "import, run: make setup"
+    echo
+  fi
+fi
+
 [ -x .venv/bin/python ] || die \
 "No Python environment yet.
 
@@ -43,6 +55,23 @@ echo
 "The web dependencies are not installed.
 
   Open a terminal here and run:  make setup"
+
+# Present is not the same as current. `git pull` updates package.json and leaves
+# node_modules exactly as it was, so a new dependency arrives declared and absent —
+# and the failure lands in the middle of a production build, as a module-not-found
+# for a file the reader has never heard of. npm maintains a copy of the lockfile
+# inside the installed tree, so the two mtimes answer the question directly.
+if [ web/package-lock.json -nt web/node_modules/.package-lock.json ]; then
+  die \
+"The web dependencies are out of date.
+
+  package-lock.json is newer than what is installed, which usually means a
+  git pull brought in a dependency that was never installed.
+
+  Open a terminal here and run:  make setup
+
+  (or: cd web && npm install)"
+fi
 
 if [ ! -d data/lance/moments.lance ]; then
   die \
