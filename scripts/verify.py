@@ -87,6 +87,8 @@ def findings_checks() -> None:
     misleading — because those are the findings the whole layer above is built to
     narrate.
     """
+    import logging
+
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
@@ -148,10 +150,15 @@ def findings_checks() -> None:
 
     original = intel_findings.RULES
     intel_findings.RULES = (*original, explodes)
+    # The engine logs a rule failure with its traceback, which is right — and here
+    # the failure is the point of the check, so printing a stack trace in the middle
+    # of a passing run just teaches people to ignore stack traces.
+    logging.getLogger("server.intel.findings").setLevel(logging.CRITICAL)
     try:
         broken = api.get("/catalog/tables/moments/findings").json()
     finally:
         intel_findings.RULES = original
+        logging.getLogger("server.intel.findings").setLevel(logging.NOTSET)
 
     check("a rule that raises is reported, not swallowed",
           broken["partial_analysis"] is True
@@ -733,10 +740,11 @@ def main() -> int:
             hits = moments.scanner(
                 columns=COLS,
                 nearest={"column": "vector", "q": v, "k": 5, "metric": "cosine"},
+            disable_scoring_autoprojection=True,
             ).to_table().to_pylist()
         else:
             hits = moments.scanner(
-                columns=COLS, full_text_query=q, limit=5
+                columns=COLS, full_text_query=q, disable_scoring_autoprojection=True, limit=5
             ).to_table().to_pylist()
         idx = moments.io_stats_incremental().read_bytes
         vid = segments.io_stats_incremental().read_bytes
@@ -759,6 +767,7 @@ def main() -> int:
         narrow = moments.scanner(
             columns=COLS,
             nearest={"column": "vector", "q": v, "k": 8, "metric": "cosine"},
+            disable_scoring_autoprojection=True,
             filter=f"track = '{tracks[0].replace(chr(39), chr(39) * 2)}'",
             prefilter=True,
         ).to_table().to_pylist()

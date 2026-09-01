@@ -167,6 +167,7 @@ def warm() -> None:
         columns=["moment_id"],
         nearest={"column": "vector", "q": np.zeros(768, dtype=np.float32),
                  "k": 1, "metric": "cosine"},
+            disable_scoring_autoprojection=True,
     ).to_table()
     drain_index()
     drain_video()
@@ -210,6 +211,7 @@ def _vector_hits(req: SearchReq, where: str | None, k: int) -> list[dict]:
     return STATE.moments.ds.scanner(
         columns=COLUMNS,
         nearest={"column": "vector", "q": v, "k": k, "metric": "cosine"},
+            disable_scoring_autoprojection=True,
         # prefilter pushes the SQL predicate INTO the search rather than throwing away
         # results afterwards, so a narrow filter still returns k hits.
         filter=where, prefilter=True,
@@ -220,7 +222,7 @@ def _fts_hits(req: SearchReq, where: str | None, k: int) -> list[dict]:
     try:
         return STATE.moments.ds.scanner(
             columns=COLUMNS, full_text_query=req.q, filter=where,
-            prefilter=True, limit=k,
+            disable_scoring_autoprojection=True, prefilter=True, limit=k,
         ).to_table().to_pylist()
     except Exception:
         return []
