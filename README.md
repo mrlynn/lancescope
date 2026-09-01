@@ -37,6 +37,26 @@ Where the root comes from, in order:
 `LANCESCOPE_CONFIG` moves the settings file. Connections may be local directories or
 `s3://` / `db://` URIs; remote ones are saved unverified rather than falsely ticked.
 
+## The guide
+
+Everything below in more depth, and served by the app itself at **`/docs`** — a
+tutorial, how-to guides, generated reference, and the reasoning behind the decisions
+that look odd:
+
+| | |
+| --- | --- |
+| [What LanceScope is](docs/guide/index.md) | the shape of the thing |
+| [Getting started](docs/guide/start-here.md) | clone to a real finding, about five minutes |
+| [Connect a database](docs/guide/howto-connect.md) | local, switching, pinning, remote |
+| [Diagnose a slow query](docs/guide/howto-diagnose.md) | access paths, costs, before and after |
+| [Enable the language layer](docs/guide/howto-intelligence.md) | local and free, or a key |
+| [Point an agent at it](docs/guide/howto-agents.md) | MCP, and which database it reads |
+| [Reference](docs/guide/reference-configuration.md) | config, query modes, findings, models, tools, routes |
+| [Why it works this way](docs/guide/explain-cost.md) | cost as the unit, Blob V2, evidence before advice |
+
+The six reference pages are generated from the code by `make docs`, and `make test`
+fails if they drift from it.
+
 ## Point an agent at it
 
 The console's read surface is also an MCP server, so Claude Code — or any agent host

@@ -25,8 +25,12 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
-import embed
 from server.catalog import Catalog, Handle, disk_usage, is_blob_field
+
+# `embed` pulls SigLIP and therefore torch, and is imported where it is used rather
+# than here. Importing this module is how the app describes its own routes — to the
+# documentation generator, to the tests — and none of that should need a gigabyte of
+# machine learning to be installed first.
 
 router = APIRouter()
 
@@ -161,6 +165,8 @@ def load(catalog: Catalog) -> bool:
 
 def warm() -> None:
     """Run one of everything so the first search on stage is not the slow one."""
+    import embed
+
     embed.load()
     embed.embed_text(["warm up"])
     STATE.moments.ds.scanner(
@@ -207,6 +213,8 @@ def _where(req: SearchReq) -> str | None:
 
 
 def _vector_hits(req: SearchReq, where: str | None, k: int) -> list[dict]:
+    import embed
+
     v = embed.embed_text([req.q])[0]
     return STATE.moments.ds.scanner(
         columns=COLUMNS,

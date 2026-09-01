@@ -1,4 +1,4 @@
-.PHONY: help setup download prepare prepare-force embed build ingest verify test api mcp web demo dev tidy bench clean
+.PHONY: help setup download prepare prepare-force embed build ingest verify test docs api mcp web demo dev tidy bench clean
 
 PY := .venv/bin/python
 UVICORN := .venv/bin/uvicorn
@@ -8,6 +8,7 @@ help:
 	@echo "make setup             install python deps + web deps"
 	@echo "make ingest LIMIT=36   download -> prepare -> embed -> build -> verify"
 	@echo "make test              contract tests, synthetic fixtures (~3s)"
+	@echo "make docs              re-render the generated reference pages"
 	@echo "make verify            green-room preflight, real corpus (~15s)"
 	@echo "make demo              run API + web together"
 
@@ -43,6 +44,12 @@ verify:
 # the one that has to pass before a demo.
 test:
 	uv run --only-group test python -m pytest
+
+# Re-render the reference pages from the code. `make test` fails if the committed
+# ones have drifted, so this is what to run after changing a route, a rule, the
+# model registry or an MCP tool.
+docs:
+	$(PY) scripts/gen_docs.py
 
 bench:
 	$(PY) scripts/blob_bench.py

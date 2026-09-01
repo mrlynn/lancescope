@@ -270,7 +270,7 @@ project a heavy column.
 **Done when:** "why is search on this table slow?" returns the unindexed-vector
 finding, with the byte and token cost of having asked.
 
-### I9 — Docs
+### I9 — Docs  ✅ landed
 A README section on enabling intelligence, leading with the two paths: `ollama pull`
 for local, free, offline; or a key for the strongest results. Then the env vars, the
 model/pricing table, the OpenAI-compatible escape hatch, and what works with neither.
