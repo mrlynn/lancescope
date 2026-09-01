@@ -69,17 +69,45 @@ APPLE_PASSWORD=your-app-specific-password \
 ./desktop/sign.sh
 ```
 
-`APPLE_PASSWORD` is an **app-specific password** from appleid.apple.com, not your
-Apple ID password. If you sign more than once, store it in the keychain instead:
+`APPLE_PASSWORD` is an **app-specific password** from appleid.apple.com under
+Sign-In and Security — not your Apple ID password. It looks like
+`abcd-efgh-ijkl-mnop`. This is the single most common reason notarisation returns
+`401 Invalid credentials`.
+
+If you sign more than once, put the credentials in the keychain instead of in your
+shell history:
 
 ```bash
 xcrun notarytool store-credentials lancescope \
-  --apple-id you@example.com --team-id TEAMID --password …
+  --apple-id you@example.com --team-id TEAMID --password abcd-efgh-ijkl-mnop
 ```
+
+```bash
+NOTARY_PROFILE=lancescope \
+APPLE_SIGNING_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
+./desktop/sign.sh
+```
+
+Either way the credentials are checked **before anything is built**. Apple answers a
+`notarytool history` call in well under a second, and finding out a password is wrong
+after a Rust compile, a 428 MB copy and a signature is four minutes spent learning
+something that could have been said immediately.
 
 The script builds, signs with the hardened runtime, verifies the signature before
 spending a notarisation round trip, submits the DMG, waits, and staples the ticket so
 the app opens offline on a machine that has never seen it.
+
+### What signing proves, and what it does not
+
+A signed build has been run and verified here: hardened runtime on
+(`flags=0x10000(runtime)`), a full Developer ID chain to the Apple Root CA, all three
+entitlements applied, `codesign --verify --deep --strict` clean, and — the part that
+actually mattered — **the signed app launches and serves its tables**. That is the
+step where a wrong entitlement shows up, and it passed.
+
+Notarisation is a separate thing, and needs Apple's servers and your credentials.
+Until an app is notarised and stapled it will run on the machine that built it and be
+refused everywhere else.
 
 ### The entitlements, and why they are there
 
