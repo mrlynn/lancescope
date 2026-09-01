@@ -20,6 +20,7 @@
 #
 # and then this script can use --keychain-profile lancescope instead.
 set -euo pipefail
+# `local` and ${x//y/z} are used below; this is a bash script, not a POSIX one.
 cd "$(dirname "$0")/.."
 
 # Credentials from a file, if there is one. Typing an app-specific password into a
@@ -170,10 +171,18 @@ echo "==> building the server"
 make sidecar
 
 echo "==> building and signing the app"
-# Tauri signs the bundle, including everything under Resources, when this is set —
-# and notarises it too when the Apple credentials are in the environment, which is
-# why they are checked above rather than left to fail here.
-APPLE_SIGNING_IDENTITY="$APPLE_SIGNING_IDENTITY" ./desktop/build.sh
+# Signing only. Tauri also notarises when APPLE_ID and APPLE_PASSWORD are in the
+# environment, and when that failed it reported:
+#
+#     failed to notarize app:
+#
+# — an empty reason, for credentials that authenticate. A step that can fail
+# without saying why is a step worth owning, so those two are withheld here and
+# the notarisation happens below where its output is visible and its submission id
+# can be used to ask Apple what it disliked.
+APPLE_SIGNING_IDENTITY="$APPLE_SIGNING_IDENTITY" \
+  env -u APPLE_ID -u APPLE_PASSWORD -u APPLE_API_KEY -u APPLE_API_ISSUER \
+  ./desktop/build.sh
 
 APP="desktop/src-tauri/target/release/bundle/macos/LanceScope.app"
 DMG=$(ls desktop/src-tauri/target/release/bundle/dmg/*.dmg | head -1)
@@ -184,41 +193,61 @@ codesign --verify --deep --strict --verbose=2 "$APP"
 # until the app is notarised and stapled; anything else here is a real problem.
 spctl --assess --type execute --verbose=4 "$APP" || true
 
+# One notarisation path, ours, with the output on screen. On rejection Apple keeps a
+# log explaining exactly which file it objected to, reachable by submission id — and
+# fetching it is the difference between "notarisation failed" and knowing that one
+# dylib in a 428 MB bundle is unsigned.
 notarise() {
+  local what=$1 out id
+  echo "    submitting $(basename "$what") ($(du -h "$what" | cut -f1))"
   if [ -n "${NOTARY_PROFILE:-}" ]; then
-    xcrun notarytool submit "$1" --keychain-profile "$NOTARY_PROFILE" --wait
+    out=$(xcrun notarytool submit "$what" --keychain-profile "$NOTARY_PROFILE" --wait 2>&1) || true
   else
-    xcrun notarytool submit "$1" \
+    out=$(xcrun notarytool submit "$what" \
       --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
-      --password "$APPLE_PASSWORD" --wait
+      --password "$APPLE_PASSWORD" --wait 2>&1) || true
   fi
+  echo "${out//${APPLE_PASSWORD:-__none__}/[redacted]}" | sed 's/^/    /'
+
+  case "$out" in
+    *"status: Accepted"*) return 0 ;;
+  esac
+
+  id=$(printf '%s\n' "$out" | awk '/^ *id:/ {print $2; exit}')
+  if [ -n "$id" ]; then
+    echo
+    echo "    Apple's reasons for rejecting it:"
+    if [ -n "${NOTARY_PROFILE:-}" ]; then
+      xcrun notarytool log "$id" --keychain-profile "$NOTARY_PROFILE" 2>&1 | sed 's/^/    /'
+    else
+      xcrun notarytool log "$id" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
+        --password "$APPLE_PASSWORD" 2>&1 | sed 's/^/    /'
+    fi
+  fi
+  return 1
 }
 
 if [ -n "${APPLE_ID:-}${NOTARY_PROFILE:-}" ]; then
-  # Tauri notarises the app itself, but only when APPLE_ID and APPLE_PASSWORD are in
-  # the environment — it has no keychain-profile path for the app bundle. With a
-  # profile it signs and stops, so the app needs its own submission here.
-  #
   # notarytool takes a zip, a disk image or an installer package, never a bare
   # `.app`, so the app goes up inside a zip and the ticket is stapled to the app
-  # itself afterwards.
-  if [ -n "${NOTARY_PROFILE:-}" ]; then
-    echo "==> notarising the app (a few minutes)"
-    ZIP=$(mktemp -d)/LanceScope.zip
-    ditto -c -k --keepParent "$APP" "$ZIP"
-    notarise "$ZIP"
-    xcrun stapler staple "$APP"
+  # afterwards.
+  echo "==> notarising the app (a few minutes)"
+  ZIP=$(mktemp -d)/LanceScope.zip
+  ditto -c -k --keepParent "$APP" "$ZIP"
+  notarise "$ZIP" || { echo; echo "Nothing was stapled."; exit 1; }
+  xcrun stapler staple "$APP"
 
-    # The disk image was assembled around an unstapled app, so it is rebuilt to
-    # carry the stapled one. Shipping a DMG whose contents were notarised after it
-    # was made is how an app gets refused on a machine with no network.
-    echo "==> rebuilding the disk image around the stapled app"
-    ./desktop/build.sh >/dev/null
-    DMG=$(ls desktop/src-tauri/target/release/bundle/dmg/*.dmg | head -1)
-  fi
+  # The disk image was assembled around an app with no ticket, so it is rebuilt to
+  # carry the stapled one. A DMG whose contents were notarised after it was made is
+  # how an app gets refused on a machine with no network.
+  echo "==> rebuilding the disk image around the stapled app"
+  APPLE_SIGNING_IDENTITY="$APPLE_SIGNING_IDENTITY" \
+    env -u APPLE_ID -u APPLE_PASSWORD ./desktop/build.sh >/dev/null
+  xcrun stapler staple "$APP"
+  DMG=$(ls desktop/src-tauri/target/release/bundle/dmg/*.dmg | head -1)
 
   echo "==> notarising the disk image (a few minutes)"
-  notarise "$DMG"
+  notarise "$DMG" || { echo; echo "The app is stapled; the disk image is not."; exit 1; }
   xcrun stapler staple "$DMG"
 
   echo "==> what Gatekeeper says now"
