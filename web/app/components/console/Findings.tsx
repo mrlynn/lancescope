@@ -7,12 +7,15 @@
  *  So the same list renders in two places — inline under the panel that owns each
  *  finding, and collected in Insights — from one fetch. */
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Icon from "@/app/components/Icon";
 import { Empty } from "@/app/components/console/atoms";
 import { fmtBytes } from "@/app/lib/api";
 import type { Finding, Findings } from "@/app/lib/catalog";
-import { type Capabilities, type TableSummary, summariseTable } from "@/app/lib/settings";
+import {
+  type Capabilities, type TableSummary, type TokenMeter,
+  getTokenMeter, resetTokenMeter, summariseTable,
+} from "@/app/lib/settings";
 
 const TONE = {
   warn: { rgb: "var(--video-rgb)", color: "var(--video)", icon: "warning" },
@@ -130,12 +133,17 @@ export function InsightsTab({ d, table, ai }: {
   table: string | null;
   ai: Capabilities | null;
 }) {
+  // Bumped whenever something is asked of a model, so the meter below re-reads
+  // rather than polling a number that changes only when someone acts.
+  const [spent, setSpent] = useState(0);
+
   if (!d) return <Empty>working out what this table has to say…</Empty>;
 
   if (!d.findings.length) {
     return (
       <>
-        {table && <Summary table={table} ai={ai} partial={d.partial_analysis} />}
+        {table && <Summary table={table} ai={ai} partial={d.partial_analysis}
+                           onSpend={() => setSpent((n) => n + 1)} />}
         <PartialAnalysis d={d} />
         <Empty>
           Nothing to report on <span className="mono text-[var(--bright)]">{d.name}</span>.
@@ -143,6 +151,7 @@ export function InsightsTab({ d, table, ai }: {
             ? " Of the rules that ran, none fired — see above for the ones that did not."
             : " Every rule this console knows was checked and none of them fired."}
         </Empty>
+        <TokenSpend refreshKey={spent} />
       </>
     );
   }
@@ -162,13 +171,16 @@ export function InsightsTab({ d, table, ai }: {
           : ""}
       </p>
 
-      {table && <Summary table={table} ai={ai} partial={d.partial_analysis} />}
+      {table && <Summary table={table} ai={ai} partial={d.partial_analysis}
+                         onSpend={() => setSpent((n) => n + 1)} />}
 
       <PartialAnalysis d={d} />
 
       <div className="space-y-3 mt-4">
         {d.findings.map((f) => <FindingCard key={f.id} f={f} />)}
       </div>
+
+      <TokenSpend refreshKey={spent} />
     </>
   );
 }
@@ -179,10 +191,11 @@ export function InsightsTab({ d, table, ai }: {
  *  Not fetched on render. It costs a model call the first time, and a panel that
  *  spends money because somebody clicked a tab is a panel that spends money nobody
  *  asked to spend. After that it is a file read, and says so. */
-function Summary({ table, ai, partial }: {
+function Summary({ table, ai, partial, onSpend }: {
   table: string;
   ai: Capabilities | null;
   partial: boolean;
+  onSpend: () => void;
 }) {
   const [state, setState] = useState<TableSummary | null>(null);
   const [busy, setBusy] = useState(false);
@@ -200,6 +213,7 @@ function Summary({ table, ai, partial }: {
     setBusy(true);
     try {
       setState(await summariseTable(table, refresh));
+      onSpend();
     } catch (e) {
       setState({ ok: false, cached: false,
                  error: e instanceof Error ? e.message : "summary failed" });
@@ -284,6 +298,58 @@ function Summary({ table, ai, partial }: {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/** What the language layer has spent since the server started.
+ *
+ *  The demo has a byte instrument because the interesting fact about a Lance search
+ *  is how little it reads. This is the same argument one layer up. It shows nothing
+ *  until something has been spent, because a row of zeros teaches people to stop
+ *  looking at the row. */
+export function TokenSpend({ refreshKey }: { refreshKey: number }) {
+  const [m, setM] = useState<TokenMeter | null>(null);
+
+  const load = useCallback(() => {
+    getTokenMeter().then(setM).catch(() => setM(null));
+  }, []);
+
+  useEffect(() => { load(); }, [load, refreshKey]);
+
+  if (!m || (m.calls === 0 && m.cache_hits === 0)) return null;
+
+  const priced = m.calls - m.unpriced_calls;
+  return (
+    <div className="mt-6 pt-4" style={{ borderTop: "1px solid var(--hairline)" }}>
+      <div className="flex items-center gap-3 flex-wrap">
+        <span className="eyebrow">spent here</span>
+        <span className="mono text-[12px] text-[var(--bright)]">
+          {m.calls} call{m.calls === 1 ? "" : "s"} ·{" "}
+          {(m.input_tokens + m.output_tokens).toLocaleString()} tokens
+          {priced > 0 && m.cost_usd > 0 && (
+            <> · <span style={{ color: "var(--index)" }}>${m.cost_usd.toFixed(4)}</span></>
+          )}
+        </span>
+        <button className="mono text-[10px] text-[var(--haze)] hover:text-[var(--bright)]"
+                onClick={() => resetTokenMeter().then(setM).catch(() => {})}>
+          reset
+        </button>
+      </div>
+
+      <p className="mono text-[10px] text-[var(--haze)] mt-1.5 leading-relaxed">
+        {m.cache_hits > 0 && (
+          <>{m.cache_hits} answer{m.cache_hits === 1 ? "" : "s"} came from the cache
+            and cost nothing. </>
+        )}
+        {m.unpriced_calls > 0 && (
+          <>{m.unpriced_calls} ran on a model with no published price — free if it is
+            local, unknown otherwise. </>
+        )}
+        {m.ceiling_usd !== null && <>Ceiling ${m.ceiling_usd.toFixed(2)}. </>}
+        Since this server started, {Math.max(1, Math.round(m.seconds / 60))} minute
+        {Math.round(m.seconds / 60) === 1 ? "" : "s"} ago.
+      </p>
     </div>
   );
 }

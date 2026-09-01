@@ -19,10 +19,24 @@ from server import settings as cfg
 from server.intel import cache, tasks
 from server.intel import config as intel_config
 from server.intel import findings as intel_findings
+from server.intel import meter as intel_meter
 from server.intel.providers import NoProvider, ProviderError
 from server.routes import catalog as catalog_routes
 
 router = APIRouter(prefix="/intel")
+
+
+def spend(provider, **kwargs):
+    """Make a provider call, having checked the ceiling and recorded what it cost.
+
+    Every call in this module goes through here. A second path that called a
+    provider directly would spend money the meter never saw, and the meter would be
+    worse than useless — it would be reassuring.
+    """
+    intel_meter.METER.check_ceiling()
+    out = provider.complete(**kwargs)
+    intel_meter.METER.record(out.usage, out.cost_usd)
+    return out
 
 # Small on purpose: this is a round trip, not a benchmark. The schema is the same
 # shape the real tasks use, so a model that cannot hold a grammar fails here rather
@@ -71,13 +85,17 @@ async def selftest(role: str = "fast") -> JSONResponse:
     provider = intel_config.provider_for(role, settings)
 
     try:
-        out = provider.complete(
+        out = spend(
+            provider,
             system=SELFTEST_SYSTEM,
             user=SELFTEST_USER,
             schema=SELFTEST_SCHEMA,
             effort="low",
             max_tokens=256,
         )
+    except intel_meter.SpendCeiling as e:
+        return JSONResponse({"ok": False, "role": role, "provider": resolved.provider,
+                             "error": str(e), "ceiling_reached": True})
     except NoProvider as e:
         return JSONResponse({"ok": False, "role": role, "provider": resolved.provider,
                              "error": e.reason, "setup_hint": e.setup_hint})
@@ -147,9 +165,11 @@ async def nl_filter(name: str, body: FilterBody) -> JSONResponse:
     system, user = tasks.filter_prompt(body.question, context)
 
     try:
-        out = provider.complete(system=system, user=user,
-                                schema=tasks.FILTER_SCHEMA, effort="low",
-                                max_tokens=512)
+        out = spend(provider, system=system, user=user,
+                    schema=tasks.FILTER_SCHEMA, effort="low", max_tokens=512)
+    except intel_meter.SpendCeiling as e:
+        return JSONResponse({"ok": False, "error": str(e), "ceiling_reached": True,
+                             **context.as_dict()})
     except NoProvider as e:
         return JSONResponse({"ok": False, "error": e.reason, "setup_hint": e.setup_hint,
                              **context.as_dict()})
@@ -239,6 +259,7 @@ async def summarise(name: str, body: SummaryBody | None = None) -> JSONResponse:
                     model=model)
 
     if not refresh and model and (hit := cache.get(key)) is not None:
+        intel_meter.METER.record_cache_hit()
         return JSONResponse({
             **hit, "ok": True, "cached": True, "cost_usd": 0.0, "ms": 0,
             "version": handle.ds.version,
@@ -249,9 +270,11 @@ async def summarise(name: str, body: SummaryBody | None = None) -> JSONResponse:
     system, user = tasks.summary_prompt(context)
 
     try:
-        out = provider.complete(system=system, user=user,
-                                schema=tasks.SUMMARY_SCHEMA, effort="low",
-                                max_tokens=600)
+        out = spend(provider, system=system, user=user,
+                    schema=tasks.SUMMARY_SCHEMA, effort="low", max_tokens=600)
+    except intel_meter.SpendCeiling as e:
+        return JSONResponse({"ok": False, "cached": False, "error": str(e),
+                             "ceiling_reached": True})
     except NoProvider as e:
         return JSONResponse({"ok": False, "cached": False, "error": e.reason,
                              "setup_hint": e.setup_hint})
@@ -282,3 +305,22 @@ async def summarise(name: str, body: SummaryBody | None = None) -> JSONResponse:
 async def clear_cache(task: str | None = None) -> JSONResponse:
     """Forget cached answers. Nothing here reads a dataset."""
     return JSONResponse({"removed": cache.clear(task)})
+
+
+# ---------------------------------------------------------------------- the meter
+
+@router.get("/meter")
+async def meter() -> JSONResponse:
+    """Tokens and dollars spent by this process, beside the bytes it read.
+
+    The demo has a byte instrument because the interesting fact about a Lance search
+    is how little it reads. The same argument applies here: a tool built to make read
+    cost visible should not hide inference cost.
+    """
+    return JSONResponse(intel_meter.METER.as_dict())
+
+
+@router.post("/meter/reset")
+async def reset_meter() -> JSONResponse:
+    intel_meter.METER.reset()
+    return JSONResponse(intel_meter.METER.as_dict())

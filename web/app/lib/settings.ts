@@ -222,3 +222,24 @@ export const summariseTable = (table: string, refresh = false) =>
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ refresh }),
   });
+
+/* ----------------------------------------------------------------- the meter */
+
+/** Tokens and dollars this server process has spent. Beside the byte meter,
+ *  because a tool built to make read cost visible should not hide inference cost. */
+export type TokenMeter = {
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cost_usd: number;
+  calls: number;
+  cache_hits: number;
+  unpriced_calls: number;
+  ceiling_usd: number | null;
+  seconds: number;
+};
+
+export const getTokenMeter = () => intel<TokenMeter>("/meter");
+
+export const resetTokenMeter = () =>
+  intel<TokenMeter>("/meter/reset", { method: "POST" });

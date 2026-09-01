@@ -249,7 +249,7 @@ schema is rejected before `/rows` ever sees it.
 **Done when:** "talks from 2024 in the Go devroom" produces a filter `/rows` accepts,
 and a nonsense request returns a refusal rather than a guess.
 
-### I6 — The token meter
+### I6 — The token meter  ✅ landed
 Server-side accounting mirroring `demo.Meter`: cumulative tokens and dollars for the
 session at `GET /intel/meter`, rendered in the Insights tab in the same language as
 the byte instrument. Enforces `LANCESCOPE_SPEND_CEILING`.
