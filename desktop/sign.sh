@@ -197,8 +197,17 @@ spctl --assess --type execute --verbose=4 "$APP" || true
 # log explaining exactly which file it objected to, reachable by submission id — and
 # fetching it is the difference between "notarisation failed" and knowing that one
 # dylib in a 428 MB bundle is unsigned.
+notary_info() {
+  if [ -n "${NOTARY_PROFILE:-}" ]; then
+    xcrun notarytool info "$1" --keychain-profile "$NOTARY_PROFILE" 2>&1
+  else
+    xcrun notarytool info "$1" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
+      --password "$APPLE_PASSWORD" 2>&1
+  fi
+}
+
 notarise() {
-  local what=$1 out id
+  local what=$1 out id info
   echo "    submitting $(basename "$what") ($(du -h "$what" | cut -f1))"
   if [ -n "${NOTARY_PROFILE:-}" ]; then
     out=$(xcrun notarytool submit "$what" --keychain-profile "$NOTARY_PROFILE" --wait 2>&1) || true
@@ -209,11 +218,32 @@ notarise() {
   fi
   echo "${out//${APPLE_PASSWORD:-__none__}/[redacted]}" | sed 's/^/    /'
 
+  id=$(printf '%s\n' "$out" | awk '/^ *id:/ {print $2; exit}')
+
   case "$out" in
     *"status: Accepted"*) return 0 ;;
   esac
 
-  id=$(printf '%s\n' "$out" | awk '/^ *id:/ {print $2; exit}')
+  # `--wait` has been seen to return with a submission id and no verdict, which is
+  # not a rejection — Apple has the file and is still working on it. Treating a
+  # missing "Accepted" as a failure reported one as rejected while it was queued.
+  #
+  # Apple warns that the first submission of a new application can take hours, so
+  # this waits rather than guessing, and says what it is waiting for.
+  if [ -n "$id" ]; then
+    echo "    no verdict yet; asking Apple until there is one (first submissions of"
+    echo "    a new app can take hours — safe to interrupt and re-run, the"
+    echo "    submission keeps going)"
+    while :; do
+      info=$(notary_info "$id")
+      case "$info" in
+        *"status: Accepted"*) echo "    accepted"; return 0 ;;
+        *"status: Invalid"*|*"status: Rejected"*) break ;;
+      esac
+      printf '    %s  still processing\n' "$(date +%H:%M:%S)"
+      sleep 30
+    done
+  fi
   if [ -n "$id" ]; then
     echo
     echo "    Apple's reasons for rejecting it:"
