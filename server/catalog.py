@@ -183,3 +183,89 @@ def _looks_like_uri(s: str) -> bool:
     root. One local root is all sprint 1 configures, but the signature takes a URI so
     remote roots are an addition later rather than a rewrite."""
     return "://" in s
+
+
+# ----------------------------------------------------------------- blob detection
+
+def is_blob_field(field) -> bool:
+    """Whether a column's bytes live in a `.blob` side file rather than in the table.
+
+    Two encodings answer to this and they signal it differently. Blob V1 tags the
+    field's metadata with `lance-encoding:blob`. Blob V2 — what this corpus uses —
+    carries no field metadata at all and shows up as a pyarrow extension type named
+    `lance.blob.v2`.
+
+    Worth stating because the route this replaces got the answer by checking for the
+    substring `video_blob` in the column name. That is correct for exactly one table
+    and wrong for every other one: it mislabels a blob column called anything else,
+    and would falsely flag an ordinary column that happened to be named for a video.
+    """
+    if (field.metadata or {}).get(b"lance-encoding:blob") is not None:
+        return True
+    return str(getattr(field.type, "extension_name", "")).startswith("lance.blob")
+
+
+# --------------------------------------------------------------------- disk usage
+
+@dataclass(frozen=True)
+class DiskUsage:
+    """On-disk bytes under a path, split by whether they sit in a Blob V2 side file."""
+
+    blob_bytes: int = 0
+    meta_bytes: int = 0
+    files: int = 0
+
+    @property
+    def ratio(self) -> float:
+        return round(self.blob_bytes / max(self.meta_bytes, 1), 1)
+
+    def as_dict(self) -> dict:
+        return {
+            "blob_bytes": self.blob_bytes,
+            "meta_bytes": self.meta_bytes,
+            "ratio": self.ratio,
+            "files": self.files,
+        }
+
+
+# Keyed by (path, caller-supplied generation). Bounded because a console left open
+# on a busy dataset would otherwise accumulate an entry per version forever.
+_DISK_CACHE: OrderedDict[tuple, DiskUsage] = OrderedDict()
+_DISK_CACHE_MAX = 64
+
+
+def disk_usage(path: Path | str, generation: object) -> DiskUsage:
+    """Walk `path` and total its bytes, split blob vs everything else.
+
+    This has to be a filesystem walk. Lance's own accounting cannot answer it:
+    `tracked_files()` lists no `.blob` paths at all, and the `total_files_size` in
+    the manifest reports 43 KB for a `segments` table holding 2.65 GB of video. The
+    side files are outside everything the manifest knows about — which is the
+    demo's entire point, restated as an operational fact.
+
+    `generation` is the caller's invalidation key: pass the dataset version for one
+    table, or the tuple of versions for a whole root. Results are cached against it
+    because the UI asks for this on every table click and the walk is O(files).
+    """
+    key = (str(path), generation)
+    if key in _DISK_CACHE:
+        _DISK_CACHE.move_to_end(key)
+        return _DISK_CACHE[key]
+
+    blob = meta = files = 0
+    for p in Path(path).rglob("*"):
+        if not p.is_file():
+            continue
+        files += 1
+        size = p.stat().st_size
+        if p.suffix == ".blob":
+            blob += size
+        else:
+            meta += size
+
+    usage = DiskUsage(blob_bytes=blob, meta_bytes=meta, files=files)
+    _DISK_CACHE[key] = usage
+    _DISK_CACHE.move_to_end(key)
+    while len(_DISK_CACHE) > _DISK_CACHE_MAX:
+        _DISK_CACHE.popitem(last=False)
+    return usage

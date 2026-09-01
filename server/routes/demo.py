@@ -26,7 +26,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 import embed
-from server.catalog import Catalog, Handle
+from server.catalog import Catalog, Handle, disk_usage, is_blob_field
 
 router = APIRouter()
 
@@ -412,15 +412,6 @@ async def tracks() -> JSONResponse:
 
 # ---------------------------------------------------------------------------- schema
 
-def _dir_bytes(root: Path, blob: bool) -> int:
-    """Bytes on disk, split by whether they live in a Blob V2 side file."""
-    total = 0
-    for p in root.rglob("*"):
-        if p.is_file() and (p.suffix == ".blob") == blob:
-            total += p.stat().st_size
-    return total
-
-
 @router.get("/schema")
 async def schema() -> JSONResponse:
     """The actual tables, read off disk — the Act 3 slide, live.
@@ -428,9 +419,11 @@ async def schema() -> JSONResponse:
     The point this makes is the file split: the video bytes sit in .blob side
     files, and everything search touches is the small remainder.
 
-    Still hardcoded to the demo's two tables and still walking the directory inline.
-    C3 generalises both — this route is the seed of `/catalog/tables/{name}`, and
-    moves there rather than growing here."""
+    Kept at its old path and shape because the demo's Act 3 panel reads it, but the
+    two things it used to get wrong are now the catalog's job: the directory walk is
+    cached rather than repeated per request, and a blob column is identified by its
+    encoding rather than by the substring `video_blob` in its name. The general
+    version of this route is `/catalog/tables/{name}`."""
     _require_corpus()
 
     def fields(ds) -> list[dict]:
@@ -439,15 +432,17 @@ async def schema() -> JSONResponse:
                 "name": f.name,
                 "type": str(f.type),
                 # the one field the whole demo turns on
-                "blob": (f.metadata or {}).get(b"lance-encoding:blob") is not None
-                or "video_blob" in f.name,
+                "blob": is_blob_field(f),
             }
             for f in ds.schema
         ]
 
-    lance_root = Path(STATE.moments.uri).parent
-    blob_bytes = _dir_bytes(lance_root, blob=True)
-    meta_bytes = _dir_bytes(lance_root, blob=False)
+    # Root-wide, not per table: the panel's claim is about the whole store. Keyed on
+    # both versions so a rebuild of either table invalidates the cached walk.
+    usage = disk_usage(
+        Path(STATE.moments.uri).parent,
+        generation=(STATE.moments.ds.version, STATE.segments.ds.version),
+    )
 
     return JSONResponse({
         "moments": {
@@ -459,9 +454,9 @@ async def schema() -> JSONResponse:
             "fields": fields(STATE.segments.ds),
         },
         "on_disk": {
-            "blob_bytes": blob_bytes,
-            "meta_bytes": meta_bytes,
-            "ratio": round(blob_bytes / max(meta_bytes, 1), 1),
+            "blob_bytes": usage.blob_bytes,
+            "meta_bytes": usage.meta_bytes,
+            "ratio": usage.ratio,
         },
         "storage_version": STATE.segments.ds.data_storage_version,
     })
