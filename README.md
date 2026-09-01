@@ -46,8 +46,19 @@ that speaks MCP — can inspect a LanceDB database directly:
 claude mcp add lancescope -- uv --directory /path/to/lancescope run python -m server.mcp_server
 ```
 
-It reads whichever connection the console is pointed at, and needs no key of its own:
-the intelligence is the agent's, and the tools are the same routes the console calls.
+**Which database?** Whichever connection the console is pointed at — the same ladder,
+resolved on every call, so switching connections in the console switches what the
+agent sees. `list_tables` reports the root it resolved, so the agent can say which
+database it is describing. To pin it to one instead, independently of the console:
+
+```bash
+claude mcp add lancescope --env LANCE_ROOT=/path/to/tables -- \
+  uv --directory /path/to/lancescope run python -m server.mcp_server
+```
+
+With nothing configured, every tool says so rather than guessing. It needs no key of
+its own: the intelligence is the agent's, and the tools are the same routes the
+console calls.
 Seven of them — list tables, describe one, its findings, versions, indices,
 fragments, and a page of rows — all declared read-only, and none able to materialise
 a blob column, because the routes underneath them cannot.

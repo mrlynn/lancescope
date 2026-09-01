@@ -13,13 +13,18 @@ pytest.importorskip("mcp", reason="the MCP SDK is in the test group")
 
 
 @pytest.fixture
-def mcp(catalog, monkeypatch):
-    """The tool module, bound to the fixture corpus rather than a real connection."""
-    from server import mcp_server
-    from server.routes import catalog as routes
+def mcp(corpus, monkeypatch, tmp_path):
+    """The tool module, pointed at the fixture corpus the way a deployment would be.
 
-    monkeypatch.setattr(mcp_server, "_catalog", catalog)
-    routes.bind(catalog)
+    `LANCE_ROOT` rather than an injected catalog: the resolution happens on every
+    call now, so a test that reached past it would be testing something the server
+    no longer does.
+    """
+    from server import mcp_server
+
+    monkeypatch.setenv("LANCESCOPE_CONFIG", str(tmp_path / "settings.json"))
+    monkeypatch.setenv("LANCE_ROOT", str(corpus))
+    monkeypatch.setattr(mcp_server, "_catalog", None)
     return mcp_server
 
 
@@ -103,3 +108,50 @@ async def test_a_missing_table_is_an_answer(mcp):
 async def test_the_row_limit_is_capped(mcp):
     body = await mcp.read_rows("ordinary", limit=10_000)
     assert body["returned"] <= 100
+
+
+async def test_with_nothing_configured_every_tool_says_so(monkeypatch, settings_file):
+    """An agent cannot tell a wrong answer from a right one.
+
+    This used to fall back to the process's working directory, which meant an
+    unconfigured server started in this repository found `data/lance/moments` and
+    answered questions about a database nobody had selected. The only safe
+    unconfigured state is one that says it is unconfigured.
+    """
+    from server import mcp_server
+
+    monkeypatch.setattr(mcp_server, "_catalog", None)
+    monkeypatch.setattr(mcp_server.cfg, "demo_root", lambda: None)
+
+    assert mcp_server.catalog() is None
+    for body in (await mcp_server.list_tables(),
+                 await mcp_server.describe_table("anything"),
+                 await mcp_server.read_rows("anything")):
+        assert body["error"] == "no database is configured"
+        assert "LANCE_ROOT" in body["detail"]
+
+
+async def test_it_follows_the_console_switching_connections(monkeypatch, corpus,
+                                                            empty_root, settings_file):
+    """Resolved per call, not once.
+
+    Someone switching connections in the console while an agent is mid-session
+    should not have the agent quietly keep answering about the database they left.
+    """
+    from server import mcp_server
+    from server import settings as cfg
+
+    monkeypatch.setattr(mcp_server, "_catalog", None)
+
+    s = cfg.load()
+    cfg.add_connection(s, "fixtures", str(corpus))
+    cfg.save(s)
+    first = await mcp_server.list_tables()
+    assert "ordinary" in {t["name"] for t in first["tables"]}
+
+    s = cfg.load()
+    cfg.add_connection(s, "empty", str(empty_root))
+    cfg.save(s)
+    second = await mcp_server.list_tables()
+    assert second["tables"] == []
+    assert second["root"] == str(empty_root)
