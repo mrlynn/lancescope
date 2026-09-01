@@ -201,7 +201,7 @@ Alongside the zero-bytes rule in `CONTRIBUTING.md`, and asserted by `verify.py`.
 
 ## Tickets
 
-### I1 — Provider shim, model registry, capabilities endpoint
+### I1 — Provider shim, model registry, capabilities endpoint  ✅ landed
 `server/intel/{providers,registry,config}.py`, reading the stored `Intelligence` block
 from `server/settings.py` rather than inventing a config of its own; auto-detection in
 the resolution order above; `GET /intel/capabilities` returning `{available, provider, models_by_role,
@@ -348,3 +348,27 @@ what it writes is its own file.
 For I1 this means the provider shim reads a config object that already exists, and
 `GET /intel/capabilities` is a second opinion on `/settings/intelligence/probe` rather
 than the first thing to answer that question.
+
+### What I1 turned up
+
+Three things worth knowing before I1b and I5 are written.
+
+**The schema alone is not enough context.** `gemma3:27b` answered 7 of 8 NL→filter
+cases from the schema, and the miss was `track = 'Go devroom'` against a corpus whose
+track is `Go` — it transcribed the user's phrasing because nothing told it what lives
+in the column. Sending the distinct values of low-cardinality string columns fixes it
+outright: 729 characters for `moments`, still metadata, still nothing that reads a
+blob. **I5 should build that facet block, and I2's findings can compute it once.**
+
+**"Express every condition" belongs in the prompt.** Without it, a compound request
+came back with one half silently dropped — `track != 'Containers'`, the Kubernetes
+half gone, 1,087 rows returned instead of 27. With it, `gemma3:27b`, `qwen3:8b` and
+`qwen3.5:35b` all got a case built so that dropping either half is visible. The
+failures were prompt-shaped, not model-shaped.
+
+**Measured, on the FOSDEM corpus:** `gemma3:27b` 6–11s per filter, `qwen3:8b` 10–16s,
+`qwen3.5:35b` 41–53s, all with the same answers. The first two are in
+`registry.LOCAL_KNOWN_GOOD` as the defaults a local setup falls back to.
+
+The harness that produced these belongs in the repo with I5, so the cases become a
+regression test rather than a thing that was run once.

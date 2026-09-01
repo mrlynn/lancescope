@@ -14,22 +14,20 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-import httpx
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from server import settings as cfg
 from server.catalog import Catalog
+from server.intel import config as intel_config
+from server.intel.providers import ollama_host, ollama_models
 from server.routes import demo
 
 router = APIRouter(prefix="/settings")
 
 CATALOG: Catalog | None = None
 
-# Long enough for a local daemon that is running, short enough that a settings page
-# does not hang on one that is not.
-PROBE_TIMEOUT_S = 1.5
 
 
 def bind(catalog: Catalog) -> None:
@@ -88,6 +86,7 @@ def _inspect(uri: str) -> dict:
 
 def _intel_view(intel: cfg.Intelligence) -> dict:
     """Intelligence config as the UI should see it: never the key itself."""
+    resolved = intel_config.resolve(cfg.Settings(intelligence=intel))
     resolved_provider = intel.provider
     anthropic_env = bool(os.environ.get("ANTHROPIC_API_KEY"))
     key, source = cfg.api_key_for(intel, "anthropic" if resolved_provider in
@@ -102,10 +101,16 @@ def _intel_view(intel: cfg.Intelligence) -> dict:
         "ollama_host": intel.ollama_host or os.environ.get("OLLAMA_HOST")
                        or cfg.DEFAULT_OLLAMA_HOST,
         "providers": list(cfg.PROVIDERS),
-        # The provider shim (#21) is what consumes this; until it lands the settings
-        # are stored and reported, and nothing reads them at request time.
-        "active": False,
-        "active_note": "Saved. The provider layer that consumes this lands with #21.",
+        # Resolved rather than asserted: what is stored here and what the language
+        # layer actually ends up using can differ, and the page has to show the
+        # second one. `/intel/capabilities` is the same answer in full.
+        "active": resolved.available,
+        "active_note": (
+            f"Live: {resolved.models.get('deep')} via {resolved.provider} — "
+            f"{resolved.reason}."
+            if resolved.available else
+            f"Not active: {resolved.reason}. {resolved.setup_hint}".strip()
+        ),
     }
 
 
@@ -224,21 +229,16 @@ async def probe_intelligence() -> JSONResponse:
     """
     s = cfg.load()
     intel = s.intelligence
-    host = (intel.ollama_host or os.environ.get("OLLAMA_HOST")
-            or cfg.DEFAULT_OLLAMA_HOST)
-    if "://" not in host:
-        host = f"http://{host}"
-
-    ollama: dict = {"host": host, "running": False, "models": [], "error": None}
-    try:
-        r = httpx.get(f"{host.rstrip('/')}/api/tags", timeout=PROBE_TIMEOUT_S)
-        r.raise_for_status()
-        ollama["running"] = True
-        ollama["models"] = sorted(
-            m.get("name", "") for m in (r.json().get("models") or []) if m.get("name")
-        )
-    except (httpx.HTTPError, ValueError) as e:
-        ollama["error"] = type(e).__name__
+    host = ollama_host(intel.ollama_host)
+    installed = ollama_models(intel.ollama_host)
+    ollama = {
+        "host": host,
+        "running": installed is not None,
+        "models": installed or [],
+        # None and [] are different answers — no daemon, versus a daemon with nothing
+        # pulled — and the page says which.
+        "error": None if installed is not None else "unreachable",
+    }
 
     key, source = cfg.api_key_for(intel, "anthropic")
     return JSONResponse({

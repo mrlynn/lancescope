@@ -16,6 +16,10 @@ dependencies = [
     # embeddings
     "torch>=2.5",
     "open-clip-torch>=2.30",
+    # the language layer — optional at runtime, not at install time: the console
+    # works with no provider configured, but the Anthropic path needs its SDK present
+    # to be one import away rather than a try/except around a missing package.
+    "anthropic>=1.2",
     # serving
     "fastapi>=0.115",
     "uvicorn[standard]>=0.34",

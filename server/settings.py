@@ -280,12 +280,19 @@ def api_key_for(intel: Intelligence, provider: str) -> tuple[str | None, str | N
     A deployment that exports `ANTHROPIC_API_KEY` should not be overridden by a value
     someone typed into a browser, and an operator who typed one into the browser
     should be told which of the two is actually in play.
+
+    The stored key is scoped to the provider it was stored for. There is one key
+    field in settings, so a value left behind from an earlier configuration would
+    otherwise be offered to whoever asked next — which showed up as a settings page
+    reporting Anthropic as ready on the strength of a token typed in while the
+    provider was Ollama. An environment variable is named after its provider and
+    needs no such scoping.
     """
     env_name = {"anthropic": "ANTHROPIC_API_KEY", "openai-compat": "LANCESCOPE_LLM_API_KEY"}
     name = env_name.get(provider)
     if name and (v := os.environ.get(name)):
         return v, "env"
-    if intel.api_key:
+    if intel.api_key and (intel.provider or "auto") in (provider, "auto"):
         return intel.api_key, "settings"
     return None, None
 

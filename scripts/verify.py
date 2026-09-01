@@ -79,6 +79,94 @@ def heavy_columns(fields: list[dict]) -> list[str]:
     return out
 
 
+def intel_checks() -> None:
+    """The language layer resolves to the right thing in every state, including none.
+
+    The Ollama probe is stubbed rather than exercised: this has to pass on a machine
+    with no daemon, which is every CI runner and most laptops. What is being checked
+    is the ladder, not Ollama.
+    """
+    import os
+    import tempfile
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from server.intel import config as intel_config
+    from server.intel import registry
+    from server.routes import intel as intel_routes
+
+    real_probe = intel_config.ollama_models
+
+    def resolved(**fields):
+        """Resolve against a throwaway settings file, never the operator's own."""
+        with tempfile.TemporaryDirectory() as tmp:
+            os.environ["LANCESCOPE_CONFIG"] = str(Path(tmp) / "settings.json")
+            key = fields.pop("env_key", None)
+            os.environ.pop("ANTHROPIC_API_KEY", None)
+            if key:
+                os.environ["ANTHROPIC_API_KEY"] = key
+            from server import settings as cfg
+            st = cfg.load()
+            for k, v in fields.items():
+                setattr(st.intelligence, k, v)
+            return intel_config.resolve(st)
+
+    try:
+        # 1. Nothing configured and nothing local.
+        intel_config.ollama_models = lambda *_a, **_k: None
+        r = resolved()
+        check("no key and no local runtime resolves to nothing, with a hint",
+              r.provider == "none" and not r.available and bool(r.setup_hint))
+
+        # 2. A key, found by auto-detection.
+        r = resolved(env_key="sk-ant-not-a-real-key")
+        check("a key alone brings up the Anthropic path",
+              r.provider == "anthropic" and r.available
+              and r.models["deep"] == registry.ANTHROPIC_DEFAULT,
+              r.models.get("deep", ""))
+
+        # 3. A local runtime, no key.
+        intel_config.ollama_models = lambda *_a, **_k: ["qwen3:8b", "llama3.2:3b"]
+        r = resolved()
+        check("a local runtime alone brings up the language layer, free",
+              r.provider == "ollama" and r.available and r.models["deep"] == "qwen3:8b",
+              r.models.get("deep", ""))
+
+        # 4. Both — and then the explicit pin, which has to beat auto-detection.
+        both = resolved(env_key="sk-ant-not-a-real-key")
+        pinned = resolved(env_key="sk-ant-not-a-real-key", provider="ollama")
+        check("with both, the key wins; an explicit pin beats them both",
+              both.provider == "anthropic" and pinned.provider == "ollama")
+
+        # A model nobody has heard of is usable, and honest about what is unknown.
+        unknown = registry.lookup("some-local-model:9b", "ollama")
+        check("an unknown model costs nothing to run and nothing is invented",
+              registry.cost_usd(unknown, 1000, 1000) == 0.0
+              and not unknown.tools and unknown.input_usd_per_mtok is None)
+        priced = registry.cost_usd(registry.MODELS[registry.ANTHROPIC_DEFAULT], 1_000_000, 0)
+        check("a known model is priced from the registry", priced == 5.0, f"${priced}")
+
+        # The routes, including the one that has to fail gracefully.
+        with tempfile.TemporaryDirectory() as tmp:
+            os.environ["LANCESCOPE_CONFIG"] = str(Path(tmp) / "settings.json")
+            intel_config.ollama_models = lambda *_a, **_k: None
+            os.environ.pop("ANTHROPIC_API_KEY", None)
+            app = FastAPI()
+            app.include_router(intel_routes.router)
+            api = TestClient(app)
+            caps = api.get("/intel/capabilities")
+            test = api.post("/intel/selftest")
+            check("capabilities answers with nothing configured",
+                  caps.status_code == 200 and caps.json()["available"] is False)
+            check("a self-test with no provider is a result, not a 500",
+                  test.status_code == 200 and test.json()["ok"] is False
+                  and bool(test.json()["error"]))
+    finally:
+        intel_config.ollama_models = real_probe
+        os.environ.pop("LANCESCOPE_CONFIG", None)
+
+
 def settings_checks() -> None:
     """Connections move the catalog, and the settings surface keeps its promises.
 
@@ -360,6 +448,9 @@ def main() -> int:
 
     print("\n  settings")
     settings_checks()
+
+    print("\n  intelligence")
+    intel_checks()
 
     print(f"\n{'ALL GOOD — go on stage' if ok else 'SOMETHING IS BROKEN'}")
     return 0 if ok else 1

@@ -102,3 +102,59 @@ export const saveIntelligence = (patch: Record<string, unknown>) =>
   call<IntelligenceView>("/intelligence", { method: "PUT", body: JSON.stringify(patch) });
 
 export const probeIntelligence = () => call<IntelProbe>("/intelligence/probe");
+
+/* ------------------------------------------------------------------ intelligence */
+
+export type ModelInfo = {
+  id: string;
+  provider: string;
+  context: number | null;
+  input_usd_per_mtok: number | null;
+  output_usd_per_mtok: number | null;
+  structured_output: boolean;
+  tools: boolean;
+  priced_on: string | null;
+  note: string;
+};
+
+export type Capabilities = {
+  available: boolean;
+  provider: string;
+  reason: string;
+  models_by_role: { deep: ModelInfo; fast: ModelInfo };
+  installed_models: string[];
+  known_good_local: string[];
+  tools_capable: boolean;
+  key_source: string | null;
+  host: string | null;
+  setup_hint: string;
+  priced_on: string;
+};
+
+/** A self-test answers 200 whether or not it worked — a provider that fails is a
+ *  result, not a server fault. Read `ok`, never the status code. */
+export type SelfTest = {
+  ok: boolean;
+  role: string;
+  provider?: string;
+  model?: string | null;
+  error: string | null;
+  setup_hint?: string;
+  retryable?: boolean;
+  text?: string;
+  data?: Record<string, unknown> | null;
+  usage?: { input_tokens: number; output_tokens: number; cache_read_tokens: number };
+  cost_usd?: number | null;
+  ms?: number;
+};
+
+async function intel<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`/api/intel${path}`, { cache: "no-store", ...init });
+  if (!res.ok) throw new Error(`${res.status}`);
+  return res.json();
+}
+
+export const getCapabilities = () => intel<Capabilities>("/capabilities");
+
+export const runSelfTest = (role = "fast") =>
+  intel<SelfTest>(`/selftest?role=${role}`, { method: "POST" });
