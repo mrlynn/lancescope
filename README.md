@@ -24,14 +24,19 @@ vector DB, and it makes for a claim you can prove live rather than assert on a s
 Every figure comes from Lance's own IO accounting (`Dataset.io_stats_incremental()`),
 not from anything measured off to the side. Run `make verify` to reproduce:
 
+Measured on a 16-talk corpus: **1,114 moments, 162 segments, 2.65 GB of video.**
+
 | operation | index bytes | video bytes |
 |---|---|---|
-| semantic search over every moment | ~1.7 MB | **0** |
-| full-text search over transcripts | ~0.1 MB | **0** |
-| the same search, filtered to one devroom | ~1.7 MB | **0** |
-| open a blob handle | — | ~3 KB |
+| semantic search over every moment | 3.45 MB | **0** |
+| full-text search over transcripts | 0.11 MB | **0** |
+| the same search, filtered to one devroom | 3.45 MB | **0** |
+| open a blob handle | — | 2,722 |
 | start playback (cold segment) | — | ~17 MB, one segment |
 | seek again inside it (warm) | — | 262,144 — byte-exact |
+
+On disk that table is **2.65 GB of video in `.blob` side files against 20.1 MB of
+everything a search reads** — a ratio of 132 to 1, which the `S` view shows live.
 
 See [FINDINGS.md](FINDINGS.md) for the measurements that shaped the design, including
 the one that forced videos to be stored as ~16 MB segments rather than whole files.

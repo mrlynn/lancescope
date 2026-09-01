@@ -14,6 +14,7 @@ import argparse
 import json
 import shutil
 import sys
+import warnings
 from pathlib import Path
 
 import lance
@@ -117,6 +118,14 @@ def write_segments(talks: list[dict], prune: bool = True) -> int:
         if prune:
             for seg in segs:
                 Path(seg["path"]).unlink(missing_ok=True)
+            # Record that the bytes now live in the blob column, so a later
+            # prepare run does not decide the talk needs re-segmenting just
+            # because its working files are gone.
+            man_p = WORK / man["talk_id"] / "manifest.json"
+            if man_p.exists():
+                cached = json.loads(man_p.read_text())
+                cached["blobs_written"] = True
+                man_p.write_text(json.dumps(cached, indent=2))
         print(f"    segments {total:4d}  ({man['title'][:44]:44s})", end="\r", flush=True)
     return total
 
@@ -133,6 +142,21 @@ def main() -> int:
         return 1
     print(f"{len(talks)} talks\n")
 
+    # The segments table is rebuilt from scratch, which needs every talk's segment
+    # files on disk. They are pruned once their bytes are in the blob column, so a
+    # second build has nothing to read from.
+    missing = [
+        man["title"]
+        for man in talks
+        if any(not Path(sg["path"]).exists() for sg in man["segments"])
+    ]
+    if missing:
+        print(f"  {len(missing)} talk(s) have no segment files left on disk, because a")
+        print("  previous build moved them into the blob column. To rebuild the tables:")
+        print("      make prepare-force && make embed && make build")
+        print(f"  first missing: {missing[0][:60]}")
+        return 1
+
     print("  writing segments (Blob V2)...")
     nseg = write_segments(talks, prune=not args.keep_segments)
     print(f"    segments: {nseg} rows written        ")
@@ -146,7 +170,12 @@ def main() -> int:
     print(f"    moments: {tbl.count_rows()} rows")
 
     print("  indexing...")
-    tbl.create_index(config=lancedb.index.FTS(), column="transcript", replace=True)
+    # create_fts_index is marked deprecated in favour of create_index(config=FTS()),
+    # but that path mis-binds its positional arguments in lancedb 0.38 and fails with
+    # "Field path `l2` not found in schema". The deprecated call is the working one.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        tbl.create_fts_index("transcript", replace=True)
     print("    FTS index on transcript")
     n = tbl.count_rows()
     if n >= 5000:

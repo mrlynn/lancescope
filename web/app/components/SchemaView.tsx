@@ -72,7 +72,8 @@ export default function SchemaView({ onClose }: { onClose: () => void }) {
 
   return (
     <div
-      className="fixed inset-0 z-[58] overflow-y-auto px-[var(--stage-pad)] py-10"
+      // pb clears the byte rail, which stays visible on top of this view.
+      className="fixed inset-0 z-[58] overflow-y-auto px-[var(--stage-pad)] pt-10 pb-[250px]"
       style={{ background: "rgba(12,11,10,0.97)" }}
       onClick={onClose}
     >

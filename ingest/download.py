@@ -36,8 +36,10 @@ MIRRORS = [
 ]
 
 # Refuse to keep going once the disk gets tight; a filled disk is a worse outcome
-# than a smaller corpus.
-MIN_FREE_GB = 8.0
+# than a smaller corpus. The threshold is generous because each downloaded talk is
+# later joined by its segment files and its copy in the blob column, so the corpus
+# costs roughly three times what this stage puts on disk.
+MIN_FREE_GB = 12.0
 SCHEDULE = "https://fosdem.org/{year}/schedule/xml"
 
 # Devrooms whose talks lean on slides rather than a fixed podium shot. Text-to-frame

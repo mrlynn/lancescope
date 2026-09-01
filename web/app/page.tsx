@@ -121,7 +121,7 @@ export default function Page() {
         run(CUES[n - 1], mode, track);
       } else if (e.key.toLowerCase() === "r") {
         resetMeter().then(setMeter);
-      } else if (e.key === "Enter" && hits.length) {
+      } else if ((e.key === "Enter" || e.code === "NumpadEnter") && hits.length) {
         setPicked(hits[0]);
       } else if (e.key === "Escape") {
         inputRef.current?.blur();

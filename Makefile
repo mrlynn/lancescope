@@ -1,4 +1,4 @@
-.PHONY: help setup download prepare embed build ingest verify api web demo dev tidy bench clean
+.PHONY: help setup download prepare prepare-force embed build ingest verify api web demo dev tidy bench clean
 
 PY := .venv/bin/python
 UVICORN := .venv/bin/uvicorn
@@ -19,6 +19,10 @@ download:
 
 prepare:
 	$(PY) ingest/prepare.py
+
+# Re-segment everything, including talks whose working files were pruned.
+prepare-force:
+	$(PY) ingest/prepare.py --force
 
 embed:
 	$(PY) ingest/embed.py

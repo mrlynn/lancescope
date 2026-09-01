@@ -7,6 +7,7 @@ because slide-heavy talks hold one image for a long time.
     uv run python ingest/prepare.py
 """
 
+import argparse
 import csv
 import json
 import re
@@ -40,12 +41,18 @@ def ffmpeg(args: list[str]) -> None:
         raise RuntimeError(f"ffmpeg failed: {res.stderr.strip()[:400]}")
 
 
+class NotReady(Exception):
+    """The video will not decode yet — usually it is still being written."""
+
+
 def probe_duration(path: Path) -> float:
     out = subprocess.run(
         ["ffprobe", "-v", "error", "-show_entries", "format=duration",
          "-of", "default=nw=1:nk=1", str(path)],
-        capture_output=True, text=True, check=True,
+        capture_output=True, text=True,
     )
+    if out.returncode != 0 or not out.stdout.strip():
+        raise NotReady(path.parent.name)
     return float(out.stdout.strip())
 
 
@@ -217,13 +224,28 @@ def window_text(stream: list[tuple[float, str]], ts: float) -> str:
 
 # ---------------------------------------------------------------------------- driver
 
-def prepare_talk(talk_dir: Path) -> dict | None:
+def prepare_talk(talk_dir: Path, force: bool = False) -> dict | None:
     video = talk_dir / "video.mp4"
     if not video.exists():
         return None
     talk_id = talk_dir.name
     out = WORK / talk_id
     out.mkdir(parents=True, exist_ok=True)
+
+    # Segmenting and frame extraction are the expensive steps; skip a talk whose
+    # manifest is already newer than its video so the corpus can be built up as
+    # downloads land instead of in one all-or-nothing pass.
+    manifest_p = out / "manifest.json"
+    if not force and manifest_p.exists():
+        try:
+            cached = json.loads(manifest_p.read_text())
+            segs_ok = all(Path(sg["path"]).exists() for sg in cached["segments"])
+            frames_ok = all(Path(m["frame_path"]).exists() for m in cached["moments"])
+            if cached.get("moments") and (segs_ok or cached.get("blobs_written")) and frames_ok:
+                cached["_cached"] = True
+                return cached
+        except Exception:                                  # noqa: BLE001
+            pass                                           # rebuild on any doubt
 
     title, speaker, track, year = talk_id, "", "", 0
     meta_p = talk_dir / "meta.json"
@@ -290,6 +312,11 @@ def prepare_talk(talk_dir: Path) -> dict | None:
 
 
 def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--force", action="store_true", help="re-segment talks already done")
+    args = ap.parse_args()
+
+    skipped = 0
     talks = sorted(d for d in RAW.iterdir() if d.is_dir())
     if not talks:
         print(f"no talks in {RAW}; run ingest/download.py first")
@@ -300,12 +327,15 @@ def main() -> int:
 
     for d in talks:
         try:
-            man = prepare_talk(d)
+            man = prepare_talk(d, force=args.force)
         except Exception as exc:
             print(f"  ! {d.name}: {exc}")
             continue
         if not man:
             print(f"  ! {d.name}: no video.mp4")
+            continue
+        if man.get("_cached"):
+            print(f"  =  {man['title'][:52]:52s} (already prepared)")
             continue
         seg_mb = [s["bytes"] / 1e6 for s in man["segments"]]
         print(
@@ -315,6 +345,9 @@ def main() -> int:
             f"({min(seg_mb):.0f}-{max(seg_mb):.0f} MB)  "
             f"{len(man['moments']):4d} moments  {man['n_cues']:4d} cues"
         )
+
+    if skipped:
+        print(f"\n  {skipped} talk(s) still downloading — re-run prepare when they finish")
     return 0
 
 
