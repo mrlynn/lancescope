@@ -282,7 +282,7 @@ export default function Console() {
                 ? <><FragmentsTab d={fragments} /><PanelFindings d={findings} panel="fragments" /></>
                 : <Empty>reading fragments…</Empty>)}
               {tab === "query" && (picked
-                ? <QueryTab key={picked} table={picked} />
+                ? <QueryTab key={picked} table={picked} root={root} />
                 : <Empty>pick a table to query</Empty>)}
               {tab === "compare" && (picked
                 ? <CompareTab key={picked} table={picked} />

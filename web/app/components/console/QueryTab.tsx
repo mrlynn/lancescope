@@ -21,6 +21,10 @@ import {
   getQueryCapabilities, runQuery,
 } from "@/app/lib/catalog";
 import { fmtBytes } from "@/app/lib/api";
+import { download, toCsv, toJson } from "@/app/lib/export";
+import {
+  type StoredQuery, describeSpec, useQueryHistory, useSavedQueries,
+} from "@/app/lib/queries";
 
 const MODE_LABEL: Record<string, string> = {
   scan: "filter",
@@ -31,7 +35,7 @@ const MODE_LABEL: Record<string, string> = {
 
 const MODES = ["scan", "fts", "vector", "hybrid"] as const;
 
-export function QueryTab({ table }: { table: string }) {
+export function QueryTab({ table, root }: { table: string; root: string | null }) {
   const [caps, setCaps] = useState<QueryCapabilities | null>(null);
   const [mode, setMode] = useState<QuerySpec["mode"]>("scan");
   const [filter, setFilter] = useState("");
@@ -50,6 +54,12 @@ export function QueryTab({ table }: { table: string }) {
   // work stopped.
   const [aborter, setAborter] = useState<AbortController | null>(null);
   const [cancelled, setCancelled] = useState(false);
+  const [saveName, setSaveName] = useState("");
+
+  // Both lists are per database and live in the browser, beside recents and pins —
+  // a query written against one database means nothing against another.
+  const { history, record, clear } = useQueryHistory(root);
+  const { saved, save, remove } = useSavedQueries(root);
   const [showPlan, setShowPlan] = useState(false);
   const [showRepro, setShowRepro] = useState(false);
 
@@ -84,7 +94,10 @@ export function QueryTab({ table }: { table: string }) {
         : {}),
     };
     try {
-      setResult(await runQuery(table, spec, controller.signal));
+      const r = await runQuery(table, spec, controller.signal);
+      setResult(r);
+      record(table, spec, { read_bytes: r.read_bytes, ms: r.ms,
+                            returned: r.returned, version: r.version });
     } catch (e) {
       setResult(null);
       if (e instanceof DOMException && e.name === "AbortError") {
@@ -97,7 +110,34 @@ export function QueryTab({ table }: { table: string }) {
       setBusy(false);
       setAborter(null);
     }
-  }, [table, mode, filter, limit, text, vectorColumn, likeRow, k, prefilter]);
+  }, [table, mode, filter, limit, text, vectorColumn, likeRow, k, prefilter, record]);
+
+  /** Put a stored query back in the form. It is not run: a saved query is a
+   *  question, and running it is still the reader's decision — especially since the
+   *  cost recorded beside it describes a past run against a version that may have
+   *  moved. */
+  const load = useCallback((q: StoredQuery) => {
+    setMode(q.spec.mode);
+    setFilter(q.spec.filter ?? "");
+    setText(q.spec.text ?? "");
+    setVectorColumn(q.spec.vector_column ?? "");
+    setLikeRow(String(q.spec.like_row ?? 0));
+    setK(String(q.spec.k ?? 10));
+    setLimit(String(q.spec.limit ?? 25));
+    setResult(null);
+    setError(null);
+  }, []);
+
+  const currentSpec = (): QuerySpec => ({
+    mode,
+    filter: filter.trim() || null,
+    limit: Number(limit) || 25,
+    ...(mode === "fts" || mode === "hybrid" ? { text } : {}),
+    ...(mode === "vector" || mode === "hybrid"
+      ? { vector_column: vectorColumn, like_row: Number(likeRow) || 0,
+          k: Number(k) || 10, prefilter }
+      : {}),
+  });
 
   const active = capFor(mode);
 
@@ -246,6 +286,44 @@ export function QueryTab({ table }: { table: string }) {
             </pre>
           )}
 
+          <div className="flex flex-wrap items-center gap-2 mb-4">
+            <span className="eyebrow">this result</span>
+            <button className="btn mono !h-[26px] !px-2.5 text-[10px] tracking-[0.14em] uppercase"
+                    onClick={() => download(`${table}-${Date.now()}.csv`,
+                                            toCsv(result.columns, result.rows),
+                                            "text/csv")}>
+              <Icon name="external" size={12} />csv
+            </button>
+            <button className="btn mono !h-[26px] !px-2.5 text-[10px] tracking-[0.14em] uppercase"
+                    onClick={() => download(`${table}-${Date.now()}.json`,
+                                            toJson(result.columns, result.rows),
+                                            "application/json")}>
+              <Icon name="external" size={12} />json
+            </button>
+            <span className="mono text-[10px] text-[var(--haze)]">
+              the {result.returned} rows on screen — heavy columns were never read,
+              and export as the summaries shown here
+            </span>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 mb-4">
+            <span className="eyebrow">save as</span>
+            <input className="qin w-[220px]" value={saveName}
+                   onChange={(e) => setSaveName(e.target.value)}
+                   onKeyDown={(e) => {
+                     if (e.key === "Enter" && saveName.trim()) {
+                       save(saveName.trim(), table, currentSpec());
+                       setSaveName("");
+                     }
+                   }}
+                   placeholder="what this query answers" />
+            <button className="btn mono !h-[26px] !px-2.5 text-[10px] tracking-[0.14em] uppercase"
+                    disabled={!saveName.trim()}
+                    onClick={() => { save(saveName.trim(), table, currentSpec()); setSaveName(""); }}>
+              <Icon name="check" size={12} />save
+            </button>
+          </div>
+
           {showRepro && (
             <pre className="mono text-[10px] leading-relaxed p-4 rounded-sm mb-4
                             overflow-x-auto whitespace-pre"
@@ -293,10 +371,66 @@ export function QueryTab({ table }: { table: string }) {
         </>
       )}
 
-      {!result && !error && !busy && (
+      {!result && !error && !busy && !cancelled && (
         <Empty>Run a query to see what it costs and which path Lance takes.</Empty>
       )}
+
+      <QueryList title="Saved" queries={saved.filter((q) => q.table === table)}
+                 onLoad={load} onRemove={remove} />
+      <QueryList title="Recent" queries={history.filter((q) => q.table === table)}
+                 onLoad={load} onClear={clear} />
     </>
+  );
+}
+
+/** A stored query reads as what it asks and what it cost last time — not as a spec.
+ *  Clicking one loads it into the form rather than running it: the recorded cost
+ *  describes a past run, and deciding to spend it again is the reader's. */
+function QueryList({ title, queries, onLoad, onRemove, onClear }: {
+  title: string;
+  queries: StoredQuery[];
+  onLoad: (q: StoredQuery) => void;
+  onRemove?: (id: string) => void;
+  onClear?: () => void;
+}) {
+  if (!queries.length) return null;
+  return (
+    <div className="mt-7">
+      <div className="flex items-center gap-3 mb-2">
+        <Eyebrow>{title}</Eyebrow>
+        {onClear && (
+          <button className="mono text-[10px] text-[var(--haze)] hover:text-[var(--bright)]"
+                  onClick={onClear}>
+            clear
+          </button>
+        )}
+      </div>
+      <div className="space-y-1">
+        {queries.map((q) => (
+          <div key={q.id} className="flex items-center gap-3 px-3 py-2 rounded-sm border"
+               style={{ borderColor: "var(--rule)" }}>
+            <button className="text-left min-w-0 flex-1" onClick={() => onLoad(q)}>
+              <div className="mono text-[12px] text-[var(--bright)] truncate">
+                {q.name ?? describeSpec(q.spec)}
+              </div>
+              <div className="mono text-[10px] text-[var(--haze)] truncate">
+                {q.spec.mode}
+                {q.name ? ` · ${describeSpec(q.spec)}` : ""}
+                {q.last && ` · last run ${fmtBytes(q.last.read_bytes).value} `
+                  + `${fmtBytes(q.last.read_bytes).unit}, ${q.last.returned} rows, `
+                  + `v${q.last.version}`}
+              </div>
+            </button>
+            {onRemove && (
+              <button className="mono text-[10px] text-[var(--haze)] hover:text-[var(--video)]"
+                      onClick={() => onRemove(q.id)}>
+                remove
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
