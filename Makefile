@@ -1,4 +1,4 @@
-.PHONY: help setup download prepare prepare-force embed build ingest verify test docs ui sidecar api mcp web demo dev tidy bench clean
+.PHONY: help setup download prepare prepare-force embed build ingest verify test docs ui sidecar app api mcp web demo dev tidy bench clean
 
 PY := .venv/bin/python
 UVICORN := .venv/bin/uvicorn
@@ -9,6 +9,7 @@ help:
 	@echo "make ingest LIMIT=36   download -> prepare -> embed -> build -> verify"
 	@echo "make test              contract tests, synthetic fixtures (~3s)"
 	@echo "make docs              re-render the generated reference pages"
+	@echo "make app               build LanceScope.app (unsigned)"
 	@echo "make verify            green-room preflight, real corpus (~15s)"
 	@echo "make demo              run API + web together"
 
@@ -60,6 +61,11 @@ ui:
 
 # The console server as one executable, without torch. See packaging/lancescope.spec
 # for why that exclusion is the whole point.
+# The macOS app: a window that owns the server, rather than a script the login
+# shell gets to interfere with. Unsigned — see desktop/sign.sh for the rest.
+app: sidecar
+	cd desktop/src-tauri && npx --yes @tauri-apps/cli@2 build
+
 sidecar: ui
 	uv run --only-group console --with pyinstaller pyinstaller \
 	  --noconfirm --distpath packaging/dist --workpath packaging/build \

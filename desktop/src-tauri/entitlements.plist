@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- The bundled server is a PyInstaller build. Python's import machinery maps
+       pages from the archive and writes JIT-adjacent pages for some extensions, and
+       the hardened runtime blocks that without these two. Without them the app
+       signs, notarises, and then dies on launch with a code signature error, which
+       is the worst place to find out. -->
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+
+  <!-- A user points this at their own directories. Sandboxing it would mean a
+       file-picker dance for a tool whose entire job is to read a path somebody
+       typed, so this is a Developer ID app rather than an App Store one. -->
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+</dict>
+</plist>

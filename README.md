@@ -37,6 +37,20 @@ Where the root comes from, in order:
 `LANCESCOPE_CONFIG` moves the settings file. Connections may be local directories or
 `s3://` / `db://` URIs; remote ones are saved unverified rather than falsely ticked.
 
+## The macOS app
+
+```bash
+make app
+```
+
+Builds `LanceScope.app` — a window with its own title bar, running a server it starts
+and stops itself. Nothing to install on the machine it lands on: no Python, no Node,
+no Lance. 160 MB as a DMG.
+
+It carries the console and leaves out torch, so the demo's semantic search is
+unavailable in a packaged build and says so. `./desktop/sign.sh` signs and notarises
+it with a Developer ID — see [the guide](docs/guide/howto-desktop.md).
+
 ## The guide
 
 Everything below in more depth, and served by the app itself at **`/docs`** — a
