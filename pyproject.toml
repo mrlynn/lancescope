@@ -37,6 +37,29 @@ dependencies = [
 [dependency-groups]
 dev = ["ruff>=0.9"]
 
+# What the packaged desktop app ships, and deliberately not what the repository
+# installs. The console — catalog, query, compare, findings, settings, and a
+# language layer that reaches a model over HTTP — needs no machine learning locally.
+# torch and open-clip are two gigabytes that exist for the demo's SigLIP embedding,
+# and shipping them in a desktop app to support one screen would quadruple the
+# download for every user who never opens it.
+#
+# The demo stays a thing you run from a checkout. In a packaged build its routes
+# report that they are unavailable, which they already do when the corpus is absent.
+console = [
+    "pylance>=0.38",
+    "pyarrow>=18",
+    "numpy>=2.0",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.34",
+    "pydantic>=2.9",
+    "httpx>=0.28",
+    "anthropic>=1.2",
+    "mcp>=2.1",
+]
+
+build = ["pyinstaller>=6.11"]
+
 # What the contract tests need, and nothing else. Deliberately excludes torch and
 # open-clip: the console does not import them, and a test job that pulls a gigabyte
 # of machine learning to check that a filter is pushed down is a test job nobody

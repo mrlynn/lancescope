@@ -1,6 +1,12 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // The desktop app carries the interface as static files and serves them from the
+  // same process as the API, so there is no Next.js server in the bundle and no
+  // Node runtime to ship. `next dev` and `next build` are unaffected: the export
+  // only happens when asked for.
+  ...(process.env.NEXT_OUTPUT === "export" ? { output: "export" as const } : {}),
+
   async rewrites() {
     // Proxy the FastAPI layer so the browser talks to one origin and Range requests
     // on /api/video/* reach Lance untouched.

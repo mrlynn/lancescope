@@ -1,4 +1,4 @@
-.PHONY: help setup download prepare prepare-force embed build ingest verify test docs api mcp web demo dev tidy bench clean
+.PHONY: help setup download prepare prepare-force embed build ingest verify test docs ui sidecar api mcp web demo dev tidy bench clean
 
 PY := .venv/bin/python
 UVICORN := .venv/bin/uvicorn
@@ -50,6 +50,20 @@ test:
 # model registry or an MCP tool.
 docs:
 	$(PY) scripts/gen_docs.py
+
+# --- desktop ------------------------------------------------------------------
+
+# The interface as static files, for the app bundle to carry. Not used by `make dev`
+# or `make demo`, which run the Next.js server.
+ui:
+	cd web && npm run export
+
+# The console server as one executable, without torch. See packaging/lancescope.spec
+# for why that exclusion is the whole point.
+sidecar: ui
+	uv run --only-group console --with pyinstaller pyinstaller \
+	  --noconfirm --distpath packaging/dist --workpath packaging/build \
+	  packaging/lancescope.spec
 
 bench:
 	$(PY) scripts/blob_bench.py

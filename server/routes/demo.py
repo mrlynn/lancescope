@@ -85,6 +85,9 @@ class State:
     blob_cache: OrderedDict[int, object] = field(default_factory=OrderedDict)
     n_moments: int = 0
     n_talks: int = 0
+    # False in a packaged build, where SigLIP is deliberately absent. The demo's
+    # tables still describe themselves; only the search needs a model.
+    can_embed: bool = True
     corpus_video_bytes: int = 0
     median_talk_bytes: int = 0
     median_segment_bytes: int = 0
@@ -112,6 +115,21 @@ def drain_video() -> None:
         return
     METER.video_bytes += (d := STATE.segments.drain()).read_bytes
     METER.video_iops += d.read_iops
+
+
+def _require_embedding() -> None:
+    """Semantic search needs the model that produced the vectors.
+
+    A build without it can still browse the corpus, so this is a per-request refusal
+    with a reason rather than a server that will not start.
+    """
+    if not STATE.can_embed:
+        raise HTTPException(
+            503,
+            "This build has no embedding model. Semantic and hybrid search need "
+            "SigLIP, which the packaged app leaves out — run from a checkout to "
+            "use them. Full-text search and everything in the console still work.",
+        )
 
 
 def _require_corpus() -> None:
@@ -164,8 +182,20 @@ def load(catalog: Catalog) -> bool:
 
 
 def warm() -> None:
-    """Run one of everything so the first search on stage is not the slow one."""
-    import embed
+    """Run one of everything so the first search on stage is not the slow one.
+
+    Except in a packaged build, where there is no embedding model to warm. The
+    desktop app ships the console and leaves out SigLIP and torch — two gigabytes
+    for one screen — so this reports that and returns rather than taking the whole
+    server down at startup, which is what it used to do.
+    """
+    try:
+        import embed
+    except ImportError:
+        STATE.can_embed = False
+        print("no embedding model in this build — the console is unaffected; the "
+              "demo can list its corpus but not search it.")
+        return
 
     embed.load()
     embed.embed_text(["warm up"])
@@ -264,6 +294,8 @@ def _decorate(hits: list[dict]) -> None:
 @router.post("/search")
 async def search(req: SearchReq) -> JSONResponse:
     _require_corpus()
+    if req.mode in ("vector", "hybrid"):
+        _require_embedding()
     async with LOCK:
         where = _where(req)
         t0 = time.time()
