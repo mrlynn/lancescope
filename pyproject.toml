@@ -20,6 +20,9 @@ dependencies = [
     # works with no provider configured, but the Anthropic path needs its SDK present
     # to be one import away rather than a try/except around a missing package.
     "anthropic>=1.2",
+    # The read surface as agent tools. Cheap to carry: the routes already exist and
+    # this wraps them, so the intelligence is the caller's rather than ours.
+    "mcp>=2.1",
     # serving
     "fastapi>=0.115",
     "uvicorn[standard]>=0.34",
@@ -46,6 +49,10 @@ test = [
     "fastapi>=0.115",
     "httpx>=0.28",
     "pydantic>=2.9",
+    # The MCP tools are async, and the agent surface is exactly the one that needs
+    # testing in CI rather than by hand.
+    "pytest-asyncio>=0.24",
+    "mcp>=2.1",
 ]
 
 [tool.ruff]
