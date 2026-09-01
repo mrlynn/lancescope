@@ -17,9 +17,27 @@ export type TableRef = {
   modified: string | null;
 };
 
+/** What a connection can honestly do, decided from what it is rather than by
+ *  trying. Three states, because "unsupported" and "never tried" are different
+ *  claims and reporting the second as the first is a guess. */
+export type Capability = {
+  state: "available" | "unsupported" | "unverified";
+  reason: string;
+  available: boolean;
+};
+
+export type RootCapabilities = {
+  remote: boolean;
+  discover: Capability;
+  inspect: Capability;
+  disk_split: Capability;
+  io_meter: Capability;
+};
+
 export type TableList = {
   root: string;
   tables: TableRef[];
+  capabilities?: RootCapabilities;
   read_bytes: number;
   read_iops: number;
   note: string;

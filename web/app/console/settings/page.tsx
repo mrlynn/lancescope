@@ -143,11 +143,20 @@ function Connections({ state, onChange, onError }: {
                           <Icon name="warning" size={11} />unreachable — {c.note}
                         </span>
                       : c.reachable === null
-                        ? <><Icon name="info" size={11} />{c.note}</>
+                        ? <span className="flex items-center gap-1.5"
+                                style={{ color: "var(--index)" }}>
+                            <Icon name="info" size={11} />
+                            remote — saved, not browsable
+                          </span>
                         : <><Icon name="table" size={11} />
                             {c.tables.length} table{c.tables.length === 1 ? "" : "s"}</>}
                     {c.last_used && <span className="text-[var(--dim)]">· last used {fmtWhen(c.last_used)}</span>}
                   </div>
+                  {c.capabilities?.remote && (
+                    <div className="text-[11px] text-[var(--haze)] leading-relaxed mt-1.5">
+                      {c.capabilities.discover.reason}
+                    </div>
+                  )}
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   {!c.active && (

@@ -20,6 +20,7 @@ export type ConnectionView = {
   reachable: boolean | null;
   tables: string[];
   note: string;
+  capabilities?: import("@/app/lib/catalog").RootCapabilities;
 };
 
 export type IntelligenceView = {
@@ -54,6 +55,7 @@ export type Probe = {
   reachable: boolean | null;
   tables: string[];
   note: string;
+  capabilities?: import("@/app/lib/catalog").RootCapabilities;
 };
 
 export type IntelProbe = {

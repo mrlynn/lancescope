@@ -168,10 +168,15 @@ class ResolvedRoot:
     source: str                    # env | connection | default | none
     connection_id: str | None = None
     detail: str = ""
+    # The root exactly as it was given. `Path` mangles a URI — `s3://bucket/x`
+    # becomes `s3:/bucket/x`, one slash short and no longer recognisable as remote —
+    # so anything that needs to know what kind of root this is, or wants to show it
+    # to the person who typed it, reads this instead.
+    uri: str = ""
 
     def as_dict(self) -> dict:
         return {
-            "root": str(self.root) if self.root else None,
+            "root": self.uri or (str(self.root) if self.root else None),
             "source": self.source,
             "connection_id": self.connection_id,
             "detail": self.detail,
@@ -218,17 +223,17 @@ def demo_root() -> Path | None:
 def resolve_root(s: Settings) -> ResolvedRoot:
     env = os.environ.get("LANCE_ROOT")
     if env:
-        return ResolvedRoot(Path(env).expanduser(), "env",
+        return ResolvedRoot(Path(env).expanduser(), "env", uri=env,
                             detail="LANCE_ROOT is set; it wins over saved connections.")
 
     if s.active_id:
         conn = next((c for c in s.connections if c.id == s.active_id), None)
         if conn:
             return ResolvedRoot(Path(conn.uri).expanduser(), "connection", conn.id,
-                                detail=conn.label)
+                                detail=conn.label, uri=conn.uri)
 
     if (demo := demo_root()) is not None:
-        return ResolvedRoot(demo, "default",
+        return ResolvedRoot(demo, "default", uri=str(demo),
                             detail="No connection saved; falling back to the ingest "
                                    "output directory, which has tables in it.")
 
