@@ -349,6 +349,23 @@ def query_checks() -> None:
           not seg_caps["hybrid"]["available"] and "needs both legs" in seg_caps["hybrid"]["reason"],
           seg_caps["hybrid"]["reason"])
 
+    # A result belongs to a version. Saying which is what stops figures on screen
+    # from quietly describing a table that has moved on.
+    check("a result names the version it describes",
+          scan["version"] > 0 and scan["latest_version"] >= scan["version"]
+          and scan["stale"] is False,
+          f"v{scan['version']} of v{scan['latest_version']}")
+
+    # A timeout gives up on the wait, not on the work — and says so, because there
+    # is no way to give up on the work.
+    slow = api.post("/catalog/tables/moments/query",
+                    json={"mode": "vector", "vector_column": "vector", "like_row": 0,
+                          "k": 5, "timeout_s": 0.001})
+    check("a query that outruns its timeout is a 408 that explains itself",
+          slow.status_code == 408 and "stopped waiting" in slow.json()["detail"]
+          and "continues" in slow.json()["detail"],
+          slow.json()["detail"][:60])
+
     bad = run("moments", {"mode": "scan", "filter": "no_such_column = 1"})
     missing = run("moments", {"mode": "vector", "vector_column": "title", "like_row": 0})
     check("a query the user got wrong is a 400, not a 500",

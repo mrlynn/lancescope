@@ -315,6 +315,12 @@ export type QueryResult = {
   total_rows: number | null;
   truncated: boolean;
   reproduction: string;
+  /** The version this result describes, and the newest on disk when it was read.
+   *  They differ when the table has been written to since, which makes everything
+   *  on screen true of a version nobody is using any more. */
+  version: number;
+  latest_version: number;
+  stale: boolean;
   /** Only a hybrid search has legs. Reported separately because its cost is the sum
    *  of two paths, and one of them may be a brute-force scan that dominates. */
   legs: {
@@ -330,12 +336,13 @@ export type QueryResult = {
 export const getQueryCapabilities = (n: string) =>
   get<QueryCapabilities>(`/tables/${n}/query/capabilities`);
 
-async function post<T>(path: string, body: unknown): Promise<T> {
+async function post<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
   const res = await fetch(`/api/catalog${path}`, {
     method: "POST",
     cache: "no-store",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
+    signal,
   });
   if (!res.ok) {
     let detail = `${res.status}`;
@@ -349,8 +356,8 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   return res.json();
 }
 
-export const runQuery = (n: string, spec: QuerySpec) =>
-  post<QueryResult>(`/tables/${n}/query`, spec);
+export const runQuery = (n: string, spec: QuerySpec, signal?: AbortSignal) =>
+  post<QueryResult>(`/tables/${n}/query`, spec, signal);
 
 export const explainQuery = (n: string, spec: QuerySpec) =>
   post<{ plan: PlanReading; read_bytes: number }>(`/tables/${n}/query/explain`, spec);

@@ -45,6 +45,15 @@ RRF_K = 60
 MAX_LIMIT = 200
 MAX_K = 200
 
+# How long a request waits for a query before giving up on the wait.
+#
+# It gives up on the *wait*, not on the work: pylance exposes no way to interrupt a
+# running scan — `scan_stats_callback` fires once, at the end, and an exception
+# raised from it is logged and discarded. So a timeout here frees the request and
+# the browser, and the scan continues on its thread until it finishes. Saying that
+# plainly is the difference between a limitation and a lie.
+DEFAULT_TIMEOUT_S = 30.0
+
 
 @dataclass
 class QuerySpec:
@@ -81,6 +90,19 @@ class QueryError(ValueError):
 # Lance appends where in its own source the error was raised — useful in a bug
 # report, noise on a screen: `..., /Users/runner/work/lance/.../query.rs:877:2`.
 _RUST_SITE = re.compile(r",?\s*/[^\s,]*\.rs:\d+:\d+\s*$")
+
+
+def _latest_version(ds) -> int:
+    """The newest version on disk, or this one if that cannot be read.
+
+    A handle opened a while ago is reading the version it opened. If the table has
+    moved since, everything measured against the old one is still true — of a
+    version nobody is using any more, which is worth saying rather than hiding.
+    """
+    try:
+        return int(ds.latest_version)
+    except Exception:                                        # noqa: BLE001
+        return int(ds.version)
 
 
 def _first_line(e: Exception) -> str:
@@ -391,6 +413,11 @@ class QueryOutcome:
     total_rows: int | None
     truncated: bool
     reproduction: str
+    # The version this result describes, and the newest one on disk when it was
+    # read. They differ when the table has been written to since — which makes the
+    # numbers on screen true of something that is no longer current.
+    version: int = 0
+    latest_version: int = 0
     # Only a hybrid search has legs; everything else took one path and reports it
     # in `plan`.
     legs: list[dict] = field(default_factory=list)
@@ -409,6 +436,9 @@ class QueryOutcome:
             "truncated": self.truncated,
             "reproduction": self.reproduction,
             "legs": self.legs,
+            "version": self.version,
+            "latest_version": self.latest_version,
+            "stale": self.latest_version > self.version,
         }
 
 
@@ -565,6 +595,8 @@ def run_hybrid(handle: Handle, spec: QuerySpec, *, cell) -> QueryOutcome:
         truncated=False,
         reproduction=reproduction(handle.uri, spec, projected),
         legs=[leg.as_dict() for leg in legs],
+        version=ds.version,
+        latest_version=_latest_version(ds),
     )
 
 
@@ -630,4 +662,6 @@ def run(handle: Handle, spec: QuerySpec, *, cell) -> QueryOutcome:
         truncated=spec.mode == "scan" and total is not None
                   and spec.offset + len(rows) < total,
         reproduction=reproduction(handle.uri, spec, projected),
+        version=ds.version,
+        latest_version=_latest_version(ds),
     )
