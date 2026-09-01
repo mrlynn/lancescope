@@ -51,10 +51,27 @@ ollama pull qwen3:8b            # local, free, offline, no account
 export ANTHROPIC_API_KEY=sk-…   # or Claude, with the cost of every call shown
 ```
 
-Neither is required. A key pasted into the settings page is stored in the settings
-file at mode 0600 — the environment variable is the safer path and always wins over
-it. See [the sprint plan](docs/intelligence-sprint-2.md) for what the layer does with
-this once it lands.
+Neither is required, and neither has to be configured: with a key set the Claude path
+comes up on its own, and with Ollama running the local one does. An explicit choice in
+settings beats both. A key pasted into the settings page is stored in the settings file
+at mode 0600 — the environment variable is the safer path and always wins over it.
+
+**Test it before trusting it.** *Test the model* on the settings page spends one real
+call on the configured provider and reports what came back, how long it took and what
+it cost, so a stale key or a deleted model is a sentence on screen rather than a
+mystery three features later:
+
+```
+answered, and honoured the schema
+gemma3:27b · 11.8s · 72 in / 41 out · no cost — this ran on your machine
+```
+
+`GET /intel/capabilities` is the same answer without spending anything. Both report
+`cost_usd: null` rather than a guess for a model that isn't in the price registry —
+prices are cached data, and carry the date they were read.
+
+See [the sprint plan](docs/intelligence-sprint-2.md) for what the layer does with this
+next: findings, plain-English filters, summaries, and the catalog over MCP.
 
 Licensed under Apache-2.0. See [CONTRIBUTING.md](CONTRIBUTING.md) for how the work is
 planned and landed.

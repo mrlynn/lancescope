@@ -13,14 +13,16 @@ import AppBar from "@/app/components/nav/AppBar";
 import { Caveat, Empty, Eyebrow, fmtWhen } from "@/app/components/console/atoms";
 import { dbParent } from "@/app/lib/dbname";
 import {
-  type IntelProbe, type IntelligenceView, type Probe, type SettingsState,
-  activateConnection, addConnection, getSettings, probeConnection, probeIntelligence,
-  removeConnection, saveIntelligence,
+  type Capabilities, type IntelProbe, type IntelligenceView, type Probe,
+  type SelfTest, type SettingsState,
+  activateConnection, addConnection, getCapabilities, getSettings, probeConnection,
+  probeIntelligence, removeConnection, runSelfTest, saveIntelligence,
 } from "@/app/lib/settings";
 
 export default function SettingsPage() {
   const [state, setState] = useState<SettingsState | null>(null);
   const [probe, setProbe] = useState<IntelProbe | null>(null);
+  const [caps, setCaps] = useState<Capabilities | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -28,6 +30,7 @@ export default function SettingsPage() {
       .then(setState)
       .catch((e) => setError(e instanceof Error ? e.message : "settings unreachable"));
     probeIntelligence().then(setProbe).catch(() => setProbe(null));
+    getCapabilities().then(setCaps).catch(() => setCaps(null));
   }, []);
 
   return (
@@ -44,7 +47,11 @@ export default function SettingsPage() {
         <Intelligence
           intel={state?.intelligence ?? null}
           probe={probe}
-          onProbe={() => probeIntelligence().then(setProbe).catch(() => setProbe(null))}
+          caps={caps}
+          onProbe={() => {
+            probeIntelligence().then(setProbe).catch(() => setProbe(null));
+            getCapabilities().then(setCaps).catch(() => setCaps(null));
+          }}
           onSaved={(i) => setState((s) => (s ? { ...s, intelligence: i } : s))}
           onError={setError}
         />
@@ -228,9 +235,10 @@ const ROLE_HINT: Record<string, string> = {
   none: "Off. The console keeps every deterministic surface it has.",
 };
 
-function Intelligence({ intel, probe, onProbe, onSaved, onError }: {
+function Intelligence({ intel, probe, caps, onProbe, onSaved, onError }: {
   intel: IntelligenceView | null;
   probe: IntelProbe | null;
+  caps: Capabilities | null;
   onProbe: () => void;
   onSaved: (i: IntelligenceView) => void;
   onError: (e: string | null) => void;
@@ -238,6 +246,8 @@ function Intelligence({ intel, probe, onProbe, onSaved, onError }: {
   const [draft, setDraft] = useState<Record<string, unknown>>({});
   const [key, setKey] = useState("");
   const [saved, setSaved] = useState(false);
+  const [test, setTest] = useState<SelfTest | null>(null);
+  const [testing, setTesting] = useState(false);
 
   const v = <T,>(field: string, fallback: T): T =>
     (draft[field] as T) ?? fallback;
@@ -262,6 +272,35 @@ function Intelligence({ intel, probe, onProbe, onSaved, onError }: {
         English filters, table summaries, and the ask box — and every response it produces
         reports the tokens and dollars it spent next to the bytes it read.
       </p>
+
+      {caps && (
+        <div className="px-4 py-3 rounded-sm border mb-4"
+             style={{ borderColor: caps.available
+                        ? "rgb(var(--index-rgb) / 0.4)" : "var(--rule)",
+                      background: caps.available
+                        ? "rgb(var(--index-rgb) / 0.05)" : "transparent" }}>
+          <div className="mono text-[12px] flex items-center gap-2"
+               style={{ color: caps.available ? "var(--index)" : "var(--haze)" }}>
+            <Icon name={caps.available ? "check" : "info"} size={14} />
+            {caps.available
+              ? `${caps.models_by_role.deep.id} via ${caps.provider}`
+              : "no provider"}
+          </div>
+          <div className="mono text-[10px] text-[var(--haze)] mt-1">
+            {caps.reason}
+            {caps.available && caps.models_by_role.fast.id !== caps.models_by_role.deep.id
+              && ` · translation on ${caps.models_by_role.fast.id}`}
+          </div>
+          {caps.available && !caps.tools_capable && (
+            <div className="mono text-[10px] text-[var(--haze)] mt-1">
+              Summaries and filters yes; the ask box needs a tool-capable model.
+            </div>
+          )}
+          {!caps.available && caps.setup_hint && (
+            <div className="mono text-[10px] text-[var(--haze)] mt-1">{caps.setup_hint}</div>
+          )}
+        </div>
+      )}
 
       {probe && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
@@ -379,12 +418,66 @@ function Intelligence({ intel, probe, onProbe, onSaved, onError }: {
           <Icon name="refresh" size={14} />
           Re-check providers
         </button>
+        <button className="btn" disabled={testing}
+                onClick={async () => {
+                  setTesting(true); setTest(null);
+                  try {
+                    setTest(await runSelfTest("fast"));
+                  } catch (e) {
+                    onError(e instanceof Error ? e.message : "self-test failed");
+                  } finally {
+                    setTesting(false);
+                  }
+                }}>
+          <Icon name="spark" size={14} />
+          {testing ? "asking…" : "Test the model"}
+        </button>
         {saved && (
           <span className="mono flex items-center gap-1.5 text-[11px]" style={{ color: "var(--index)" }}>
             <Icon name="check" size={13} />saved
           </span>
         )}
       </div>
+
+      {testing && (
+        <p className="mono text-[11px] text-[var(--haze)] mt-4">
+          One real call to the configured model. A large local model can take half a
+          minute, and longer if it has to load first.
+        </p>
+      )}
+
+      {test && (
+        <div className="mt-4 px-4 py-3 rounded-sm border"
+             style={{ borderColor: test.ok
+                        ? "rgb(var(--index-rgb) / 0.4)" : "rgb(var(--video-rgb) / 0.4)",
+                      background: test.ok
+                        ? "rgb(var(--index-rgb) / 0.05)" : "rgb(var(--video-rgb) / 0.07)" }}>
+          <div className="mono text-[12px] flex items-center gap-2"
+               style={{ color: test.ok ? "var(--index)" : "var(--video)" }}>
+            <Icon name={test.ok ? "check" : "warning"} size={14} />
+            {test.ok ? "answered, and honoured the schema" : (test.error ?? "failed")}
+          </div>
+          {test.ok && (
+            <>
+              <p className="text-[12px] text-[var(--body)] mt-2 leading-relaxed">
+                {String(test.data?.answer ?? test.text ?? "")}
+              </p>
+              <div className="mono text-[10px] text-[var(--haze)] mt-2">
+                {test.model} · {((test.ms ?? 0) / 1000).toFixed(1)}s ·{" "}
+                {test.usage?.input_tokens ?? 0} in / {test.usage?.output_tokens ?? 0} out ·{" "}
+                {test.cost_usd === 0
+                  ? "no cost — this ran on your machine"
+                  : test.cost_usd == null
+                    ? "cost unknown — this model is not in the price registry"
+                    : `$${test.cost_usd.toFixed(5)}`}
+              </div>
+            </>
+          )}
+          {!test.ok && test.setup_hint && (
+            <div className="mono text-[10px] text-[var(--haze)] mt-2">{test.setup_hint}</div>
+          )}
+        </div>
+      )}
 
       <p className="text-[12px] text-[var(--haze)] mt-5 leading-relaxed">{intel.active_note}</p>
     </section>
