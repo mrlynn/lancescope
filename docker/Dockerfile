@@ -30,6 +30,15 @@ WORKDIR /build
 COPY web/package.json web/package-lock.json* ./
 RUN npm ci --no-audit --no-fund
 COPY web/ ./
+
+# The guide is markdown at the repository root and not inside `web/`, so copying
+# only `web/` leaves `app/lib/docs.ts` resolving `../docs/guide` against nothing.
+# That does not fail loudly: `generateStaticParams` simply returns an empty array,
+# and it is `output: export` that turns an empty array into a build error. Hence
+# the sibling directory rather than a path inside the build context — `..` from
+# /build is /, which is where the loader looks.
+COPY docs/guide/ /docs/guide/
+
 # The same export the DMG carries, so the container and the desktop app serve
 # byte-identical interfaces and a bug reproduces in both.
 RUN NEXT_OUTPUT=export npm run build
