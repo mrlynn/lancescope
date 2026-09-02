@@ -12,6 +12,7 @@
  *  All three stay mounted. A half-typed URI or an unsaved API key surviving a tab
  *  switch is worth more than the DOM it costs. */
 
+import { useRouter } from "next/navigation";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import Icon, { type IconName } from "@/app/components/Icon";
 import AppBar from "@/app/components/nav/AppBar";
@@ -81,6 +82,7 @@ export default function SettingsPage() {
   const [runtime, setRuntime] = useState<RuntimeReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const tab = useSyncExternalStore(subscribeToTab, readTab, (): TabId => "connections");
+  const router = useRouter();
 
   useEffect(() => {
     getSettings()
@@ -155,7 +157,12 @@ export default function SettingsPage() {
                 that nothing is downloaded. */}
             <section className="panel p-6">
               <Eyebrow>Sample datasets</Eyebrow>
-              <SampleDatasets onOpened={() => getSettings().then(setState).catch(() => undefined)} />
+              <SampleDatasets onOpened={async () => {
+                /* "Open it" adopted the URI and made it active. Staying here would
+                   leave that button having visibly done nothing. */
+                await getSettings().then(setState).catch(() => undefined);
+                router.push("/console");
+              }} />
             </section>
           </div>
         </div>
@@ -208,10 +215,12 @@ function Connections({ state, onChange, onError }: {
   onChange: (s: SettingsState) => void;
   onError: (e: string | null) => void;
 }) {
+  const router = useRouter();
   const [uri, setUri] = useState("");
   const [label, setLabel] = useState("");
   const [found, setFound] = useState<Probe | null>(null);
   const [busy, setBusy] = useState(false);
+  const [opening, setOpening] = useState<string | null>(null);
 
   const run = async (fn: () => Promise<SettingsState>) => {
     setBusy(true);
@@ -227,13 +236,38 @@ function Connections({ state, onChange, onError }: {
 
   const locked = state?.env_locked ?? false;
 
+  /** The row is the way in.
+   *
+   *  Switching a connection and then looking at it were two clicks in two places —
+   *  Use here, then the breadcrumb — and the first of them gave no evidence it had
+   *  worked beyond a border changing colour. Opening a connection is what anyone
+   *  came to this list to do, so the row does it: activate if it is not already
+   *  active, then go and read it. `Use` stays for the narrower case of repointing
+   *  the catalog without leaving this page. */
+  const open = async (c: SettingsState["connections"][number]) => {
+    if (!c.active) {
+      if (locked) return;
+      setOpening(c.id);
+      try {
+        onChange(await activateConnection(c.id));
+        onError(null);
+      } catch (e) {
+        onError(e instanceof Error ? e.message : "failed");
+        setOpening(null);
+        return;
+      }
+    }
+    router.push("/console");
+  };
+
   return (
     <section className="panel p-6">
       <Eyebrow>Connections</Eyebrow>
       <p className="text-[13px] text-[var(--body)] leading-relaxed mb-5 max-w-[62ch]">
         Any directory holding <span className="mono text-[var(--bright)]">.lance</span> tables.
-        Switching is immediate — the catalog is repointed in place, no restart. Everything
-        the console does against a connection is read-only.
+        Click one to open it in the console — switching is immediate, the catalog is
+        repointed in place, no restart. Everything the console does against a connection
+        is read-only.
       </p>
 
       {state === null ? (
@@ -249,23 +283,38 @@ function Connections({ state, onChange, onError }: {
           <div className="space-y-2 mb-6">
             {state.connections.map((c) => (
               <div key={c.id}
-                   className="flex items-start gap-4 px-4 py-3 rounded-sm border"
+                   className="group flex items-stretch rounded-sm border
+                              focus-within:border-[var(--index)]"
                    style={c.active
                      ? { borderColor: "var(--video)", background: "rgb(var(--video-rgb) / 0.09)" }
                      : { borderColor: "var(--rule)" }}>
+                <button
+                  type="button"
+                  disabled={busy || opening !== null || (locked && !c.active)}
+                  onClick={() => open(c)}
+                  title={locked && !c.active
+                    ? "LANCE_ROOT is pinning the root — this cannot be made active"
+                    : `Open ${c.label} in the console`}
+                  className="flex items-start gap-4 flex-1 min-w-0 px-4 py-3 text-left
+                             rounded-sm transition-colors
+                             hover:bg-[rgb(var(--index-rgb)/0.11)]
+                             disabled:hover:bg-transparent disabled:cursor-default"
+                >
                 <span className="pt-0.5 shrink-0"
                       style={{ color: c.active ? "var(--video)" : "var(--dim)" }}>
-                  <Icon name={c.active ? "check" : "database"} size={16} />
+                  <Icon name={opening === c.id ? "clock" : c.active ? "check" : "database"}
+                        size={16} />
                 </span>
-                <div className="min-w-0 flex-1">
-                  <div className="text-[14px] font-medium"
-                       style={{ color: c.active ? "var(--video)" : "var(--bright)" }}>
+                <span className="min-w-0 flex-1 block">
+                  <span className="block text-[14px] font-medium"
+                        style={{ color: c.active ? "var(--video)" : "var(--bright)" }}>
                     {c.label}
-                  </div>
-                  <div className="mono text-[10px] text-[var(--haze)] truncate" title={c.uri}>
+                  </span>
+                  <span className="mono block text-[10px] text-[var(--haze)] truncate"
+                        title={c.uri}>
                     {dbParent(c.uri) || c.uri}
-                  </div>
-                  <div className="mono flex items-center gap-1.5 text-[10px] mt-1 text-[var(--haze)]">
+                  </span>
+                  <span className="mono flex items-center gap-1.5 text-[10px] mt-1 text-[var(--haze)]">
                     {c.reachable === false
                       ? <span className="flex items-center gap-1.5" style={{ color: "var(--video)" }}>
                           <Icon name="warning" size={11} />unreachable — {c.note}
@@ -279,27 +328,41 @@ function Connections({ state, onChange, onError }: {
                         : <><Icon name="table" size={11} />
                             {c.tables.length} table{c.tables.length === 1 ? "" : "s"}</>}
                     {c.last_used && <span className="text-[var(--dim)]">· last used {fmtWhen(c.last_used)}</span>}
-                  </div>
+                  </span>
                   {c.capabilities?.remote && (
-                    <div className="text-[11px] text-[var(--haze)] leading-relaxed mt-1.5">
+                    <span className="block text-[11px] text-[var(--haze)] leading-relaxed mt-1.5">
                       {c.capabilities.discover.reason}
-                    </div>
+                    </span>
                   )}
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
+                </span>
+
+                {/* The row goes somewhere, so it says so — quietly until it is
+                    pointed at, because three permanent arrows down the list would
+                    be louder than the one connection that is active. */}
+                <span className="self-center shrink-0 pl-3 opacity-0 transition-opacity
+                                 group-hover:opacity-100 group-focus-within:opacity-100"
+                      style={{ color: c.active ? "var(--video)" : "var(--index)" }}>
+                  <Icon name="chevronRight" size={16} />
+                </span>
+                </button>
+
+                <span className="flex items-center gap-2 shrink-0 pr-3">
                   {!c.active && (
-                    <button className="btn" disabled={busy || locked}
+                    <button className="btn" disabled={busy || opening !== null || locked}
+                            data-tip="Switch the catalog without leaving this page"
+                            data-tip-side="left"
                             onClick={() => run(() => activateConnection(c.id))}>
                       <Icon name="check" size={14} />
                       Use
                     </button>
                   )}
-                  <button className="iconbtn" disabled={busy} data-tip="Remove" data-tip-side="left"
+                  <button className="iconbtn" disabled={busy || opening !== null}
+                          data-tip="Remove" data-tip-side="left"
                           aria-label={`Remove ${c.label}`}
                           onClick={() => run(() => removeConnection(c.id))}>
                     <Icon name="trash" size={14} />
                   </button>
-                </div>
+                </span>
               </div>
             ))}
           </div>
