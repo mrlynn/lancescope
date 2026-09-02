@@ -60,6 +60,8 @@ The only routes that write anything, and what they write is the settings file.
 | `POST` | `/settings/connections/{conn_id}/activate` | — |
 | `PUT` | `/settings/intelligence` | — |
 | `GET` | `/settings/intelligence/probe` | What is actually available on this machine right now. |
+| `GET` | `/settings/samples` | Public Lance datasets worth opening, for a console with nothing in it yet. |
+| `POST` | `/settings/samples/open` | Save a sample as a connection and point the console at it. |
 
 ## Creating a database
 

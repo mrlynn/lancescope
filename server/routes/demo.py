@@ -152,11 +152,17 @@ def load(catalog: Catalog) -> bool:
 
     Returns False and leaves the demo unarmed if either table is missing, rather
     than taking the process down.
+
+    Every failure counts as "missing", not just `FileNotFoundError`. A local root
+    that lacks these tables raises that; a remote one raises `ValueError` from deep
+    inside Lance, and catching only the first meant pointing the console at any
+    remote root killed it at startup — an unreachable console, because a demo it was
+    never going to run could not find a corpus that was never going to be there.
     """
     try:
         moments = catalog.open("moments", scope="demo", pin=True)
         segments = catalog.open("segments", scope="demo", pin=True)
-    except FileNotFoundError:
+    except Exception:                                              # noqa: BLE001
         return False
 
     STATE.moments, STATE.segments = moments, segments

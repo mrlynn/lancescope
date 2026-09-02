@@ -245,3 +245,50 @@ export const getTokenMeter = () => intel<TokenMeter>("/meter");
 
 export const resetTokenMeter = () =>
   intel<TokenMeter>("/meter/reset", { method: "POST" });
+
+// ------------------------------------------------------------ sample datasets
+
+/** A public Lance dataset offered to a console with nothing in it yet.
+ *
+ *  Nothing is installed and nothing is downloaded: opening one saves a URI, and
+ *  pylance reads `hf://` lazily, so the bytes that move are the bytes you look at. */
+export type Sample = {
+  slug: string;
+  uri: string;
+  title: string;
+  /** What the data is. */
+  what: string;
+  /** Why it is worth opening in *this* console specifically. */
+  shows: string;
+  /** Measured, not estimated. */
+  scale: string;
+  tables: number;
+  first: string;
+  added: boolean;
+};
+
+export type SampleList = { samples: Sample[]; note: string };
+
+export async function getSamples(): Promise<SampleList> {
+  const res = await fetch("/api/settings/samples", { cache: "no-store" });
+  if (!res.ok) throw new Error(`samples: ${res.status}`);
+  return res.json();
+}
+
+/** What happened when a sample was opened. `adopted` is false when `LANCE_ROOT`
+ *  pins the console elsewhere — the connection is still saved, and `note` says so. */
+export type SampleOpened = { adopted: boolean; note: string };
+
+export async function openSample(uri: string): Promise<SampleOpened> {
+  const res = await fetch("/api/settings/samples/open", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ uri }),
+  });
+  if (!res.ok) {
+    let detail = `${res.status}`;
+    try { detail = (await res.json()).detail ?? detail; } catch { }
+    throw new Error(String(detail));
+  }
+  return res.json();
+}

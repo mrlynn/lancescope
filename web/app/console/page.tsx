@@ -6,6 +6,7 @@ import Icon, { type IconName } from "@/app/components/Icon";
 import Mark from "@/app/components/Mark";
 import AppBar from "@/app/components/nav/AppBar";
 import DbSwitcher from "@/app/components/nav/DbSwitcher";
+import SampleDatasets from "@/app/components/samples/SampleDatasets";
 import { Cost, Empty } from "@/app/components/console/atoms";
 import TableRail from "@/app/components/console/TableRail";
 import {
@@ -249,21 +250,31 @@ export default function Console() {
               </p>
             </div>
           ) : (
-            <div className="max-w-lg mx-auto">
-              <p className="text-[15px] text-[var(--haze)] leading-relaxed">
+            <div className="max-w-3xl mx-auto text-left">
+              <p className="text-[15px] text-[var(--haze)] leading-relaxed text-center">
                 No Lance tables under{" "}
-                <span className="mono text-[var(--bright)]">{list.root || "any configured path"}</span>.{" "}
-                <Link href="/console/settings" className="underline"
-                      style={{ color: "var(--video)" }}>Add a connection</Link>{" "}
-                pointing at a LanceDB directory, or build the demo corpus with{" "}
-                <span className="mono text-[var(--bright)]">make ingest</span>.
+                <span className="mono text-[var(--bright)]">{list.root || "any configured path"}</span>.
               </p>
-              {/* A database with nothing in it is exactly the moment to offer to
-                  fill one. */}
-              <Link href="/console/new" className="btn btn-accent mt-7 inline-flex">
-                <Icon name="plus" size={14} />
-                Build one from your own files
-              </Link>
+
+              {/* Three ways forward, and the cheapest one first. Someone who has
+                  nothing to look at cannot evaluate a console for reading data, and
+                  telling them to go and make some is the slowest of the three. */}
+              <div className="mt-9">
+                <div className="eyebrow mb-3">Open something public</div>
+                <SampleDatasets compact onOpened={() => window.location.reload()} />
+              </div>
+
+              <div className="mt-10 pt-7 flex flex-wrap items-center justify-center gap-3"
+                   style={{ borderTop: "1px solid var(--rule)" }}>
+                <Link href="/console/new" className="btn btn-accent inline-flex">
+                  <Icon name="plus" size={14} />
+                  Build one from your own files
+                </Link>
+                <Link href="/console/settings" className="btn inline-flex">
+                  <Icon name="database" size={14} />
+                  Connect to a database
+                </Link>
+              </div>
             </div>
           )}
         </div>

@@ -75,9 +75,27 @@ def parse(uri: str) -> HfRoot | None:
     return HfRoot(repo=f"{parts[0]}/{parts[1]}", path="/".join(parts[2:]))
 
 
+def _headers() -> dict[str, str]:
+    """A bearer token when one is configured, and nothing otherwise.
+
+    Public datasets need none, which is why this is optional rather than required.
+    A token buys two things: gated and private repositories, and a rate limit that
+    an unauthenticated client shares with everyone else on its address.
+    """
+    from server import credentials
+
+    headers = {"User-Agent": "lancescope"}
+    token, _ = credentials.resolve("HF_TOKEN")
+    if not token:
+        token, _ = credentials.resolve("HUGGING_FACE_HUB_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+
 def _tree(repo: str, path: str) -> list[dict]:
     url = API.format(repo=repo, path=path)
-    req = urllib.request.Request(url, headers={"User-Agent": "lancescope"})
+    req = urllib.request.Request(url, headers=_headers())
     try:
         with urllib.request.urlopen(req, timeout=TIMEOUT_S) as r:
             return json.loads(r.read().decode("utf-8"))
@@ -88,9 +106,16 @@ def _tree(repo: str, path: str) -> list[dict]:
             # The Hub answers 401 for a private repository *and* for one that does
             # not exist, deliberately, so as not to leak which. Saying "private"
             # here would be a guess, and the likelier cause is a typo.
+            from server import credentials
+
+            _, source = credentials.resolve("HF_TOKEN")
+            hint = (f"A token from {source} was sent, so this account cannot see it."
+                    if source else
+                    "No token was sent — set HF_TOKEN, or add it to .cred, if this "
+                    "repository is private.")
             raise HfUnavailable(
                 f"the Hub refused this repository ({e.code}) — it is private, or "
-                f"there is no such dataset. Public datasets need no token.") from e
+                f"there is no such dataset. {hint}") from e
         raise HfUnavailable(f"the Hub answered {e.code} for {repo}") from e
     except urllib.error.URLError as e:
         raise HfUnavailable(f"could not reach huggingface.co: {e.reason}") from e
@@ -138,3 +163,107 @@ def list_tables(uri: str) -> list[str]:
     if not names and not root.path:
         names = _tables_in(_tree(root.repo, "data"), "")
     return names
+
+
+# ---------------------------------------------------------------- sample datasets
+
+@dataclass(frozen=True)
+class Sample:
+    """One dataset worth offering to somebody who has nothing to look at yet."""
+
+    slug: str
+    title: str
+    what: str          # what the data is
+    shows: str         # why it is worth opening in *this* console
+    scale: str         # measured, from the table named in `first`
+    tables: int
+    first: str
+
+    @property
+    def uri(self) -> str:
+        return f"{PREFIX}lance-format/{self.slug}"
+
+    def as_dict(self) -> dict:
+        return {"slug": self.slug, "uri": self.uri, "title": self.title,
+                "what": self.what, "shows": self.shows, "scale": self.scale,
+                "tables": self.tables, "first": self.first}
+
+
+# Curated rather than listed. `lance-format` publishes forty-eight datasets, and
+# forty-eight rows of unannotated names is a directory, not an offer. These six were
+# each opened and measured; every number below was read off the table itself, and
+# they are ordered so the first one is the one that makes the point.
+#
+# Nothing here is downloaded. Adding one saves a URI — pylance opens `hf://` lazily,
+# so the bytes that move are the bytes you look at.
+SAMPLES: tuple[Sample, ...] = (
+    Sample(
+        slug="openvid-lance",
+        title="OpenVid",
+        what="937,957 captioned video clips.",
+        shows="The one to open first. Its video sits in a Blob V2 column, so opening "
+              "the table costs 24 KB and two IOs — searching a million clips never "
+              "touches a frame. That claim is the reason this console exists, and "
+              "here it is on somebody else's data.",
+        scale="937,957 rows · 1 table · video in a blob column",
+        tables=1,
+        first="data/train",
+    ),
+    Sample(
+        slug="mnist-lance",
+        title="MNIST",
+        what="Handwritten digits, the smallest useful thing here.",
+        shows="Every kind of index at once — IVF_PQ on the embedding, a BTree on the "
+              "label, a Bitmap on its name — over 10,000 rows that answer instantly. "
+              "A good place to watch the query plan change.",
+        scale="10,000 rows · 2 tables · 512-dim vectors",
+        tables=2,
+        first="data/test",
+    ),
+    Sample(
+        slug="coco-captions-2017-lance",
+        title="COCO Captions",
+        what="Photographs with the sentences people wrote about them.",
+        shows="Two vector columns, one for the image and one for the caption, plus an "
+              "inverted index on the text. Hybrid search has two real spaces to fuse "
+              "rather than one and a filter.",
+        scale="40,670 rows · 2 tables · image and text vectors",
+        tables=2,
+        first="data/test",
+    ),
+    Sample(
+        slug="squad-v2-lance",
+        title="SQuAD v2",
+        what="Questions asked against Wikipedia paragraphs.",
+        shows="Six indices, three of them inverted. The most full-text-shaped dataset "
+              "here, and the one where an unused index is easiest to catch.",
+        scale="130,319 rows · 2 tables · six indices",
+        tables=2,
+        first="data/train",
+    ),
+    Sample(
+        slug="librispeech-clean-lance",
+        title="LibriSpeech",
+        what="Read speech with its transcripts.",
+        shows="Audio in a binary column beside the text that describes it, split three "
+              "ways — a corpus where comparing two versions of the same table has "
+              "something to compare.",
+        scale="2,703 rows in dev · 3 tables · audio and text",
+        tables=3,
+        first="data/dev_clean",
+    ),
+    Sample(
+        slug="oxford-pets-lance",
+        title="Oxford Pets",
+        what="Photographs of thirty-seven breeds of cat and dog.",
+        shows="Small, friendly, and labelled two ways — a Bitmap index on `is_dog` is "
+              "about as legible as a scalar index gets.",
+        scale="7,390 rows · 1 table · 512-dim vectors",
+        tables=1,
+        first="data/train",
+    ),
+)
+
+
+def samples() -> list[dict]:
+    return [s.as_dict() for s in SAMPLES]

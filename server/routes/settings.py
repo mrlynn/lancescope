@@ -61,10 +61,14 @@ def adopt_root(uri: str, label: str) -> dict:
     return {
         "connection": conn.as_dict(),
         "adopted": resolved.source != "env",
+        # Says what happened, not what the first caller happened to be doing. This
+        # is reached both after an ingest and after opening a sample dataset, and
+        # "the table was written to" is false in the second case — nothing was
+        # written there, a connection was saved.
         "note": ("" if resolved.source != "env" else
                  f"LANCE_ROOT is set, so the console stays pointed at "
-                 f"{resolved.uri}. The table was written to {uri} — add it as a "
-                 f"connection once LANCE_ROOT is unset."),
+                 f"{resolved.uri}. The connection to {uri} was saved and becomes "
+                 f"available once LANCE_ROOT is unset."),
         **_state(),
     }
 
@@ -181,6 +185,44 @@ def _state() -> dict:
 @router.get("")
 async def get_settings() -> JSONResponse:
     return JSONResponse(_state())
+
+
+# ------------------------------------------------------------- sample datasets
+
+@router.get("/samples")
+async def samples() -> JSONResponse:
+    """Public Lance datasets worth opening, for a console with nothing in it yet.
+
+    Deliberately not installed, and deliberately not downloaded. Adding one saves a
+    URI: pylance opens `hf://` lazily, so the bytes that move are the bytes you look
+    at, and a million-row video corpus costs 24 KB to open.
+    """
+    from server import hf
+
+    active = {c.uri for c in cfg.load().connections}
+    rows = [{**s, "added": s["uri"] in active} for s in hf.samples()]
+    return JSONResponse({
+        "samples": rows,
+        "note": ("Nothing is downloaded. Adding one saves a URI and opens it over "
+                 "the network, so it needs a connection — and reads only what you "
+                 "actually look at."),
+    })
+
+
+class OpenSampleBody(BaseModel):
+    uri: str = Field(min_length=1)
+
+
+@router.post("/samples/open")
+async def open_sample(body: OpenSampleBody) -> JSONResponse:
+    """Save a sample as a connection and point the console at it."""
+    from server import hf
+
+    known = {s.uri: s for s in hf.SAMPLES}
+    sample = known.get(body.uri)
+    if sample is None:
+        raise HTTPException(404, f"{body.uri} is not one of the offered samples")
+    return JSONResponse(adopt_root(sample.uri, sample.title))
 
 
 # ---------------------------------------------------------------------- connections

@@ -2,11 +2,27 @@
 
 /** The left rail.
  *
- *  A flat list of every table was fine at three tables and useless at forty. This
- *  is the conventional shape instead — filter at the top, then pinned, then what
- *  you were just looking at, then everything — because that is the shape people
- *  already know how to read, and because the useful question in a console is
- *  rarely "what is the alphabetically first table" but "the one I had open".
+ *  A flat list of every table was fine at three tables and useless at forty, so
+ *  shortcuts were added — pinned, then recent, then everything. That overshot in
+ *  the other direction: "everything" still contained the shortcuts, so at three
+ *  tables the rail showed each of them twice and, if pinned, three times. A nav
+ *  that lists the same thing in two places makes the reader work out whether they
+ *  are the same thing, every time.
+ *
+ *  So: **an item appears exactly once**, and shortcuts have to earn their place.
+ *
+ *  Below a screenful, there is one list. Scanning eight things is faster than
+ *  deciding which of three groups to scan, and a shortcut to something already
+ *  visible is not a shortcut. Pinned tables sort to the top, because pinning is a
+ *  deliberate act and should visibly do something.
+ *
+ *  Above a screenful, the groups appear and are mutually exclusive: pinned, then
+ *  what you were just looking at, then the remainder — named "Other tables"
+ *  rather than "All", because by then that is what it is.
+ *
+ *  Filtering collapses back to one list either way. Someone who has typed a query
+ *  has said what they are looking for, and ranking their own recency above their
+ *  own search is answering a question they stopped asking.
  */
 
 import { useMemo } from "react";
@@ -57,6 +73,25 @@ export default function TableRail({
 
   const searching = query.trim().length > 0;
 
+  // Roughly a screenful of rows in the rail. Below this everything is visible at
+  // once, so grouping adds a decision without removing a scroll.
+  const GROUPS_EARN_THEIR_PLACE_AT = 8;
+  const grouped = !searching && (tables?.length ?? 0) >= GROUPS_EARN_THEIR_PLACE_AT;
+
+  // One list, pinned first. Used below the threshold and whenever filtering.
+  const flat = useMemo(() => {
+    if (searching) return matches;
+    const isPinned = (t: TableRef) => pins.includes(t.name);
+    return [...matches].sort((a, b) => Number(isPinned(b)) - Number(isPinned(a)));
+  }, [matches, pins, searching]);
+
+  // Mutually exclusive, so nothing is listed twice.
+  const recentOnly = grouped
+    ? recent.filter((t) => !pins.includes(t.name))
+    : [];
+  const shortcut = new Set([...pinned, ...recentOnly].map((t) => t.name));
+  const remainder = grouped ? matches.filter((t) => !shortcut.has(t.name)) : [];
+
   return (
     <nav className="w-full lg:w-[262px] shrink-0">
       <div className="relative mb-4">
@@ -86,16 +121,32 @@ export default function TableRail({
         <div className="eyebrow px-1">loading</div>
       ) : (
         <div className="space-y-5">
-          <Section title="Pinned" icon="starFilled" rows={pinned} {...{ picked, onPick, pins, onTogglePin }} />
-          <Section title="Recent" icon="clock" rows={recent} {...{ picked, onPick, pins, onTogglePin }} />
-          <Section
-            title={searching ? `${matches.length} match${matches.length === 1 ? "" : "es"}` : "All tables"}
-            icon="table"
-            count={searching ? undefined : matches.length}
-            rows={matches}
-            empty={searching ? `Nothing matching “${query}”.` : "No tables here."}
-            {...{ picked, onPick, pins, onTogglePin }}
-          />
+          {grouped ? (
+            <>
+              <Section title="Pinned" icon="starFilled" rows={pinned}
+                       {...{ picked, onPick, pins, onTogglePin }} />
+              <Section title="Recent" icon="clock" rows={recentOnly}
+                       {...{ picked, onPick, pins, onTogglePin }} />
+              {/* "Other" only means something when there is something above it to
+                  be other than. On a fresh session with nothing pinned and nothing
+                  visited, this is simply the list. */}
+              <Section
+                title={pinned.length || recentOnly.length ? "Other tables" : "All tables"}
+                icon="table" count={remainder.length} rows={remainder}
+                {...{ picked, onPick, pins, onTogglePin }} />
+            </>
+          ) : (
+            <Section
+              title={searching
+                ? `${matches.length} match${matches.length === 1 ? "" : "es"}`
+                : "Tables"}
+              icon="table"
+              count={searching ? undefined : flat.length}
+              rows={flat}
+              empty={searching ? `Nothing matching “${query}”.` : "No tables here."}
+              {...{ picked, onPick, pins, onTogglePin }}
+            />
+          )}
         </div>
       )}
 

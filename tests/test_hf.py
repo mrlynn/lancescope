@@ -176,3 +176,63 @@ def test_a_local_root_still_joins_through_path(corpus):
     cat = Catalog(corpus)
     assert cat.uri_for("moments").endswith("moments.lance")
     assert "://" not in cat.uri_for("moments")
+
+
+def test_a_remote_root_with_no_demo_corpus_does_not_take_the_server_down(monkeypatch):
+    """Pointing the console at any remote root used to kill it at startup.
+
+    `demo.load` promised to return False rather than take the process down, but it
+    caught only `FileNotFoundError`; a missing remote table raises `ValueError` from
+    deep inside Lance, so the exception escaped the lifespan handler and the console
+    never came up at all — over a demo it was never going to run.
+    """
+    from server.routes import demo
+
+    class Exploding:
+        def open(self, *a, **kw):
+            raise ValueError("Dataset at path moments.lance was not found")
+
+    assert demo.load(Exploding()) is False
+
+
+# ------------------------------------------------------------- sample datasets
+
+def test_the_offered_samples_are_curated_rather_than_listed():
+    """The org publishes forty-eight datasets, and forty-eight unannotated names is
+    a directory rather than an offer."""
+    assert 3 <= len(hf.SAMPLES) <= 8
+
+
+def test_every_sample_says_what_it_is_and_why_this_console_makes_it_interesting():
+    for s in hf.SAMPLES:
+        assert s.uri.startswith("hf://datasets/lance-format/"), s.uri
+        assert s.what and s.shows and s.scale, s.slug
+        # `shows` is the reason to open *this* one here; a restatement of `what`
+        # would make the six cards interchangeable.
+        assert s.shows != s.what
+        assert s.tables >= 1
+
+
+def test_the_first_sample_is_the_one_that_makes_the_argument():
+    """Blob V2 is the claim this console exists to demonstrate, so the dataset that
+    demonstrates it should not be fourth."""
+    assert "blob" in hf.SAMPLES[0].shows.lower()
+
+
+def test_a_sample_uri_parses_the_way_any_other_hub_root_does():
+    for s in hf.SAMPLES:
+        parsed = hf.parse(s.uri)
+        assert parsed is not None and parsed.repo.startswith("lance-format/")
+
+
+def test_samples_report_whether_they_are_already_a_connection(settings_file):
+    from server import settings as cfg
+
+    rows = {s["uri"]: s for s in hf.samples()}
+    assert all("uri" in r for r in rows.values())
+
+    s = cfg.load()
+    cfg.add_connection(s, "MNIST", "hf://datasets/lance-format/mnist-lance")
+    cfg.save(s)
+    saved = {c.uri for c in cfg.load().connections}
+    assert "hf://datasets/lance-format/mnist-lance" in saved
