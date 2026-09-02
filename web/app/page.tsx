@@ -56,7 +56,7 @@ export default function Home() {
       {/* ------------------------------------------------------------- masthead */}
       <section className="max-w-[720px] mt-6 mb-12">
         <div className="flex items-center gap-3 mb-4">
-          <Mark size={26} className="text-[var(--video)]" />
+          <Mark size={26} className="text-[var(--haze)]" />
           <h1 className="text-[34px] leading-none font-black tracking-tight text-[var(--bright)]">
             LanceScope
           </h1>

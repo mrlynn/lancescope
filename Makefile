@@ -64,6 +64,12 @@ test:
 docs:
 	$(PY) scripts/gen_docs.py
 
+# Re-render the icon set from the one definition of the mark in scripts/gen_icons.py.
+# Run after any change to the mark and commit the result; the DMG bakes these in, so
+# a drifted icon costs a release rather than a rebuild.
+icons:
+	uv run --with pillow python scripts/gen_icons.py
+
 # --- desktop ------------------------------------------------------------------
 
 # The interface as static files, for the app bundle to carry. Not used by `make dev`

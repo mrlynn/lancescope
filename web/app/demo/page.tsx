@@ -293,7 +293,7 @@ export default function Page() {
 
       {!hits.length && !busy && (
         <div className="mt-24 text-center">
-          <Mark size={34} className="mx-auto mb-5 text-[var(--rule)]" />
+          <Mark size={34} mono className="mx-auto mb-5 text-[var(--rule)]" />
           <p className="text-[15px] text-[var(--haze)] max-w-lg mx-auto leading-relaxed">
             No moments loaded. Build the corpus with{" "}
             <span className="mono text-[var(--bright)]">make ingest</span>, then reload.

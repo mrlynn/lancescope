@@ -1,0 +1,43 @@
+<!-- The LanceScope mark.
+
+     A deliberate derivative of the LanceDB mark in brand/LanceDB: the same 4x4
+     lattice on a 204pt box, the same axis positions, the same 18.5pt radius. Cell
+     for cell it is their glyph, because LanceScope is a tool for looking at their
+     format and the debt should be legible rather than laundered.
+
+     What changed is that one cell is being read. Cell [3,3] — the bottom-right
+     corner, whose two orthogonal neighbours are already empty in the original, so
+     a handle extends diagonally out of the box without displacing anything — is
+     covered by a glass. The other ten dots sit back at 55% so the glass is the
+     subject and the lattice is the thing being examined. That is the product in
+     one image: a search touches one cell of a table it does not read.
+
+     The lens is empty rather than filled, and the handle is heavy, because both
+     have to survive a 16px favicon. An earlier version marked the cell with a
+     thin ring; at favicon size the ring fell below a pixel and what was left was
+     the LanceDB mark verbatim. Test any change to this file in ONE COLOUR at
+     14px against brand/LanceDB before shipping it — that is the test the handle
+     exists to pass.
+
+     Coral is --video from web/app/globals.css. The mark takes one accent, not
+     two: the glass is an object laid over the data, and objects read as one
+     colour when they are small.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 204 204" width="204" height="204">
+  <g fill="#a3958c" opacity="0.55">
+    <circle cx="48.5" cy="48.5" r="18.5"/>
+    <circle cx="84.2" cy="48.5" r="18.5"/>
+    <circle cx="119.8" cy="48.5" r="18.5"/>
+    <circle cx="48.5" cy="84.2" r="18.5"/>
+    <circle cx="119.8" cy="84.2" r="18.5"/>
+    <circle cx="155.0" cy="84.2" r="18.5"/>
+    <circle cx="48.5" cy="119.8" r="18.5"/>
+    <circle cx="84.2" cy="119.8" r="18.5"/>
+    <circle cx="119.8" cy="119.8" r="18.5"/>
+    <circle cx="84.2" cy="155.0" r="18.5"/>
+  </g>
+  <g stroke="#ff734a" fill="none" stroke-width="11">
+    <circle cx="155.0" cy="155.0" r="22"/>
+    <line x1="172.0" y1="172.0" x2="191.8" y2="191.8" stroke-linecap="round"/>
+  </g>
+</svg>
