@@ -344,14 +344,46 @@ if [ -n "${APPLE_ID:-}${NOTARY_PROFILE:-}" ]; then
   notarise "$ZIP" || { echo; echo "Nothing was stapled."; exit 1; }
   xcrun stapler staple "$APP"
 
-  # The disk image was assembled around an app with no ticket, so it is rebuilt to
-  # carry the stapled one. A DMG whose contents were notarised after it was made is
-  # how an app gets refused on a machine with no network.
+  # The disk image was assembled around an app with no ticket, so it has to be made
+  # again around the stapled one. A DMG whose contents were notarised after it was
+  # built is how an app gets refused on a machine with no network.
+  #
+  # ONLY the disk image is rebuilt. This used to run the whole Tauri build again,
+  # which recompiled and re-signed the app — replacing the freshly stapled copy with
+  # a binary Apple had never seen, so the staple that followed died with
+  #
+  #     CloudKit query for LanceScope.app failed due to "Record not found"
+  #     The staple and validate action failed! Error 65.
+  #
+  # after a successful notarisation, which is a confusing way to lose forty minutes.
+  # Tauri vendors create-dmg beside the image it built, so the image is assembled
+  # directly from the app that now carries the ticket, and the app is never touched.
+  # Layout matches bundle.macOS.dmg in tauri.conf.json — change both together.
   echo "==> rebuilding the disk image around the stapled app"
-  APPLE_SIGNING_IDENTITY="$APPLE_SIGNING_IDENTITY" \
-    env -u APPLE_ID -u APPLE_PASSWORD ./desktop/build.sh >/dev/null
-  xcrun stapler staple "$APP"
-  DMG=$(ls desktop/src-tauri/target/release/bundle/dmg/*.dmg | head -1)
+  DMG_DIR="desktop/src-tauri/target/release/bundle/dmg"
+  # Absolute, because the image is built from inside DMG_DIR. Carried as an array
+  # rather than an interpolated string: `${BG:+--background "$BG"}` collapses to one
+  # argument in some shells and word-splits on any space in the path in others, and
+  # both failures look like create-dmg not understanding its own option. An empty
+  # array simply omits the flag, so an image still builds when no background has
+  # been generated.
+  BG="$PWD/desktop/src-tauri/dmg-background.png"
+  BG_ARGS=()
+  [ -f "$BG" ] && BG_ARGS=(--background "$BG")
+  rm -f "$DMG"
+  ( cd "$DMG_DIR" && ./bundle_dmg.sh \
+      --volname "LanceScope" \
+      --icon "LanceScope.app" 170 205 \
+      --app-drop-link 490 205 \
+      --window-size 660 400 \
+      --hide-extension "LanceScope.app" \
+      "${BG_ARGS[@]}" \
+      --codesign "$APPLE_SIGNING_IDENTITY" \
+      "$(basename "$DMG")" ../macos/LanceScope.app ) >/dev/null
+
+  # The app inside the image is the stapled one, so this only confirms it survived
+  # the copy rather than trying to staple something new.
+  xcrun stapler validate "$APP"
 
   echo "==> notarising the disk image (a few minutes)"
   notarise "$DMG" || { echo; echo "The app is stapled; the disk image is not."; exit 1; }
