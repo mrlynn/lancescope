@@ -16,9 +16,17 @@
  *  Self-contained on purpose: it takes a table, a column and a way to name one row,
  *  and owns everything after that. Drop it into a detail pane, a cell renderer or a
  *  gallery without either of them knowing how a blob is addressed.
+ *
+ *  **Give it a `key` that includes the row.** What is on screen is a fact about
+ *  which row this is, and a panel that steps from one row to the next without
+ *  changing the key would leave the first row's picture under the second row's
+ *  name. React's own answer to "reset state when the input changes" is a key rather
+ *  than an effect that notices afterwards, and the frame in between is exactly the
+ *  wrong picture. Unmounting also revokes the object URL, which is the other half
+ *  of not wanting this component to outlive its row.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Icon from "@/app/components/Icon";
 import { fmtBytes } from "@/app/lib/api";
 import { type RowAddress, heavyCellUrl } from "@/app/lib/catalog";
@@ -73,26 +81,24 @@ export function CellMedia({
     }
   };
 
-  // Compared by value: a caller rebuilding `{rowid: 4}` inline on every render
-  // hands us a new object each time, and depending on the object itself would clear
-  // the picture it just asked for, forever.
+  // Compared by value: a caller rebuilding `{rowid: 4}` inline on every render hands
+  // us a new object each time, and keying anything off the object itself would throw
+  // away the picture it just asked for, forever.
   const address = JSON.stringify(row);
+  const url = useMemo(
+    () => heavyCellUrl(table, column, JSON.parse(address) as RowAddress),
+    [table, column, address],
+  );
 
-  // A different row in the same component: drop what was shown rather than leaving
-  // one row's picture under another row's name.
-  useEffect(() => {
-    release();
-    setLoaded(null);
-    setError(null);
-  }, [table, column, address]);
-
+  // Releasing on the way out is the whole of the cleanup, because a different row
+  // is a different component — see the note on `key` above.
   useEffect(() => release, []);
 
   const show = useCallback(async () => {
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(heavyCellUrl(table, column, row), { cache: "no-store" });
+      const res = await fetch(url, { cache: "no-store" });
       if (!res.ok) {
         let detail = `${res.status}`;
         try { detail = (await res.json()).detail ?? detail; } catch { /* not JSON */ }
@@ -111,7 +117,7 @@ export function CellMedia({
     } finally {
       setBusy(false);
     }
-  }, [table, column, address]);
+  }, [url]);
 
   if (error) {
     return (
@@ -147,8 +153,9 @@ export function CellMedia({
   return (
     <figure className={`m-0 ${className}`}>
       {kind === "image" && (
-        // eslint-disable-next-line @next/next/no-img-element -- an object URL for
-        // bytes this page just fetched; there is no remote to optimise.
+        /* An object URL for bytes this page just fetched — there is no remote for
+           `next/image` to optimise, and no loader that could read a blob URL. */
+        // eslint-disable-next-line @next/next/no-img-element
         <img
           src={loaded.url}
           alt={`the ${column} of this row`}

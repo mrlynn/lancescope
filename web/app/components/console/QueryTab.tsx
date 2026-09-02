@@ -84,8 +84,11 @@ export function QueryTab({ table, root }: { table: string; root: string | null }
   const describeRef = useRef<HTMLInputElement>(null);
   const [textSearch, setTextSearch] = useState<TextSearchCapability | null>(null);
   const [columns, setColumns] = useState<CompletionColumn[]>([]);
-  const [check, setCheck] = useState<FilterValidation | null>(null);
-  const [checking, setChecking] = useState(false);
+  // The verdict is stored with the predicate it describes. Keeping them together is
+  // what makes "is this answer still about what is in the box" a comparison rather
+  // than a second piece of state to remember to clear — and a stale count under an
+  // edited filter is the one failure that would make this worse than saying nothing.
+  const [check, setCheck] = useState<{ for: string; v: FilterValidation } | null>(null);
   const [showPlan, setShowPlan] = useState(false);
   const [showRepro, setShowRepro] = useState(false);
 
@@ -127,20 +130,35 @@ export function QueryTab({ table, root }: { table: string; root: string | null }
   //
   // Debounced rather than per keystroke, and aborted when the text moves on, so a
   // slow count against a large table cannot land after the filter it described has
-  // been edited — the stale answer being the one failure that would make this worse
-  // than saying nothing.
+  // been edited.
   useEffect(() => {
     const text = filter.trim();
-    if (!text) { setCheck(null); setChecking(false); return; }
+    if (!text) return;
     const controller = new AbortController();
-    setChecking(true);
     const t = setTimeout(() => {
       validateFilter(table, text, controller.signal)
-        .then((v) => { setCheck(v); setChecking(false); })
-        .catch(() => { if (!controller.signal.aborted) { setCheck(null); setChecking(false); } });
+        .then((v) => setCheck({ for: text, v }))
+        .catch((e) => {
+          // A failure is recorded against this text rather than dropped. Dropping it
+          // leaves "checking…" under the box forever, which is the one reading of
+          // this line that is never true.
+          if (controller.signal.aborted) return;
+          setCheck({ for: text, v: {
+            valid: false,
+            error: e instanceof ApiError ? e.message : "could not check this filter",
+            filter: text, matched_rows: null, total_rows: null,
+            read_bytes: 0, read_iops: 0,
+          } });
+        });
     }, 400);
-    return () => { clearTimeout(t); controller.abort(); setChecking(false); };
+    return () => { clearTimeout(t); controller.abort(); };
   }, [table, filter]);
+
+  // Both derived rather than stored. An answer is shown when it is an answer about
+  // the predicate currently in the box; anything else is still being checked.
+  const asked = filter.trim();
+  const verdict = check && check.for === asked ? check.v : null;
+  const checking = asked !== "" && verdict === null;
 
   const capFor = (m: string): QueryCapability | undefined =>
     caps?.capabilities.find((c) => c.mode === m);
@@ -336,18 +354,18 @@ export function QueryTab({ table, root }: { table: string; root: string | null }
 
       {filter.trim() && (
         <div className="mono text-[11px] mb-4 flex items-baseline gap-2 flex-wrap">
-          {checking && !check && <span className="text-[var(--dim)]">checking…</span>}
-          {check?.valid && check.matched_rows !== null && (
+          {checking && <span className="text-[var(--dim)]">checking…</span>}
+          {verdict?.valid && verdict.matched_rows !== null && (
             <>
-              <span style={{ color: check.matched_rows === 0 ? "var(--video)" : "var(--index)" }}>
-                matches {check.matched_rows.toLocaleString()} of{" "}
-                {(check.total_rows ?? 0).toLocaleString()} rows
+              <span style={{ color: verdict.matched_rows === 0 ? "var(--video)" : "var(--index)" }}>
+                matches {verdict.matched_rows.toLocaleString()} of{" "}
+                {(verdict.total_rows ?? 0).toLocaleString()} rows
               </span>
               <span className="text-[var(--dim)]">
-                · counted for {fmtBytes(check.read_bytes).value}{" "}
-                {fmtBytes(check.read_bytes).unit}
+                · counted for {fmtBytes(verdict.read_bytes).value}{" "}
+                {fmtBytes(verdict.read_bytes).unit}
               </span>
-              {check.matched_rows === 0 && (
+              {verdict.matched_rows === 0 && (
                 <span className="text-[var(--haze)]">
                   — the filter is valid, so this is what the table says, not a mistake
                   in the predicate
@@ -355,8 +373,8 @@ export function QueryTab({ table, root }: { table: string; root: string | null }
               )}
             </>
           )}
-          {check && !check.valid && (
-            <span style={{ color: "var(--video)" }}>{check.error}</span>
+          {verdict && !verdict.valid && (
+            <span style={{ color: "var(--video)" }}>{verdict.error}</span>
           )}
         </div>
       )}
