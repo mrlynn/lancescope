@@ -116,7 +116,8 @@ def _validate(body: JobBody) -> RunRequest:
     except OSError:
         pass
 
-    kinds = tuple(k for k in (body.kinds or ["image"]) if k in KINDS) or ("image",)
+    kinds = (tuple(k for k in (body.kinds or sorted(IMPLEMENTED)) if k in KINDS)
+             or tuple(sorted(IMPLEMENTED)))
     unimplemented = [k for k in kinds if k not in IMPLEMENTED]
     if unimplemented and not [k for k in kinds if k in IMPLEMENTED]:
         _refuse(f"{', '.join(unimplemented)} cannot be turned into rows yet. "

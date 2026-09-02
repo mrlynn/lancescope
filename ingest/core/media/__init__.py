@@ -54,6 +54,10 @@ def handler_for(kind: str):
         from ingest.core.media.image import ImageHandler
 
         return ImageHandler()
+    if kind == "pdf":
+        from ingest.core.media.pdf import PdfHandler
+
+        return PdfHandler()
     raise LookupError(
         f"no handler for {kind!r} yet — this build ingests "
         f"{', '.join(sorted(IMPLEMENTED))}")
@@ -62,4 +66,4 @@ def handler_for(kind: str):
 # Kinds that can actually be turned into rows today, as opposed to kinds this tool
 # can recognise in a directory listing. Discovery knows about all four; the writer
 # only knows about these, and the plan says so rather than discovering it per file.
-IMPLEMENTED = frozenset({"image"})
+IMPLEMENTED = frozenset({"image", "pdf"})

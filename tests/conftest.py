@@ -248,9 +248,29 @@ WAV_HEADER = (b"RIFF$\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00"
               b"\x44\xac\x00\x00\x88X\x01\x00\x02\x00\x10\x00data\x00\x00\x00\x00")
 MP4_FTYP = (b"\x00\x00\x00\x20ftypisom\x00\x00\x02\x00isomiso2avc1mp41"
             b"\x00\x00\x00\x08free")
-MINIMAL_PDF = (b"%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
-               b"2 0 obj<</Type/Pages/Kids[]/Count 0>>endobj\n"
-               b"trailer<</Root 1 0 R>>\n%%EOF\n")
+# A real one-page PDF with a real text layer, assembled by hand so the fixture needs
+# no PDF library to exist. `PdfReader` extracts "Kubernetes quarterly report" from
+# it, which is what lets a test assert that the text column came from the page
+# rather than from the filename.
+MINIMAL_PDF = (
+    b"%PDF-1.4\n"
+    b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"
+    b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n"
+    b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+    b"/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>\nendobj\n"
+    b"4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n"
+    b"5 0 obj\n<< /Length 59 >>\nstream\n"
+    b"BT /F1 24 Tf 72 700 Td (Kubernetes quarterly report) Tj ET\n"
+    b"endstream\nendobj\n"
+    b"xref\n0 6\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n"
+    b"0000000115 00000 n \n0000000241 00000 n \n0000000311 00000 n \n"
+    b"trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n419\n%%EOF\n")
+
+# A PDF with no pages at all — a real shape a real file can have, and one the
+# handler has to refuse rather than write an empty row for.
+EMPTY_PDF = (b"%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
+             b"2 0 obj<</Type/Pages/Kids[]/Count 0>>endobj\n"
+             b"trailer<</Root 1 0 R>>\n%%EOF\n")
 
 
 @pytest.fixture

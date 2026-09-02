@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -133,7 +134,9 @@ class RunRequest:
     source: str
     destination: str
     name: str
-    kinds: tuple[str, ...] = ("image",)
+    # Everything this build can turn into rows, rather than a hardcoded list that
+    # silently stops including a medium the day one is added.
+    kinds: tuple[str, ...] = tuple(sorted(IMPLEMENTED))
     limit: int | None = None
     hash_contents: bool = False
     max_files: int = 50_000
@@ -208,6 +211,12 @@ def run(
     t0 = time.perf_counter()
     progress = Progress()
     result = RunResult(table=req.name)
+
+    # Its own subdirectory, removed at the end. Images are embedded from where they
+    # already are, but a PDF renders one JPEG per page, and without this the cache
+    # would grow by every page of every document ever ingested.
+    scratch = Path(work_dir) / f"run-{int(t0 * 1000):x}"
+    scratch.mkdir(parents=True, exist_ok=True)
 
     def tick() -> None:
         if on_progress:
@@ -321,11 +330,17 @@ def run(
             tick()
             kind = kind_for(path)
             try:
-                extraction = handlers[kind].extract(path, work_dir)
+                extraction = handlers[kind].extract(path, scratch)
                 rows = _rows_for(path, kind, extraction.items,
                                  hash_contents=req.hash_contents)
                 embed_paths = [it.image_path for it in extraction.items]
                 progress.source_bytes_read += path.stat().st_size
+                # A handler's own reservations — a scan with no text layer, a
+                # six-hundred-page book — belong in the result, not in a log nobody
+                # reads. Capped, because one warning per file is a wall of text.
+                for w in extraction.warnings:
+                    if w not in result.warnings and len(result.warnings) < 20:
+                        result.warnings.append(w)
                 consecutive = 0
             except Exception as e:                                 # noqa: BLE001
                 reason = f"{type(e).__name__}: {e}".split("\n")[0][:200]
@@ -368,6 +383,7 @@ def run(
 
     progress.current_file = None
     progress.current_file_started = None
+    shutil.rmtree(scratch, ignore_errors=True)
 
     if outcome is None:
         result.ms = (time.perf_counter() - t0) * 1000

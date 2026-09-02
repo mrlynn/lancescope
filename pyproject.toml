@@ -104,6 +104,13 @@ test = [
     # testing in CI rather than by hand.
     "pytest-asyncio>=0.24",
     "mcp>=2.1",
+    # The media decoders, which are small pure wheels rather than the gigabyte this
+    # group exists to avoid. Without them the handlers would only ever be exercised
+    # by hand. The "this build has no decoder" paths stay covered because those tests
+    # pin preflight rather than reading whatever the machine happens to have.
+    "pillow>=11",
+    "pypdfium2>=4.30",
+    "pypdf>=5",
 ]
 
 [tool.ruff]

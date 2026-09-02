@@ -145,7 +145,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     from ingest.core.embedders.config import embedder_for, resolve
     from ingest.core.run import RunRequest
 
-    kinds = tuple((args.types or "image").split(","))
+    kinds = tuple(args.types.split(",")) if args.types else tuple(sorted(IMPLEMENTED))
     if bad := [k for k in kinds if k not in KINDS]:
         print(f"unknown media type(s): {', '.join(bad)}. Known: {', '.join(KINDS)}",
               file=sys.stderr)
@@ -252,7 +252,9 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--name", required=True, help="table name")
     g.add_argument("--into", help="parent directory for the table "
                                   "(default: the active connection, else ~/LanceScope)")
-    g.add_argument("--types", help=f"comma-separated subset of {', '.join(KINDS)}")
+    g.add_argument("--types",
+                   help=f"comma-separated subset of {', '.join(sorted(IMPLEMENTED))} "
+                        f"(default: all of them)")
     g.add_argument("--limit", type=int, help="first N files only — try it cheaply")
     g.add_argument("--hash", action="store_true",
                    help="record a sha256 of every file (reads every byte; off by "

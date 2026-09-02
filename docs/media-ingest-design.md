@@ -226,6 +226,11 @@ blob mode *would* write, so nobody is surprised.
   flag.** Audio's highest-value query is "find where they said X", and that is
   lexical — FTS answers it better than any embedding.
 
+  PDF has since made the same argument concretely: a scanned page has no text layer,
+  gets `text_source="filename"` rather than nothing, and is still found by *"a blue
+  circle"* through its rendered image. Rows do not need every column populated to
+  earn their place — they need the columns they do have to be honestly labelled.
+
 This never forces more than one table, and at most two vector columns, only on
 opt-in. A run records exactly one embedder identity; appending to an ingest-created
 table is refused unless that identity matches byte-for-byte. That refusal is the
@@ -743,11 +748,11 @@ four-page-kind test means new pages need full front matter:
 | phase | what lands | why here |
 |---|---|---|
 | **0** | ~~The spike~~ — **done**. `scripts/ingest_spike.py`, results in `FINDINGS.md`: pylance-only indexing works, schema metadata round-trips, and Ollama is a viable third backend | decided the dependency groups: ingest adds no heavy dependency |
-| **0b** | `tests/test_write_quarantine.py` green against `main` as it stands, plus `LANCESCOPE_READ_ONLY` and `ingest_capabilities()` | no feature, no risk, and it is what makes every later phase safe. Merge before a line of ingest exists |
-| **1** | Look, don't touch: `plan.py`, `binaries.py`, `GET /ingest/capabilities`, `POST /ingest/scan`, `lancescope scan`, and the Found screen with a disabled Next | zero writes, and genuinely useful alone — *"what is in this folder, and what could this tool do with it"* |
-| **2** | **Images end to end — the first shippable slice.** `schema.py`, `writer.py`, `indexing.py`, `jobs.py`, hosted + null embedders, `POST /ingest/jobs` + poll, the wizard, adoption, `lancescope ingest` | one decoder, no blob table, `copy_mode="none"`, jobs that finish in seconds to minutes — the whole feature in miniature, exercising the lifecycle without the hour-long cases |
-| **3** | The long tail of the lifecycle: cancel, discard, the failure taxonomy and the 10-in-a-row stop, the journal and `interrupted`, the jobs list, `?job=` reattach, `/events` paging | where the honest messages get written and tested |
-| **4** | PDF (cheapest second modality — a page is a keyframe with text attached), then the local SigLIP backend | reuses phase 2's row shape entirely |
+| **0b** | ~~The write quarantine~~ — **done**. Five structural tests plus a tamper detector that runs the whole read API and every MCP tool and checks no byte moved; each verified by mutation | no feature, no risk, and it is what makes every later phase safe |
+| **1** | ~~Look, don't touch~~ — **done**. `plan.py`, `binaries.py`, `/ingest/capabilities`, `/ingest/scan`, `lancescope scan`, the Found screen. A 75 GB photo library surveys in 2.1 s | zero writes, and genuinely useful alone |
+| **2** | ~~Images end to end~~ — **done**. Schema, writer, indexing, jobs, embedders (Ollama, OpenAI-compatible, multimodal, local SigLIP), the console wizard and `lancescope ingest`. Verified with real SigLIP: *"horizontal stripes"* returns the striped pictures | the whole feature in miniature |
+| **3** | ~~The lifecycle~~ — **mostly done** with phase 2: cancel, discard, the failure taxonomy and the ten-in-a-row stop, the journal and `interrupted`, `?job=` reattach, `/events` paging. **Left: the jobs-list screen** | where the honest messages got written |
+| **4** | ~~PDF~~ — **done**. One row per page via pypdfium2 + pypdf, text layer into the FTS column, scans embedded and labelled. Verified: full-text finds *"logistics"* on the right page, and *"a blue circle"* returns a photograph **and** a scanned page in one query | a page is a keyframe with its transcript already attached, so it reused phase 2's row shape entirely |
 | **5** | Video: blob table, segmentation, adaptive keyframes, sidecar subtitles, `copy_mode="blobs"`. **Plus a read-side dependency:** playback goes through `/video/{talk_id}/{segment_idx}` in `routes/demo.py`, which is FOSDEM-shaped. A generic ranged blob route (`GET /catalog/tables/{name}/blob/{blob_key}`) must exist for a user's video table to be playable — read-only work in the read-only router, but real work | |
 | **6** | Audio: ASR, waveform thumbs, transcript windows. Ships text-only/FTS first, then SigLIP-text vectors, then the optional second space with RRF | |
 | **7** | The two deferred costs, argued on their own numbers: decoders in the packaged app, and the Tauri directory picker | neither blocks anything before it |
