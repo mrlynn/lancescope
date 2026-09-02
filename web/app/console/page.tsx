@@ -22,6 +22,7 @@ import {
   InsightsTab, PanelFindings, PartialAnalysis,
 } from "@/app/components/console/Findings";
 import { CompareTab } from "@/app/components/console/CompareTab";
+import { TrainingTab, trainingFindings } from "@/app/components/console/TrainingTab";
 import { QueryTab } from "@/app/components/console/QueryTab";
 import { usePins, useRecents } from "@/app/lib/recents";
 import {
@@ -31,18 +32,29 @@ import {
 
 // Each tab names what it reads, and carries the glyph for it — the row is
 // scannable as shapes before any of the words are read.
-const TABS: { id: string; icon: IconName }[] = [
-  { id: "schema", icon: "schema" },
-  { id: "versions", icon: "history" },
-  { id: "indices", icon: "index" },
-  { id: "fragments", icon: "fragments" },
-  { id: "rows", icon: "rows" },
-  { id: "query", icon: "search" },
-  { id: "compare", icon: "history" },
-  { id: "insights", icon: "spark" },
+//
+// Two groups, because the tabs are two kinds of thing and nine of them in one strip
+// no longer fit a laptop: the first five read the table's own metadata, the last
+// four ask something of it. The split is where the row breaks when it has to break,
+// which is a seam that means something rather than wherever the width ran out.
+const TAB_GROUPS: { id: string; icon: IconName }[][] = [
+  [
+    { id: "schema", icon: "schema" },
+    { id: "versions", icon: "history" },
+    { id: "indices", icon: "index" },
+    { id: "fragments", icon: "fragments" },
+    { id: "rows", icon: "rows" },
+  ],
+  [
+    { id: "query", icon: "search" },
+    { id: "compare", icon: "history" },
+    { id: "training", icon: "play" },
+    { id: "insights", icon: "spark" },
+  ],
 ];
+const TABS = TAB_GROUPS.flat();
 type Tab = "schema" | "versions" | "indices" | "fragments" | "rows" | "query"
-  | "compare" | "insights";
+  | "compare" | "training" | "insights";
 
 const PAGE = 25;
 
@@ -175,7 +187,7 @@ export default function Console() {
     let alive = true;
     const run = async () => {
       try {
-        if (tab === "schema" && !detail) {
+        if ((tab === "schema" || tab === "training") && !detail) {
           const d = await getTable(picked);
           if (!alive) return;
           setDetail(d); setCost({ bytes: d.read_bytes, iops: d.read_iops });
@@ -310,21 +322,26 @@ export default function Console() {
 
           {/* ---------------------------------------------------------- detail */}
           <section className="flex-1 min-w-0">
-            <div className="seg mb-6 flex-wrap">
-              {TABS.map((t) => (
-                <button
-                  key={t.id}
-                  onClick={() => setTab(t.id as Tab)}
-                  data-on={tab === t.id}
-                  className="mono !px-3.5 text-[10px] tracking-[0.14em] uppercase"
-                >
-                  <Icon name={t.icon} size={14} />
-                  {t.id}
-                  <TabBadge
-                    findings={findings}
-                    panel={t.id === "insights" ? null : t.id}
-                  />
-                </button>
+            <div className="flex flex-wrap items-center gap-2 mb-6">
+              {TAB_GROUPS.map((group) => (
+                <div key={group[0].id} className="seg">
+                  {group.map((t) => (
+                    <button
+                      key={t.id}
+                      onClick={() => setTab(t.id as Tab)}
+                      data-on={tab === t.id}
+                      className="mono !px-3.5 text-[10px] tracking-[0.14em] uppercase"
+                    >
+                      <Icon name={t.icon} size={14} />
+                      {t.id}
+                      <TabBadge
+                        findings={findings}
+                        panel={t.id === "insights" ? null : t.id}
+                        facet={t.id === "training" ? "training" : undefined}
+                      />
+                    </button>
+                  ))}
+                </div>
               ))}
             </div>
 
@@ -345,6 +362,7 @@ export default function Console() {
               {tab === "query" && (picked
                 ? <QueryTab key={picked} table={picked} root={root} />
                 : <Empty>pick a table to query</Empty>)}
+              {tab === "training" && <TrainingTab d={detail} findings={findings} />}
               {tab === "compare" && (picked
                 ? <CompareTab key={picked} table={picked} />
                 : <Empty>pick a table to compare</Empty>)}
@@ -385,8 +403,12 @@ export default function Console() {
  *  a zero — a badge that is always there stops being a signal — and the colour is
  *  that panel's own worst severity, not the table's, so a tab holding two notes does
  *  not borrow the alarm from a warning three tabs away. */
-function TabBadge({ findings, panel }: { findings: Findings | null; panel: string | null }) {
-  const mine = (findings?.findings ?? []).filter((f) => panel === null || f.panel === panel);
+function TabBadge({ findings, panel, facet }: {
+  findings: Findings | null; panel: string | null; facet?: "training";
+}) {
+  const mine = facet
+    ? trainingFindings(findings)
+    : (findings?.findings ?? []).filter((f) => panel === null || f.panel === panel);
   const n = mine.length;
   const warn = mine.some((f) => f.severity === "warn");
   if (!n) return null;

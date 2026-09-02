@@ -191,6 +191,11 @@ export type Rows = {
   read_iops: number;
 };
 
+/** Whose question a finding answers. A panel says where the evidence lives; a facet
+ *  says who is paying for it, and the two are different axes — an unindexed vector
+ *  column is evidence on Indices and a per-query cost to anyone running an eval. */
+export type Facet = "training";
+
 /** A finding is derived, never generated: `evidence` holds the literal numbers the
  *  claim was computed from, and `panel` names where those numbers are on screen. */
 export type Finding = {
@@ -203,6 +208,7 @@ export type Finding = {
   caveat: string;
   suggested_action: string;
   columns: string[];
+  facets: Facet[];
 };
 
 /** A check that could not run. Distinct from "nothing to report": a partial
@@ -217,6 +223,8 @@ export type RuleFailure = {
 export type Findings = {
   name: string;
   uri: string;
+  /** Which facet this response was narrowed to, or null for everything. */
+  facet: Facet | null;
   findings: Finding[];
   summary: {
     total: number;
@@ -260,6 +268,9 @@ export const getTable = (n: string) => get<TableDetail>(`/tables/${n}`);
 export const getVersions = (n: string) => get<Versions>(`/tables/${n}/versions`);
 export const getIndices = (n: string) => get<Indices>(`/tables/${n}/indices`);
 export const getFragments = (n: string) => get<Fragments>(`/tables/${n}/fragments`);
+/** Every finding, once per table. The facets ride along on each one, so a view that
+ *  wants a subset filters what is already here — `?facet=` exists on the route for
+ *  callers with no list in hand, which is agents over MCP rather than this page. */
 export const getFindings = (n: string) => get<Findings>(`/tables/${n}/findings`);
 
 export function getRows(
