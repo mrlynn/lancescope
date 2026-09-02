@@ -70,6 +70,13 @@ docs:
 icons:
 	uv run --with pillow python scripts/gen_icons.py
 
+# The version, in the three files that each hold their own literal copy. Run before
+# tagging; `make test` fails if they ever disagree.
+#   make version            show what each file currently claims
+#   make version SET=0.2.0  set all three
+version:
+	@$(PY) scripts/bump_version.py $(SET)
+
 # --- desktop ------------------------------------------------------------------
 
 # The interface as static files, for the app bundle to carry. Not used by `make dev`

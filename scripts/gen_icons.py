@@ -125,7 +125,7 @@ def write_ico(path: Path, sizes: list[int]) -> None:
     offset = 6 + 16 * len(sizes)
     header = struct.pack("<HHH", 0, 1, len(sizes))
     entries, body = b"", b""
-    for s, blob in zip(sizes, blobs):
+    for s, blob in zip(sizes, blobs, strict=True):
         entries += struct.pack(
             "<BBBBHHII", s if s < 256 else 0, s if s < 256 else 0, 0, 0,
             1, 32, len(blob), offset,

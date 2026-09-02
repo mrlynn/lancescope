@@ -30,4 +30,8 @@ for tool in cargo npx; do
 done
 
 cd desktop/src-tauri
-exec npx --yes @tauri-apps/cli@2 build "$@"
+# Pinned, not floating. `@tauri-apps/cli@2` resolves the newest 2.x at run time,
+# so two builds a month apart were not the same build and a CLI release could move
+# the bundle layout or the DMG window under a tagged artefact nobody would rebuild.
+# Bump this deliberately, and rebuild the DMG once to look at it when you do.
+exec npx --yes @tauri-apps/cli@2.11.4 build "$@"

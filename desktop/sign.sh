@@ -294,14 +294,31 @@ notarise() {
     echo "    no verdict yet; asking Apple until there is one (first submissions of"
     echo "    a new app can take hours — safe to interrupt and re-run, the"
     echo "    submission keeps going)"
+    # NOTARY_TIMEOUT bounds the wait, in seconds. Unset means wait forever, which
+    # is the right behaviour at a desk: the submission is live and interrupting
+    # costs nothing. On a CI runner forever means idling until the job timeout
+    # kills the script mid-staple, leaving an unnotarised DMG and a red build for
+    # the wrong reason — so the workflow sets a bound and this exits saying the
+    # submission is still going, with the id needed to staple it later.
+    local waited=0
     while :; do
       info=$(notary_info "$id")
       case "$info" in
         *"status: Accepted"*) echo "    accepted"; return 0 ;;
         *"status: Invalid"*|*"status: Rejected"*) break ;;
       esac
+      if [ -n "${NOTARY_TIMEOUT:-}" ] && [ "$waited" -ge "$NOTARY_TIMEOUT" ]; then
+        echo
+        echo "    still processing after ${NOTARY_TIMEOUT}s, which is as long as"
+        echo "    NOTARY_TIMEOUT allows. This is NOT a rejection — the submission is"
+        echo "    live at Apple. Check it and staple when it lands:"
+        echo "      xcrun notarytool info $id ..."
+        echo "      xcrun stapler staple <the .app or .dmg>"
+        return 1
+      fi
       printf '    %s  still processing\n' "$(date +%H:%M:%S)"
       sleep 30
+      waited=$((waited + 30))
     done
   fi
   if [ -n "$id" ]; then
