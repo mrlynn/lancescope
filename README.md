@@ -117,6 +117,26 @@ that look odd:
 The six reference pages are generated from the code by `make docs`, and `make test`
 fails if they drift from it.
 
+## Before you push
+
+```bash
+make check
+```
+
+Everything CI runs, in the order that fails cheapest first: `ruff` on the same pin
+the workflow uses, the contract tests, then the interface's typecheck, lint and
+build. It ends with the container image where Docker is installed, and says which
+check it skipped where it is not — that one only runs remotely, and it is worth
+knowing you are pushing blind on it rather than assuming green.
+
+`make test` stays the fast inner loop and covers one of CI's five jobs; `make check`
+covers four, and `tests/test_check.py` fails if a job is added to the workflow that
+the target neither runs nor explicitly excuses. The fifth is the eight-version
+reader matrix, which is minutes rather than seconds and is excused by name.
+
+`make verify` is a different gate: the real corpus rather than synthetic fixtures,
+and the one that has to pass before a demo.
+
 ## Point an agent at it
 
 The console's read surface is also an MCP server, so Claude Code — or any agent host
