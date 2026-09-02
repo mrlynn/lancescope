@@ -231,6 +231,10 @@ def exercise_read_api(client, tables: list[str]) -> int:
                           json={"mode": "scan", "limit": 5}).status_code == 200
         ok += client.post(f"/catalog/tables/{name}/query/explain",
                           json={"mode": "scan", "limit": 5}).status_code == 200
+        # Streaming a blob is the most write-adjacent read in the API — it opens a
+        # side file and seeks in it — so it belongs in the sweep rather than outside.
+        ok += client.get(f"/catalog/tables/{name}/blob",
+                         params={"key": "0", "key_column": "id"}).status_code == 200
     return ok
 
 

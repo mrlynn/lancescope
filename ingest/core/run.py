@@ -43,7 +43,7 @@ from ingest.core import indexing, writer
 from ingest.core.embedders.base import EmbedderError, NoEmbedder
 from ingest.core.media import IMPLEMENTED, handler_for, kind_for
 from ingest.core.plan import scan
-from ingest.core.schema import identity_metadata, item_schema
+from ingest.core.schema import blob_schema, identity_metadata, item_schema
 
 BATCH_ROWS = 256
 CONSECUTIVE_FAILURE_LIMIT = 10
@@ -102,6 +102,8 @@ class Failure:
 class RunResult:
     table: str = ""
     uri: str = ""
+    blob_uri: str = ""
+    blob_rows: int = 0
     rows: int = 0
     version: int = 0
     vector_dim: int | None = None
@@ -118,6 +120,7 @@ class RunResult:
     def as_dict(self) -> dict:
         return {
             "table": self.table, "uri": self.uri, "rows": self.rows,
+            "blob_uri": self.blob_uri, "blob_rows": self.blob_rows,
             "version": self.version, "vector_dim": self.vector_dim,
             "embedder": self.embedder,
             "indices": [i.as_dict() for i in self.indices],
@@ -140,6 +143,10 @@ class RunRequest:
     limit: int | None = None
     hash_contents: bool = False
     max_files: int = 50_000
+    # "none" references originals where they already are — the default, because
+    # nobody ingesting a video library wants a second copy of it. "blobs" stores
+    # them, segmented, so the table is playable on its own.
+    copy_mode: str = "none"
 
 
 class Cancelled(Exception):
@@ -182,7 +189,9 @@ def _rows_for(src: Path, kind: str, items, *, hash_contents: bool) -> list[dict]
             "text": it.text,
             "text_source": it.text_source,
             "thumb_jpeg": it.thumb_jpeg,
-            "blob_key": it.blob_key,
+            # The handler knows which chunk a moment is in; only the run knows the
+            # source id. Joined here so both tables agree on the key.
+            "blob_key": None if it.blob_key is None else f"{source_id}:{it.blob_key}",
             "blob_offset_s": it.blob_offset_s,
             "meta_json": json.dumps(it.meta, default=str) if it.meta else "",
         })
@@ -286,11 +295,15 @@ def run(
             f"their filenames and any text they carry — searchable, but not by what "
             f"they look like.")
 
+    copy_mode = req.copy_mode if req.copy_mode in ("none", "blobs") else "none"
     schema = item_schema(dim=space.dim if space else None).with_metadata(
-        identity_metadata(space=space, copy_mode="none", kinds=kinds))
-    handlers = {k: handler_for(k) for k in kinds}
+        identity_metadata(space=space, copy_mode=copy_mode, kinds=kinds))
+    blob_fields = blob_schema().with_metadata(
+        identity_metadata(space=space, copy_mode=copy_mode, kinds=kinds))
+    handlers = {k: handler_for(k, copy_mode) for k in kinds}
 
     outcome: writer.WriteOutcome | None = None
+    blob_outcome: writer.WriteOutcome | None = None
     pending_rows: list[dict] = []
     pending_paths: list[Path] = []
     consecutive = 0
@@ -333,6 +346,15 @@ def run(
                 extraction = handlers[kind].extract(path, scratch)
                 rows = _rows_for(path, kind, extraction.items,
                                  hash_contents=req.hash_contents)
+                if extraction.chunks:
+                    # Written per file rather than batched: a batch of segments is
+                    # hundreds of megabytes held in memory, which is the one thing
+                    # the demo's per-talk append exists to avoid.
+                    blob_outcome = _write_blobs(
+                        req, blob_fields, rows[0]["source_id"], kind,
+                        extraction.chunks, blob_outcome)
+                    result.blob_uri, result.blob_rows = (
+                        blob_outcome.uri, blob_outcome.rows)
                 embed_paths = [it.image_path for it in extraction.items]
                 progress.source_bytes_read += path.stat().st_size
                 # A handler's own reservations — a scan with no text layer, a
@@ -413,6 +435,8 @@ def run(
         result.detail = (
             f"{result.rows:,} rows in {req.name}.lance"
             + (f", indexed on {', '.join(built)}" if built else "")
+            + (f", with {result.blob_rows:,} segment(s) in "
+               f"{req.name}_blobs.lance" if result.blob_rows else "")
             + (f". {len(result.failures)} file(s) failed."
                if result.failures else "."))
     return result
@@ -424,3 +448,35 @@ def result_text_probe(uri: str) -> list[dict]:
 
     ds = lance.dataset(uri)
     return ds.to_table(columns=["text"], limit=256).to_pylist()
+
+
+def _write_blobs(req: RunRequest, schema: pa.Table, source_id: str, kind: str,
+                 chunks, previous):
+    """Append one file's stored segments to the blob table, creating it if needed.
+
+    The bytes are read once, written once, and dropped — never held for the corpus.
+    `blob_key` is `<source_id>:<chunk_idx>`, which is what the item rows join on and
+    what a ranged read asks for by name.
+    """
+    from lance import blob_array
+
+    payloads = [c.path.read_bytes() for c in chunks]
+    batch = pa.table({
+        "blob_key": [f"{source_id}:{c.chunk_idx}" for c in chunks],
+        "source_id": [source_id] * len(chunks),
+        "kind": [kind] * len(chunks),
+        "chunk_idx": [c.chunk_idx for c in chunks],
+        "start_s": [c.start_s for c in chunks],
+        "end_s": [c.end_s for c in chunks],
+        "mime": [c.mime for c in chunks],
+        "size_bytes": [c.size_bytes for c in chunks],
+        "payload": blob_array(payloads),
+    }, schema=schema)
+
+    if previous is None:
+        out = writer.create_blob_table(req.destination, req.name, batch)
+    else:
+        out = writer.append(previous.uri, batch)
+    for c in chunks:
+        c.path.unlink(missing_ok=True)
+    return out

@@ -89,6 +89,9 @@ class JobBody(BaseModel):
     kinds: list[str] | None = None
     limit: int | None = Field(default=None, ge=1)
     hash_contents: bool = False
+    # "none" indexes the originals where they are; "blobs" also stores them,
+    # segmented, so the table plays without the source files.
+    copy_mode: str = "none"
     activate: bool = True
 
 
@@ -134,9 +137,12 @@ def _validate(body: JobBody) -> RunRequest:
         _refuse(f"{', '.join(unimplemented)} cannot be turned into rows yet. "
                 f"This build ingests {', '.join(sorted(IMPLEMENTED))}.")
 
+    if body.copy_mode not in ("none", "blobs"):
+        _refuse(f"copy_mode must be 'none' or 'blobs', not {body.copy_mode!r}")
+
     return RunRequest(source=str(source), destination=str(dest), name=body.name,
                       kinds=kinds, limit=body.limit,
-                      hash_contents=body.hash_contents)
+                      hash_contents=body.hash_contents, copy_mode=body.copy_mode)
 
 
 @router.post("/jobs", status_code=202)

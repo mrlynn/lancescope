@@ -178,6 +178,9 @@ export type StartJob = {
   name: string;
   kinds?: MediaKind[];
   limit?: number | null;
+  /** "none" indexes originals where they are; "blobs" also stores them, segmented,
+   *  so the table plays without the source files. */
+  copy_mode?: "none" | "blobs";
 };
 
 export const startJob = (body: StartJob) =>

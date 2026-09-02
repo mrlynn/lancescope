@@ -132,3 +132,64 @@ def test_a_query_over_a_timestamp_column_serialises_too(api):
                  json={"mode": "scan", "limit": 2})
     assert r.status_code == 200, r.text
     assert isinstance(r.json()["rows"][0]["at"], str)
+
+
+# --------------------------------------------------------------------------- blobs
+
+def test_a_blob_can_be_streamed_out_by_key(api):
+    """The demo has streamed video from a blob column since the beginning, through a
+    route with two FOSDEM column names baked into its path. A table someone built
+    from their own video needs the same thing without them."""
+    r = api.get("/catalog/tables/blobs/blob", params={"key": "0", "key_column": "id"})
+    assert r.status_code == 200, r.text
+    assert r.headers["accept-ranges"] == "bytes"
+    assert len(r.content) > 0
+    # The cost of moving bytes is reported like every other read here.
+    assert int(r.headers["x-read-bytes"]) > 0
+
+
+def test_a_range_request_returns_only_that_range(api):
+    r = api.get("/catalog/tables/blobs/blob",
+                params={"key": "0", "key_column": "id"},
+                headers={"Range": "bytes=0-1023"})
+    assert r.status_code == 206
+    assert len(r.content) == 1024
+    assert r.headers["content-range"].startswith("bytes 0-1023/")
+
+
+def test_a_range_past_the_end_is_refused_rather_than_answered_empty(api):
+    r = api.get("/catalog/tables/blobs/blob",
+                params={"key": "0", "key_column": "id"},
+                headers={"Range": "bytes=99999999-"})
+    assert r.status_code == 416
+    assert "past the end" in r.json()["detail"]
+
+
+def test_one_response_cannot_be_asked_to_hold_the_whole_file_in_memory(api):
+    from server.routes.catalog import MAX_BLOB_CHUNK
+
+    r = api.get("/catalog/tables/blobs/blob",
+                params={"key": "0", "key_column": "id"},
+                headers={"Range": "bytes=0-99999999"})
+    assert r.status_code == 206
+    assert len(r.content) <= MAX_BLOB_CHUNK
+
+
+def test_asking_a_table_with_no_blob_column_says_so(api):
+    r = api.get("/catalog/tables/ordinary/blob", params={"key": "0", "key_column": "id"})
+    assert r.status_code == 404
+    assert "no blob column" in r.json()["detail"]
+
+
+def test_an_unknown_key_is_a_404_naming_the_column_it_looked_in(api):
+    r = api.get("/catalog/tables/blobs/blob",
+                params={"key": "nope", "key_column": "label"})
+    assert r.status_code == 404
+    assert "label" in r.json()["detail"]
+
+
+def test_the_blob_route_does_not_shadow_the_table_it_lives_under(api):
+    """`{name:path}` is greedy and matches in definition order, so this route has to
+    be declared above the bare table route — and that must not break the bare one."""
+    assert api.get("/catalog/tables/blobs").status_code == 200
+    assert api.get("/catalog/tables/blobs/versions").status_code == 200

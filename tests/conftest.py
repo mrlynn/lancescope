@@ -437,7 +437,8 @@ def fake_handlers(monkeypatch):
     import ingest.core.plan as plan_mod
     import ingest.core.run as run_mod
 
-    monkeypatch.setattr(run_mod, "handler_for", lambda kind: handlers[kind])
+    monkeypatch.setattr(run_mod, "handler_for",
+                        lambda kind, copy_mode="none": handlers[kind])
     monkeypatch.setattr(run_mod, "IMPLEMENTED", frozenset(handlers))
     monkeypatch.setattr(plan_mod, "preflight",
                         lambda kinds: {k: Readiness(k, Capability("available"))

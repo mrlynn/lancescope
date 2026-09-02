@@ -181,7 +181,8 @@ def cmd_ingest(args: argparse.Namespace) -> int:
 
     request = RunRequest(source=args.source, destination=str(destination),
                          name=args.name, kinds=kinds, limit=args.limit,
-                         hash_contents=args.hash)
+                         hash_contents=args.hash,
+                         copy_mode="blobs" if args.copy else "none")
 
     # First Ctrl-C asks the run to stop after the current file; a second is the
     # user saying they meant it, and Python's default handler takes over.
@@ -259,6 +260,10 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--hash", action="store_true",
                    help="record a sha256 of every file (reads every byte; off by "
                         "default for that reason)")
+    g.add_argument("--copy", action="store_true",
+                   help="store the originals in the table too, segmented into blob "
+                        "rows, so it plays without the source files (off by default: "
+                        "an index over files you still own is usually what you want)")
     g.add_argument("--dry-run", action="store_true", help="survey and validate; write nothing")
     g.add_argument("--json", action="store_true")
     g.set_defaults(fn=cmd_ingest)

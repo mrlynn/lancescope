@@ -41,6 +41,7 @@ export default function NewDatabase() {
   const [scan, setScan] = useState<ScanResult | null>(null);
   const [picked, setPicked] = useState<Set<MediaKind>>(new Set(ALL_KINDS));
   const [sampleOnly, setSampleOnly] = useState(false);
+  const [copyOriginals, setCopyOriginals] = useState(false);
   const [name, setName] = useState("");
   const [parent, setParent] = useState("");
   const [advanced, setAdvanced] = useState(false);
@@ -111,6 +112,7 @@ export default function NewDatabase() {
         name: name.trim(),
         kinds: [...picked],
         limit: sampleOnly ? 20 : null,
+        copy_mode: copyOriginals ? "blobs" : "none",
       });
       setJob(started);
       const url = new URL(window.location.href);
@@ -121,7 +123,7 @@ export default function NewDatabase() {
     } finally {
       setBusy(false);
     }
-  }, [scan, parent, caps, name, picked, sampleOnly]);
+  }, [scan, parent, caps, name, picked, sampleOnly, copyOriginals]);
 
   const toggle = useCallback((k: MediaKind) => {
     setPicked((now) => {
@@ -141,9 +143,8 @@ export default function NewDatabase() {
     window.history.replaceState({}, "", url);
   }, []);
 
-  const selectedFiles = (scan?.found ?? [])
-    .filter((f) => picked.has(f.kind))
-    .reduce((n, f) => n + f.files, 0);
+  const selected = (scan?.found ?? []).filter((f) => picked.has(f.kind));
+  const selectedFiles = selected.reduce((n, f) => n + f.files, 0);
   const willIngest = sampleOnly ? Math.min(20, selectedFiles) : selectedFiles;
   const live = job !== null && LIVE_STATES.includes(job.state);
   const finished = job !== null && !live;
@@ -225,6 +226,19 @@ export default function NewDatabase() {
                   — try it before committing to {selectedFiles.toLocaleString()}
                 </span>
               </label>
+
+              {/* Only worth offering when there is something big enough to be worth
+                  storing. For a folder of PNGs it is a decision about nothing. */}
+              {selected.some((f) => f.kind === "video" || f.kind === "audio") && (
+                <label className="flex items-center gap-2 mt-3 text-[13px] cursor-pointer">
+                  <input type="checkbox" checked={copyOriginals}
+                         onChange={(e) => setCopyOriginals(e.target.checked)} />
+                  <span>Store the originals too</span>
+                  <span className="text-[var(--haze)] text-[12px]">
+                    — segmented into the table, so it plays without the source files
+                  </span>
+                </label>
+              )}
 
               {unimplemented.length > 0 && (
                 <p className="text-[12px] leading-relaxed mt-4" style={{ color: "var(--video)" }}>

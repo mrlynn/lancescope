@@ -22,6 +22,7 @@ Read-only. Nothing here writes to a dataset, and nothing materialises a blob col
 | --- | --- | --- |
 | `GET` | `/catalog/tables` | Every table under the root. |
 | `GET` | `/catalog/tables/{name:path}` | One table in full: schema, stats, and the real on-disk byte split. |
+| `GET` | `/catalog/tables/{name:path}/blob` | Stream bytes out of a Blob V2 column, honouring HTTP Range. |
 | `GET` | `/catalog/tables/{name:path}/compare` | Two versions of one table, side by side and pinned. |
 | `POST` | `/catalog/tables/{name:path}/compare/query` | The same query against both versions — the before and after of an operation. |
 | `GET` | `/catalog/tables/{name:path}/findings` | What is worth saying about this table, derived rather than generated. |
