@@ -1,16 +1,19 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 204 204">
   <rect width="204" height="204" rx="34" fill="#171513"/>
-  <g fill="#ff734a">
-  <circle cx="48.5" cy="48.5" r="18.5"/>
-  <circle cx="84.2" cy="48.5" r="18.5"/>
-  <circle cx="119.8" cy="48.5" r="18.5"/>
-  <circle cx="48.5" cy="84.2" r="18.5"/>
-  <circle cx="119.8" cy="84.2" r="18.5"/>
-  <circle cx="155.0" cy="84.2" r="18.5"/>
-  <circle cx="48.5" cy="119.8" r="18.5"/>
-  <circle cx="84.2" cy="119.8" r="18.5"/>
-  <circle cx="119.8" cy="119.8" r="18.5"/>
-  <circle cx="84.2" cy="155.0" r="18.5"/>
-  <circle cx="155.0" cy="155.0" r="18.5"/>
+  <g fill="#a3958c" opacity="0.55">
+    <circle cx="48.5" cy="48.5" r="18.5"/>
+    <circle cx="84.2" cy="48.5" r="18.5"/>
+    <circle cx="119.8" cy="48.5" r="18.5"/>
+    <circle cx="48.5" cy="84.2" r="18.5"/>
+    <circle cx="119.8" cy="84.2" r="18.5"/>
+    <circle cx="155.0" cy="84.2" r="18.5"/>
+    <circle cx="48.5" cy="119.8" r="18.5"/>
+    <circle cx="84.2" cy="119.8" r="18.5"/>
+    <circle cx="119.8" cy="119.8" r="18.5"/>
+    <circle cx="84.2" cy="155.0" r="18.5"/>
+  </g>
+  <g stroke="#ff734a" fill="none" stroke-width="11">
+    <circle cx="155.0" cy="155.0" r="22"/>
+    <line x1="172.0" y1="172.0" x2="191.8" y2="191.8" stroke-linecap="round"/>
   </g>
 </svg>

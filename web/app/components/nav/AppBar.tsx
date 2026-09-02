@@ -5,13 +5,18 @@
  *  Left: the brand, then where you are — a breadcrumb, not a path. Right: whatever
  *  this screen can do, as icons with tooltips rather than a row of words. Three
  *  pages were each drawing their own version of this and they had already drifted
- *  (one used `<Wordmark>`, one a raw `<Image>`, one showed the theme control and
+ *  (one used a wordmark, one a raw `<Image>`, one showed the theme control and
  *  one did not).
+ *
+ *  The brand here is LanceScope's own: the mark from brand/lancescope/mark.svg and
+ *  the name set in type. It used to be LanceDB's wordmark, which inside a tool for
+ *  reading LanceDB read as attribution, but is the wrong thing to wear as an
+ *  identity — this project is not theirs. The title says so on hover.
  */
 
 import Link from "next/link";
 import Icon from "@/app/components/Icon";
-import Wordmark from "@/app/components/Wordmark";
+import Mark from "@/app/components/Mark";
 import ThemeToggle from "@/app/components/ThemeToggle";
 
 export type Crumb = { label: string; href?: string };
@@ -30,9 +35,16 @@ export default function AppBar({
   return (
     <header className="flex items-center justify-between gap-4 flex-wrap mb-8">
       <div className="flex items-center gap-3.5 min-w-0">
-        <Link href="/" title="LanceScope — home"
-              className="shrink-0 opacity-90 hover:opacity-100 transition-opacity">
-          <Wordmark />
+        <Link
+          href="/"
+          title="LanceScope — an independent tool, not affiliated with LanceDB"
+          className="shrink-0 flex items-center gap-2.5 opacity-90 hover:opacity-100
+                     transition-opacity"
+        >
+          <Mark size={22} className="text-[var(--haze)]" />
+          <span className="text-[17px] font-extrabold tracking-tight text-[var(--bright)]">
+            LanceScope
+          </span>
         </Link>
         {crumbs.map((c, i) => (
           <div key={`${c.label}-${i}`} className="flex items-center gap-3.5 min-w-0">
