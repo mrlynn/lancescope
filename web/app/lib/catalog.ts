@@ -398,6 +398,24 @@ export type FilterValidation = {
 export const getQueryCompletions = (n: string, values = true) =>
   get<QueryCompletions>(`/tables/${n}/query/completions?values=${values}`);
 
+/** Where the bytes of one heavy cell live.
+ *
+ *  A URL rather than a fetch, because the caller decides what to do with it — read
+ *  it to get at `X-Read-Bytes`, or hand it straight to a `<video>` that will make
+ *  its own range requests as somebody scrubs.
+ *
+ *  Nothing here reads heavy columns on its own. Asking for this URL is somebody
+ *  deciding to spend the bytes, and the response says how many it took.
+ */
+export function heavyCellUrl(
+  table: string, column: string, keyColumn: string, key: string | number,
+): string {
+  const q = new URLSearchParams({
+    column, key_column: keyColumn, key: String(key),
+  });
+  return `/api/catalog/tables/${table}/blob?${q}`;
+}
+
 async function post<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
   const res = await fetch(`/api/catalog${path}`, {
     method: "POST",
