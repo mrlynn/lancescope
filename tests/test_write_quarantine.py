@@ -121,35 +121,44 @@ def test_the_mcp_surface_reaches_only_the_read_routes():
 
 # ---------------------------------------------------------------- route surface
 
-# Every route that is not a plain GET, and why it does not write a dataset. A new
-# entry here is a deliberate act; a new mutating route without one fails this test.
+# Every route that is not a plain GET: whether it writes a dataset, and what it
+# actually does. A new mutating route without an entry fails this test.
 #
-# Routes under /ingest are the exception the whole quarantine exists to contain: they
-# are allowed to say they write. Everywhere else the justification has to explain why
-# the route does not, and `test_only_ingest_routes_admit_to_writing` holds that line.
-MUTATING_ROUTES = {
-    ("POST", "/ingest/scan"): "surveys a directory; opens no file and writes nothing",
-    ("POST", "/ingest/query-vector"): "embeds a sentence; reads one schema, writes nothing",
-    ("POST", "/ingest/jobs"): "writes a new table — the one thing in the server that does",
-    ("POST", "/ingest/jobs/{job_id}/cancel"): "sets a flag; commits nothing further",
-    ("POST", "/ingest/jobs/{job_id}/adopt"): "writes the settings file, never a dataset",
-    ("POST", "/ingest/jobs/{job_id}/discard"): "deletes a table this job created, and only that",
-    ("DELETE", "/ingest/jobs/{job_id}"): "forgets the record; the data stays",
-    ("POST", "/catalog/tables/{name:path}/query"): "a read with a body too big for a query string",
-    ("POST", "/catalog/tables/{name:path}/query/explain"): "plans a read without running it",
-    ("POST", "/catalog/tables/{name:path}/compare/query"): "a read across two versions",
-    ("POST", "/search"): "the demo's search, a read with a body",
-    ("POST", "/meter/reset"): "zeroes an in-memory counter",
-    ("POST", "/settings/connections"): "writes the settings file, never a dataset",
-    ("POST", "/settings/connections/probe"): "stats a directory; opens no manifest",
-    ("POST", "/settings/connections/{conn_id}/activate"): "writes the settings file",
-    ("DELETE", "/settings/connections/{conn_id}"): "forgets a connection; the data stays",
-    ("PUT", "/settings/intelligence"): "writes the settings file",
-    ("POST", "/intel/selftest"): "one round trip to the language provider",
-    ("POST", "/intel/tables/{name:path}/filter"): "turns a sentence into a filter string",
-    ("POST", "/intel/tables/{name:path}/summary"): "reads rows and describes them",
-    ("DELETE", "/intel/cache"): "clears the answer cache, which is outside any dataset",
-    ("POST", "/intel/meter/reset"): "zeroes an in-memory counter",
+# The flag is declared rather than inferred. An earlier version read the prose for
+# the word "writes", which is the kind of check that passes until someone writes
+# "writes no dataset" and then reports it as a confession. A guard that can be
+# fooled by a turn of phrase is not a guard.
+WRITES = True
+READS = False
+
+MUTATING_ROUTES: dict[tuple[str, str], tuple[bool, str]] = {
+    ("POST", "/ingest/jobs"):
+        (WRITES, "creates a new table — the one thing in the server that does"),
+    ("POST", "/ingest/jobs/{job_id}/discard"):
+        (WRITES, "deletes a table this job created, and only that"),
+    ("POST", "/ingest/scan"): (READS, "surveys a directory; opens no file"),
+    ("POST", "/ingest/query-vector"): (READS, "embeds a sentence; reads one schema"),
+    ("POST", "/ingest/jobs/{job_id}/cancel"): (READS, "sets a flag; commits nothing further"),
+    ("POST", "/ingest/jobs/{job_id}/adopt"): (READS, "saves the settings file, never a dataset"),
+    ("DELETE", "/ingest/jobs/{job_id}"): (READS, "forgets the record; the data stays"),
+    ("POST", "/catalog/tables/{name:path}/query"):
+        (READS, "a read with a body too big for a query string"),
+    ("POST", "/catalog/tables/{name:path}/query/explain"):
+        (READS, "plans a read without running it"),
+    ("POST", "/catalog/tables/{name:path}/compare/query"): (READS, "a read across two versions"),
+    ("POST", "/search"): (READS, "the demo's search, a read with a body"),
+    ("POST", "/meter/reset"): (READS, "zeroes an in-memory counter"),
+    ("POST", "/settings/connections"): (READS, "saves the settings file, never a dataset"),
+    ("POST", "/settings/connections/probe"): (READS, "stats a directory; opens no manifest"),
+    ("POST", "/settings/connections/{conn_id}/activate"): (READS, "saves the settings file"),
+    ("DELETE", "/settings/connections/{conn_id}"): (READS, "forgets a connection; the data stays"),
+    ("PUT", "/settings/intelligence"): (READS, "saves the settings file"),
+    ("POST", "/settings/samples/open"): (READS, "saves a connection; downloads nothing"),
+    ("POST", "/intel/selftest"): (READS, "one round trip to the language provider"),
+    ("POST", "/intel/tables/{name:path}/filter"): (READS, "turns a sentence into a filter string"),
+    ("POST", "/intel/tables/{name:path}/summary"): (READS, "reads rows and describes them"),
+    ("DELETE", "/intel/cache"): (READS, "clears the answer cache, outside any dataset"),
+    ("POST", "/intel/meter/reset"): (READS, "zeroes an in-memory counter"),
 }
 
 
@@ -177,15 +186,18 @@ def test_every_mutating_route_is_declared_and_justified():
         f"Add one saying why it does not write a dataset — or put it under /ingest.")
 
 
-def test_only_ingest_routes_admit_to_writing():
-    """A justification is prose, and prose drifts. This is the one word in it that
-    carries a guarantee, so it is checked rather than trusted."""
-    confessing = {(m, p) for (m, p), why in MUTATING_ROUTES.items()
-                  if "writes" in why and "never a dataset" not in why
-                  and "settings file" not in why and "writes nothing" not in why}
-    outside = {(m, p) for m, p in confessing if not p.startswith("/ingest")}
+def test_only_ingest_routes_may_write_a_dataset():
+    """The quarantine in one line: the write surface is `/ingest` and nowhere else."""
+    outside = {(m, p) for (m, p), (writes, _) in MUTATING_ROUTES.items()
+               if writes and not p.startswith("/ingest")}
     assert not outside, (
-        f"these describe themselves as writing but are not under /ingest: {sorted(outside)}")
+        f"these are declared as writing a dataset but are not under /ingest: "
+        f"{sorted(outside)}")
+
+
+def test_every_declared_route_says_what_it_does():
+    for (m, p), (_, why) in MUTATING_ROUTES.items():
+        assert why and len(why) > 12, f"{m} {p} has no useful justification"
 
 
 def test_the_declared_route_list_has_not_gone_stale():

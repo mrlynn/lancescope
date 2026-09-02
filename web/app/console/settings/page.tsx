@@ -10,6 +10,7 @@
 import { useEffect, useState } from "react";
 import Icon, { type IconName } from "@/app/components/Icon";
 import AppBar from "@/app/components/nav/AppBar";
+import SampleDatasets from "@/app/components/samples/SampleDatasets";
 import { Caveat, Empty, Eyebrow, fmtWhen } from "@/app/components/console/atoms";
 import { dbParent } from "@/app/lib/dbname";
 import {
@@ -19,30 +20,6 @@ import {
   probeIntelligence, removeConnection, runSelfTest, saveIntelligence,
 } from "@/app/lib/settings";
 
-/** The datasets LanceDB publishes in Lance format, as somewhere to start.
- *
- *  A console whose first screen asks for the path of a database you are assumed to
- *  already have is a console most people close. These are public, need no account,
- *  and open in about a second because opening one reads a manifest rather than a
- *  dataset — `mnist` costs 1,102 bytes to open and `openvid` 24,568.
- *
- *  Every repository here was checked to exist on 2026-09-02. Three others that fit
- *  the same `<name>-lance` pattern were guessed and did not resolve, which is why
- *  this list is short and hand-verified rather than generated from the docs.
- *  `openvid` is first because it is the one that makes the argument: 937,957 rows
- *  carrying the video itself, and browsing them reads none of it. */
-const PUBLISHED: { label: string; note: string; uri: string }[] = [
-  { label: "OpenVid", note: "938k video clips, blobs + embeddings",
-    uri: "hf://datasets/lance-format/openvid-lance/data" },
-  { label: "LeRobot PushT", note: "robot trajectories",
-    uri: "hf://datasets/lance-format/lerobot-pusht-lance/data" },
-  { label: "COCO Captions", note: "images + captions",
-    uri: "hf://datasets/lance-format/coco-captions-2017-lance/data" },
-  { label: "LibriSpeech", note: "audio",
-    uri: "hf://datasets/lance-format/librispeech-clean-lance/data" },
-  { label: "MNIST", note: "70k images, opens instantly",
-    uri: "hf://datasets/lance-format/mnist-lance/data" },
-];
 
 export default function SettingsPage() {
   const [state, setState] = useState<SettingsState | null>(null);
@@ -69,6 +46,20 @@ export default function SettingsPage() {
 
       <div className="max-w-[860px] space-y-6">
         <Connections state={state} onChange={setState} onError={setError} />
+
+        {/* Below the connection form, not above it: someone on this page usually
+            came to point at their own database. The offer should be what they find
+            next, rather than what they scroll past.
+
+            One list, not two. There used to be a row of chips here filled from a
+            hardcoded array; these cards say the same thing with measured numbers,
+            a reason to open each one, and the sentence that actually decides it —
+            that nothing is downloaded. */}
+        <section className="panel p-6">
+          <Eyebrow>Sample datasets</Eyebrow>
+          <SampleDatasets onOpened={() => getSettings().then(setState).catch(() => undefined)} />
+        </section>
+
         <Intelligence
           intel={state?.intelligence ?? null}
           probe={probe}
@@ -231,23 +222,6 @@ function Connections({ state, onChange, onError }: {
               <Icon name="plus" size={14} />
               Add &amp; use
             </button>
-          </div>
-
-          {/* Filled into the box rather than added outright, so the same Check and
-              Add buttons run against them as against anything typed. A shortcut
-              that took a different path through the code would be a shortcut that
-              works when the real one does not. */}
-          <div className="flex flex-wrap items-center gap-2 mt-3">
-            <span className="mono text-[10px] text-[var(--haze)] mr-1">
-              or open one LanceDB publishes:
-            </span>
-            {PUBLISHED.map((d) => (
-              <button key={d.uri} className="btn" title={`${d.note} — ${d.uri}`}
-                      disabled={busy}
-                      onClick={() => { setUri(d.uri); setLabel(d.label); setFound(null); }}>
-                {d.label}
-              </button>
-            ))}
           </div>
 
           {found && (
