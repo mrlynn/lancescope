@@ -191,6 +191,10 @@ export default function Console() {
     <main className="relative z-10 min-h-screen px-[var(--stage-pad)] pt-7 pb-16">
       <AppBar crumbs={[{ label: "Console" }]}>
         {cost && <Cost bytes={cost.bytes} iops={cost.iops} />}
+        <Link href="/console/new" className="iconbtn" data-tip="Build one from files"
+              aria-label="Build a database from files">
+          <Icon name="plus" size={16} />
+        </Link>
         <Link href="/demo" className="iconbtn" data-tip="Ctrl-F for Video" aria-label="Open the demo">
           <Icon name="play" size={16} />
         </Link>
@@ -245,14 +249,22 @@ export default function Console() {
               </p>
             </div>
           ) : (
-            <p className="text-[15px] text-[var(--haze)] max-w-lg mx-auto leading-relaxed">
-              No Lance tables under{" "}
-              <span className="mono text-[var(--bright)]">{list.root || "any configured path"}</span>.{" "}
-              <Link href="/console/settings" className="underline"
-                    style={{ color: "var(--video)" }}>Add a connection</Link>{" "}
-              pointing at a LanceDB directory, or build the demo corpus with{" "}
-              <span className="mono text-[var(--bright)]">make ingest</span>.
-            </p>
+            <div className="max-w-lg mx-auto">
+              <p className="text-[15px] text-[var(--haze)] leading-relaxed">
+                No Lance tables under{" "}
+                <span className="mono text-[var(--bright)]">{list.root || "any configured path"}</span>.{" "}
+                <Link href="/console/settings" className="underline"
+                      style={{ color: "var(--video)" }}>Add a connection</Link>{" "}
+                pointing at a LanceDB directory, or build the demo corpus with{" "}
+                <span className="mono text-[var(--bright)]">make ingest</span>.
+              </p>
+              {/* A database with nothing in it is exactly the moment to offer to
+                  fill one. */}
+              <Link href="/console/new" className="btn btn-accent mt-7 inline-flex">
+                <Icon name="plus" size={14} />
+                Build one from your own files
+              </Link>
+            </div>
           )}
         </div>
       ) : (

@@ -19,6 +19,31 @@ import {
   probeIntelligence, removeConnection, runSelfTest, saveIntelligence,
 } from "@/app/lib/settings";
 
+/** The datasets LanceDB publishes in Lance format, as somewhere to start.
+ *
+ *  A console whose first screen asks for the path of a database you are assumed to
+ *  already have is a console most people close. These are public, need no account,
+ *  and open in about a second because opening one reads a manifest rather than a
+ *  dataset — `mnist` costs 1,102 bytes to open and `openvid` 24,568.
+ *
+ *  Every repository here was checked to exist on 2026-09-02. Three others that fit
+ *  the same `<name>-lance` pattern were guessed and did not resolve, which is why
+ *  this list is short and hand-verified rather than generated from the docs.
+ *  `openvid` is first because it is the one that makes the argument: 937,957 rows
+ *  carrying the video itself, and browsing them reads none of it. */
+const PUBLISHED: { label: string; note: string; uri: string }[] = [
+  { label: "OpenVid", note: "938k video clips, blobs + embeddings",
+    uri: "hf://datasets/lance-format/openvid-lance/data" },
+  { label: "LeRobot PushT", note: "robot trajectories",
+    uri: "hf://datasets/lance-format/lerobot-pusht-lance/data" },
+  { label: "COCO Captions", note: "images + captions",
+    uri: "hf://datasets/lance-format/coco-captions-2017-lance/data" },
+  { label: "LibriSpeech", note: "audio",
+    uri: "hf://datasets/lance-format/librispeech-clean-lance/data" },
+  { label: "MNIST", note: "70k images, opens instantly",
+    uri: "hf://datasets/lance-format/mnist-lance/data" },
+];
+
 export default function SettingsPage() {
   const [state, setState] = useState<SettingsState | null>(null);
   const [probe, setProbe] = useState<IntelProbe | null>(null);
@@ -179,7 +204,8 @@ function Connections({ state, onChange, onError }: {
           <div className="flex flex-wrap items-end gap-3">
             <Field label="path or URI" wide>
               <input
-                className="inp mono" placeholder="/path/to/lance  ·  s3://bucket/prefix"
+                className="inp mono"
+                placeholder="/path/to/lance  ·  hf://datasets/…  ·  s3://bucket/prefix"
                 value={uri}
                 onChange={(e) => { setUri(e.target.value); setFound(null); }}
               />
@@ -205,6 +231,23 @@ function Connections({ state, onChange, onError }: {
               <Icon name="plus" size={14} />
               Add &amp; use
             </button>
+          </div>
+
+          {/* Filled into the box rather than added outright, so the same Check and
+              Add buttons run against them as against anything typed. A shortcut
+              that took a different path through the code would be a shortcut that
+              works when the real one does not. */}
+          <div className="flex flex-wrap items-center gap-2 mt-3">
+            <span className="mono text-[10px] text-[var(--haze)] mr-1">
+              or open one LanceDB publishes:
+            </span>
+            {PUBLISHED.map((d) => (
+              <button key={d.uri} className="btn" title={`${d.note} — ${d.uri}`}
+                      disabled={busy}
+                      onClick={() => { setUri(d.uri); setLabel(d.label); setFound(null); }}>
+                {d.label}
+              </button>
+            ))}
           </div>
 
           {found && (

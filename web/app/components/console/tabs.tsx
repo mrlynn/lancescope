@@ -310,9 +310,12 @@ export function CellView({ v }: { v: Cell }) {
  *  refusal is a first-class outcome — a model that says it cannot express something
  *  is more useful than one that produces a filter that runs and means something
  *  else. */
-function AskForFilter({ table, model, onDraft }: {
+function AskForFilter({ table, model, example, onDraft }: {
   table: string;
   model: string;
+  /** Written against this table's own columns. The hint used to name the demo
+   *  corpus, which on anything else is a suggestion guaranteed to fail. */
+  example: string;
   onDraft: (filter: string) => void;
 }) {
   const [question, setQuestion] = useState("");
@@ -343,7 +346,7 @@ function AskForFilter({ table, model, onDraft }: {
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); ask(); } }}
-          placeholder="Ask in English — moments in the Go devroom, more than ten minutes in"
+          placeholder={`Ask in English — rows where ${example}`}
           className="flex-1 bg-[var(--ink-3)] border border-[var(--rule)] rounded-sm
                      px-3 py-2 text-[12px] text-[var(--bright)] outline-none
                      focus:border-[var(--index)] transition-colors
@@ -416,6 +419,21 @@ function AskForFilter({ table, model, onDraft }: {
   );
 }
 
+/** An example predicate written against *this* table.
+ *
+ *  The placeholders used to read `track = 'Go' and year = 2025`, which is the demo
+ *  corpus and nothing else. On a table of photographs it names two columns that do
+ *  not exist, so the one hint on the screen was a suggestion guaranteed to fail. */
+function exampleFilter(d: Rows | null): string {
+  const first = d?.rows?.[0];
+  if (!first) return "a column = a value";
+  const col = (d?.columns ?? []).find(
+    (c) => typeof first[c] === "string" && String(first[c]).length < 40);
+  if (col) return `${col} = '${String(first[col]).slice(0, 24)}'`;
+  const num = (d?.columns ?? []).find((c) => typeof first[c] === "number");
+  return num ? `${num} > 0` : "a column = a value";
+}
+
 export function RowsTab({
   d, onPage, onFilter, onExpand, expanded, error, table, ai,
 }: {
@@ -436,6 +454,7 @@ export function RowsTab({
         <AskForFilter
           table={table}
           model={ai.models_by_role.fast.id}
+          example={exampleFilter(d)}
           onDraft={setDraft}
         />
       )}
@@ -447,7 +466,7 @@ export function RowsTab({
         <input
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          placeholder="SQL predicate — track = 'Go' and year = 2025"
+          placeholder={`SQL predicate — ${exampleFilter(d)}`}
           className="flex-1 bg-[var(--ink-3)] border border-[var(--rule)] rounded-sm
                      px-3 py-2 mono text-[12px] text-[var(--bright)] outline-none
                      focus:border-[var(--video)] transition-colors placeholder:text-[var(--dim)]"

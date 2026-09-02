@@ -109,3 +109,26 @@ def test_rebinding_closes_console_handles_and_spares_pinned_ones(catalog, empty_
     # connection switch would stop the demo mid-sentence.
     assert pinned.ds is not None
     assert catalog.discover() == []
+
+
+def test_a_table_with_timestamps_can_actually_be_read(api):
+    """Arrow hands temporal and decimal columns back as Python objects that
+    `json.dumps` refuses, and the failure happens in the response layer where no
+    route can catch it — so a table with an ordinary timestamp column returned a
+    bare 500 and the rows tab would not open at all."""
+    r = api.get("/catalog/tables/temporal/rows?limit=3")
+    assert r.status_code == 200, r.text
+    row = r.json()["rows"][0]
+    assert row["at"].startswith("2026-01-01T12:00")
+    assert row["day"] == "2026-01-01"
+    assert row["took"] == 0.0
+    assert row["amount"] == 0.5
+
+
+def test_a_query_over_a_timestamp_column_serialises_too(api):
+    """`_cell` is shared by rows, query and compare — one fix, three routes, and a
+    test that says so."""
+    r = api.post("/catalog/tables/temporal/query",
+                 json={"mode": "scan", "limit": 2})
+    assert r.status_code == 200, r.text
+    assert isinstance(r.json()["rows"][0]["at"], str)

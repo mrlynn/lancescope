@@ -44,6 +44,31 @@ def _apply_root(s: cfg.Settings) -> cfg.ResolvedRoot:
     return resolved
 
 
+def adopt_root(uri: str, label: str) -> dict:
+    """Save a connection, activate it, and repoint the live catalog. Returns `_state()`.
+
+    Public because ingest needs it and must not reimplement it. One module owns the
+    save-then-rebind dance — this one — and a second copy of it in the ingest router
+    is how the two drift until switching databases works in one place and not the
+    other.
+
+    An env-locked root is not overridden: `LANCE_ROOT` wins, the settings page
+    already greys the list out to say so, and quietly doing nothing would be worse.
+    """
+    s = cfg.load()
+    conn = cfg.add_connection(s, label, uri, activate=True)
+    resolved = _apply_root(s)
+    return {
+        "connection": conn.as_dict(),
+        "adopted": resolved.source != "env",
+        "note": ("" if resolved.source != "env" else
+                 f"LANCE_ROOT is set, so the console stays pointed at "
+                 f"{resolved.uri}. The table was written to {uri} — add it as a "
+                 f"connection once LANCE_ROOT is unset."),
+        **_state(),
+    }
+
+
 def _arm_demo_if_present() -> None:
     """Give the demo a second chance when a connection turns out to hold its corpus.
 
@@ -77,12 +102,22 @@ def _inspect(uri: str) -> dict:
     a local directory, and pretending to have checked an `s3://` bucket would be a
     lie the settings page then shows as a green tick.
     """
+    caps = capabilities_for(uri)
+    if "://" in uri and caps.discover.ok:
+        # A remote root with a real adapter behind it — today that means the
+        # HuggingFace datasets LanceDB publishes. This one is checked rather than
+        # labelled, because there is something to check with: the listing either
+        # comes back or says why it did not, and both are better than "unverified".
+        found = Catalog(uri).discover_detail()
+        return {"reachable": found.error is None, "tables": found.tables,
+                "note": found.error or ("" if found.tables else
+                                        "the repository holds no .lance tables"),
+                "capabilities": caps.as_dict()}
     if "://" in uri:
         # Saved, and honestly labelled. The console can hold this connection; it
         # cannot browse it, and a note saying "not verified" understated that —
         # activating one used to produce an empty database rather than an
         # explanation.
-        caps = capabilities_for(uri)
         return {"reachable": None, "tables": [], "note": caps.discover.reason,
                 "capabilities": caps.as_dict()}
     p = Path(uri).expanduser()

@@ -1,4 +1,4 @@
-.PHONY: help setup download prepare prepare-force embed build ingest verify test docs ui sidecar app api mcp web demo dev tidy bench clean
+.PHONY: help setup download prepare prepare-force embed build ingest scan doctor verify test docs ui sidecar app api mcp web demo dev tidy bench clean
 
 PY := .venv/bin/python
 UVICORN := .venv/bin/uvicorn
@@ -7,6 +7,8 @@ LIMIT ?= 36
 help:
 	@echo "make setup             install python deps + web deps"
 	@echo "make ingest LIMIT=36   download -> prepare -> embed -> build -> verify"
+	@echo "make scan SRC=~/Pics   survey your own media, reading no files"
+	@echo "make doctor            what this build can decode, and what it cannot"
 	@echo "make test              contract tests, synthetic fixtures (~3s)"
 	@echo "make docs              re-render the generated reference pages"
 	@echo "make app               build LanceScope.app (unsigned)"
@@ -39,6 +41,16 @@ ingest: download prepare embed build
 
 verify:
 	$(PY) scripts/verify.py
+
+# Survey a directory of your own media without reading a single file. `make ingest`
+# above is the FOSDEM demo pipeline; these are the general ones.
+#   make scan SRC=~/Pictures
+scan:
+	@$(PY) -m ingest.cli scan $(SRC) $(ARGS)
+
+# What this build can decode, and what it cannot.
+doctor:
+	@$(PY) -m ingest.cli doctor $(ARGS)
 
 # Contract tests over synthetic Lance tables. Seconds, no corpus, no torch — this is
 # what CI runs. `make verify` is the integration gate on the real corpus and stays

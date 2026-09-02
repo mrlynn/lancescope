@@ -27,6 +27,7 @@ from server import settings as cfg
 from server.catalog import Catalog
 from server.routes import catalog as catalog_routes
 from server.routes import demo
+from server.routes import ingest as ingest_routes
 from server.routes import intel as intel_routes
 from server.routes import settings as settings_routes
 
@@ -38,13 +39,20 @@ CATALOG = Catalog(ROOT.uri or ROOT.root or Path())
 async def lifespan(app: FastAPI):
     catalog_routes.bind(CATALOG)
     settings_routes.bind(CATALOG)
+    ingest_routes.bind(CATALOG)
     if ROOT.root is None:
         print(f"catalog: nothing configured — {ROOT.detail} Add a connection at "
               f"/console/settings.")
     else:
-        tables = CATALOG.discover()
+        found = CATALOG.discover_detail()
+        tables = found.tables
         print(f"catalog: {CATALOG.root_uri} ({ROOT.source}) — {len(tables)} table(s): "
               f"{', '.join(tables) or 'none'}")
+        if found.error:
+            # A remote listing can fail for reasons that have nothing to do with the
+            # database — no network, a repository gone private. Saying so at startup
+            # is the difference between a puzzling empty console and a known cause.
+            print(f"catalog: could not list this root — {found.error}")
 
     if demo.load(CATALOG):
         demo.warm()
@@ -80,3 +88,7 @@ app.include_router(settings_routes.router)
 # The language layer, under /intel/*. Optional: with nothing configured every route
 # here still answers, and says what is missing.
 app.include_router(intel_routes.router)
+
+# Creating a database, under /ingest/*. The only router that may write a dataset —
+# and today the only one that says it cannot yet. See server/routes/ingest.py.
+app.include_router(ingest_routes.router)

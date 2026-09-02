@@ -2,7 +2,7 @@
 title: Connect a database
 section: How to
 order: 1
-summary: Local directories, switching between them, pinning one, and what remote can and cannot do.
+summary: Local directories, the datasets LanceDB publishes, switching between them, pinning one, and what remote can and cannot do.
 ---
 
 # Connect a database
@@ -45,7 +45,35 @@ In order, first match wins:
 The settings page shows which rung produced the current root, because a resolved
 value with no provenance is what makes people edit the wrong file.
 
-## Remote URIs
+## The datasets LanceDB publishes
+
+LanceDB re-encoded about thirty canonical ML datasets into Lance and put them on
+HuggingFace under `lance-format/*`. Those **can** be browsed, and the settings page
+offers five of them as one-click sources so a fresh install has something to open:
+
+```
+hf://datasets/lance-format/openvid-lance/data
+```
+
+Paste one and press **Check** and you get a real answer — the table names, or the
+reason there are none. Everything the console does then works unchanged: schema,
+versions, indices, fragments, a page of rows, and the cost of each in bytes.
+
+`openvid` is the one worth opening first. It is 937,957 rows carrying the MP4s
+themselves in a blob column beside their embeddings and captions, which is the same
+shape the demo's corpus has — so the claim this tool exists to make can be checked
+against somebody else's data. Opening it costs 24,568 bytes. Browsing five rows costs
+about 73 KB and reads **no video at all**; the blob column is omitted from the page
+with a reason, exactly as it is locally.
+
+Two honest limits. Listing tables is an HTTP call to the Hub rather than a directory
+read, so it can fail for reasons that have nothing to do with your data — and when it
+does you get the reason rather than an empty database. And the on-disk byte split is
+**unsupported** here: it comes from walking the directory a table sits in, and a
+number derived from the manifest instead would look the same on screen and mean
+something else.
+
+## Other remote URIs
 
 `s3://`, `gs://`, `az://` and `db://` connections can be saved. They cannot be
 browsed:

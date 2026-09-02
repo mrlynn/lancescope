@@ -91,7 +91,7 @@ def http_api() -> str:
                 yield from walk(original.routes)
 
     groups: dict[str, list] = {"catalog": [], "intelligence": [], "settings": [],
-                               "demo": []}
+                               "ingest": [], "demo": []}
     for route in walk(app.routes):
         path = route.path
         if path.startswith("/catalog"):
@@ -100,6 +100,8 @@ def http_api() -> str:
             key = "intelligence"
         elif path.startswith("/settings"):
             key = "settings"
+        elif path.startswith("/ingest"):
+            key = "ingest"
         else:
             key = "demo"
         groups[key].append(route)
@@ -111,6 +113,9 @@ def http_api() -> str:
                          "nothing configured, and says what is missing."),
         "settings": ("Configuration", "The only routes that write anything, and what "
                      "they write is the settings file."),
+        "ingest": ("Creating a database", "The only routes permitted to write a "
+                   "dataset, and the only ones that may create a table. They may "
+                   "never modify one that already exists."),
         "demo": ("Ctrl-F for Video", "The demo's own routes. They return 503 when the "
                  "corpus is absent."),
     }

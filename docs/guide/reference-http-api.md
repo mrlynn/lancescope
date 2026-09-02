@@ -61,6 +61,25 @@ The only routes that write anything, and what they write is the settings file.
 | `PUT` | `/settings/intelligence` | — |
 | `GET` | `/settings/intelligence/probe` | What is actually available on this machine right now. |
 
+## Creating a database
+
+The only routes permitted to write a dataset, and the only ones that may create a table. They may never modify one that already exists.
+
+| method | path | what it does |
+| --- | --- | --- |
+| `GET` | `/ingest/capabilities` | What this build could create, before anyone asks it to create anything. |
+| `GET` | `/ingest/jobs` | Every job this server knows, including ones a restart interrupted. |
+| `POST` | `/ingest/jobs` | Begin an ingest. |
+| `DELETE` | `/ingest/jobs/{job_id}` | Forget the record. |
+| `GET` | `/ingest/jobs/{job_id}` | A job's current state. |
+| `POST` | `/ingest/jobs/{job_id}/adopt` | Point the console at what this job wrote. |
+| `POST` | `/ingest/jobs/{job_id}/cancel` | Stop after the current file. |
+| `POST` | `/ingest/jobs/{job_id}/discard` | Delete the table this job created. |
+| `GET` | `/ingest/jobs/{job_id}/events` | The per-file log after a cursor — a stream's content without a stream. |
+| `POST` | `/ingest/query-vector` | Turn a sentence into a vector in *this table's* space. |
+| `POST` | `/ingest/scan` | Survey a source directory. |
+| `GET` | `/ingest/tables/{name:path}/text-search` | Can this table be searched by typing? |
+
 ## Ctrl-F for Video
 
 The demo's own routes. They return 503 when the corpus is absent.
