@@ -129,6 +129,20 @@ jobs:
           shasum -a 256 "$DMG" | tee "$RUNNER_TEMP/SHA256SUMS.txt"
           echo "dmg=$DMG" >> "$GITHUB_OUTPUT"
 
+      # Every run keeps the DMG, including a dry run on a branch. Without this the
+      # only way to look at what the pipeline built was to tag a release, which is
+      # the one thing a rehearsal is supposed to avoid — and "it compiled" is a much
+      # weaker claim than "it opened and it ran".
+      - name: Keep the DMG as a run artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lancescope-dmg-${{ github.sha }}
+          path: |
+            ${{ steps.artefact.outputs.dmg }}
+            ${{ runner.temp }}/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Draft the release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
