@@ -14,16 +14,19 @@ from __future__ import annotations
 
 import argparse
 import json
+import signal
 import sys
 from pathlib import Path
 
-from ingest.core.capability import ingest_capabilities
-from ingest.core.media import KINDS
+from ingest.core.binaries import which_work_dir
+from ingest.core.capability import ingest_capabilities, writes_capability
+from ingest.core.media import IMPLEMENTED, KINDS
 from ingest.core.plan import DEFAULT_MAX_FILES, ScanResult, scan
 
 EXIT_OK = 0
 EXIT_FAILED = 1
 EXIT_USAGE = 2
+EXIT_CANCELLED = 130
 
 
 def human_bytes(n: int) -> str:
@@ -100,6 +103,133 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+# ------------------------------------------------------------------------- ingest
+
+class _Reporter:
+    """Progress for two different readers.
+
+    On a terminal, one line rewritten in place. Anywhere else — a log, CI, a pipe —
+    one line per completed file, because a carriage-return bar in a log file is
+    unreadable and that is where people go looking after something went wrong.
+    """
+
+    def __init__(self, *, tty: bool, as_json: bool) -> None:
+        self.tty = tty
+        self.as_json = as_json
+        self.last_done = -1
+
+    def __call__(self, p) -> None:
+        if self.as_json:
+            print(json.dumps(p.as_dict()), flush=True)
+            return
+        if self.tty:
+            eta = f"  ~{p.eta_s / 60:.0f}m left" if p.eta_s and p.eta_s > 90 else ""
+            name = Path(p.current_file).name[:38] if p.current_file else ""
+            sys.stdout.write(
+                f"\r  [{p.files_done}/{p.files_total}] {p.stage:<9} {name:<38} "
+                f"{p.rows_written:>6,} rows  {human_bytes(p.source_bytes_read):>10}"
+                f"{eta}   ")
+            sys.stdout.flush()
+        elif p.files_done != self.last_done and p.current_file:
+            self.last_done = p.files_done
+            print(f"  [{p.files_done}/{p.files_total}] {Path(p.current_file).name}")
+
+    def done(self) -> None:
+        if self.tty and not self.as_json:
+            sys.stdout.write("\r" + " " * 110 + "\r")
+            sys.stdout.flush()
+
+
+def cmd_ingest(args: argparse.Namespace) -> int:
+    from ingest.core import jobs
+    from ingest.core.embedders.config import embedder_for, resolve
+    from ingest.core.run import RunRequest
+
+    kinds = tuple((args.types or "image").split(","))
+    if bad := [k for k in kinds if k not in KINDS]:
+        print(f"unknown media type(s): {', '.join(bad)}. Known: {', '.join(KINDS)}",
+              file=sys.stderr)
+        return EXIT_USAGE
+    if unimplemented := [k for k in kinds if k not in IMPLEMENTED]:
+        print(f"{', '.join(unimplemented)} cannot be turned into rows yet. This "
+              f"build ingests {', '.join(sorted(IMPLEMENTED))}.", file=sys.stderr)
+        return EXIT_USAGE
+
+    destination = Path(args.into).expanduser() if args.into else _default_destination()
+    writes = writes_capability(destination)
+    if not writes.ok:
+        print(writes.reason, file=sys.stderr)
+        return EXIT_FAILED
+
+    from server import settings as cfg
+
+    embedder_view = resolve(cfg.load().embeddings)
+    if not args.json:
+        print(f"  source      {args.source}")
+        print(f"  destination {destination / (args.name + '.lance')}")
+        print(f"  embedder    {embedder_view.backend} — {embedder_view.reason}")
+
+    if args.dry_run:
+        result = scan(args.source, kinds=list(kinds))
+        if args.json:
+            print(json.dumps(result.as_dict(), indent=2))
+        else:
+            print()
+            print_scan(result)
+            print("\n  --dry-run: nothing was written.")
+        return EXIT_OK
+
+    request = RunRequest(source=args.source, destination=str(destination),
+                         name=args.name, kinds=kinds, limit=args.limit,
+                         hash_contents=args.hash)
+
+    # First Ctrl-C asks the run to stop after the current file; a second is the
+    # user saying they meant it, and Python's default handler takes over.
+    stopping = {"yes": False}
+
+    def on_sigint(_signum, _frame):
+        if stopping["yes"]:
+            signal.default_int_handler(_signum, _frame)
+        stopping["yes"] = True
+        print("\n  stopping after the current file — rows already committed will "
+              "be kept", file=sys.stderr)
+
+    signal.signal(signal.SIGINT, on_sigint)
+    reporter = _Reporter(tty=sys.stdout.isatty(), as_json=args.json)
+    try:
+        result = jobs.run_job_sync(request, embedder_for(), work_dir=which_work_dir(),
+                                   on_progress=reporter,
+                                   cancelled=lambda: stopping["yes"])
+    except (ValueError, FileExistsError) as e:
+        reporter.done()
+        print(f"\n{e}", file=sys.stderr)
+        return EXIT_FAILED
+    reporter.done()
+
+    if args.json:
+        print(json.dumps(result.as_dict(), indent=2))
+    else:
+        print()
+        print(f"  {result.detail}")
+        for w in result.warnings:
+            print(f"  ! {w}")
+        for f in result.failures[:5]:
+            print(f"  x {Path(f.path).name}: {f.reason}")
+        if len(result.failures) > 5:
+            print(f"  x and {len(result.failures) - 5} more")
+        print(f"\n  {result.uri}")
+
+    if result.cancelled:
+        return EXIT_CANCELLED
+    return EXIT_OK if result.rows else EXIT_FAILED
+
+
+def _default_destination() -> Path:
+    from ingest.core.capability import default_destination
+
+    return default_destination()
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         prog="lancescope",
@@ -116,6 +246,20 @@ def build_parser() -> argparse.ArgumentParser:
                         "library that links to its own parent is not rare)")
     s.add_argument("--json", action="store_true")
     s.set_defaults(fn=cmd_scan)
+
+    g = sub.add_parser("ingest", help="build a Lance table from a directory of media")
+    g.add_argument("source", help="directory to ingest")
+    g.add_argument("--name", required=True, help="table name")
+    g.add_argument("--into", help="parent directory for the table "
+                                  "(default: the active connection, else ~/LanceScope)")
+    g.add_argument("--types", help=f"comma-separated subset of {', '.join(KINDS)}")
+    g.add_argument("--limit", type=int, help="first N files only — try it cheaply")
+    g.add_argument("--hash", action="store_true",
+                   help="record a sha256 of every file (reads every byte; off by "
+                        "default for that reason)")
+    g.add_argument("--dry-run", action="store_true", help="survey and validate; write nothing")
+    g.add_argument("--json", action="store_true")
+    g.set_defaults(fn=cmd_ingest)
 
     d = sub.add_parser("doctor", help="what this build can decode, and what it cannot")
     d.add_argument("--into", help="check a specific destination as well")

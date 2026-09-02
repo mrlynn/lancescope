@@ -276,15 +276,27 @@ def media_source(tmp_path) -> Path:
 
 
 @pytest.fixture
-def api_ingest(settings_file):
-    """The ingest routes. No catalog: nothing here reads a dataset yet."""
+def api_ingest(settings_file, catalog, monkeypatch, tmp_path):
+    """The ingest routes, with settings and catalog bound so adoption is testable
+    end to end — saving a connection and repointing the live catalog is half of what
+    finishing a job means."""
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
+    from ingest.core import jobs
+    from server.routes import catalog as catalog_routes
     from server.routes import ingest as ingest_routes
+    from server.routes import settings as settings_routes
+
+    jobs.reset_for_tests()
+    monkeypatch.setenv("LANCESCOPE_WORK", str(tmp_path / "work"))
 
     app = FastAPI()
+    catalog_routes.bind(catalog)
+    settings_routes.bind(catalog)
     app.include_router(ingest_routes.router)
+    app.include_router(settings_routes.router)
+    app.include_router(catalog_routes.router)
     return TestClient(app)
 
 

@@ -68,6 +68,14 @@ The only routes permitted to write a dataset, and the only ones that may create 
 | method | path | what it does |
 | --- | --- | --- |
 | `GET` | `/ingest/capabilities` | What this build could create, before anyone asks it to create anything. |
+| `GET` | `/ingest/jobs` | Every job this server knows, including ones a restart interrupted. |
+| `POST` | `/ingest/jobs` | Begin an ingest. |
+| `DELETE` | `/ingest/jobs/{job_id}` | Forget the record. |
+| `GET` | `/ingest/jobs/{job_id}` | A job's current state. |
+| `POST` | `/ingest/jobs/{job_id}/adopt` | Point the console at what this job wrote. |
+| `POST` | `/ingest/jobs/{job_id}/cancel` | Stop after the current file. |
+| `POST` | `/ingest/jobs/{job_id}/discard` | Delete the table this job created. |
+| `GET` | `/ingest/jobs/{job_id}/events` | The per-file log after a cursor — a stream's content without a stream. |
 | `POST` | `/ingest/scan` | Survey a source directory. |
 
 ## Ctrl-F for Video

@@ -10,21 +10,34 @@ and never touch a table it finds already there. That is not politeness — a wor
 whose whole claim is that browsing changes nothing cannot also be a thing that edits
 your data because a path was mistyped.
 
-At this stage the module is entirely read-only in practice: it surveys a directory
-and reports what it would do. `GET /ingest/capabilities` says so rather than hiding
-the screen, because "this build has no writer yet" and "you may not write here" are
-different sentences and the person reading deserves the right one.
+`GET /ingest/capabilities` reports what this build could do before anyone asks it to
+do anything, because "this build cannot decode images" and "you may not write here"
+are different sentences and the person reading deserves the right one.
+
+Two verbs on two paths do two different things to a finished job, and the separation
+is deliberate: `DELETE /ingest/jobs/{id}` forgets the record and touches no data,
+while `POST /ingest/jobs/{id}/discard` deletes the table. A UI that mapped "clear
+this from the list" onto "rm -rf a directory" is one misclick from a support ticket.
 """
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+import os
+from pathlib import Path
+
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from ingest.core.capability import ingest_capabilities
-from ingest.core.media import KINDS
+from ingest.core import jobs
+from ingest.core.binaries import which_work_dir
+from ingest.core.capability import ingest_capabilities, writes_capability
+from ingest.core.embedders.config import embedder_for
+from ingest.core.media import IMPLEMENTED, KINDS
 from ingest.core.plan import DEFAULT_MAX_FILES, scan
+from ingest.core.run import RunRequest
+from ingest.core.writer import table_uri
+from server.routes import settings as settings_routes
 
 router = APIRouter(prefix="/ingest")
 
@@ -54,3 +67,136 @@ async def scan_source(body: ScanBody) -> JSONResponse:
     result = scan(body.source, kinds=wanted, max_files=body.max_files,
                   follow_symlinks=body.follow_symlinks)
     return JSONResponse(result.as_dict())
+
+
+# ------------------------------------------------------------------------- jobs
+
+class JobBody(BaseModel):
+    source: str = Field(min_length=1)
+    destination: str = Field(min_length=1)
+    name: str = Field(min_length=1, max_length=128)
+    kinds: list[str] | None = None
+    limit: int | None = Field(default=None, ge=1)
+    hash_contents: bool = False
+    activate: bool = True
+
+
+def _refuse(reason: str, status: int = 400):
+    raise HTTPException(status, reason)
+
+
+def _validate(body: JobBody) -> RunRequest:
+    """Everything knowable, checked before a worker is handed the job.
+
+    A guard here costs a round trip; the same guard discovered by the worker costs
+    however long it took to get there, and leaves a table behind.
+    """
+    writes = writes_capability(body.destination)
+    if not writes.ok:
+        raise HTTPException(503, writes.reason)
+
+    if not body.name.replace("-", "").replace("_", "").isalnum():
+        _refuse(f"{body.name!r} is not a usable table name — letters, digits, "
+                f"hyphens and underscores only.")
+
+    source = Path(body.source).expanduser()
+    dest = Path(body.destination).expanduser()
+    uri = Path(table_uri(dest, body.name))
+    if uri.exists():
+        _refuse(f"{uri} already exists. Ingest only creates new tables.", 409)
+    if not dest.exists() and not dest.parent.exists():
+        _refuse(f"{dest.parent} does not exist, so {dest} cannot be created.")
+    probe = dest if dest.exists() else dest.parent
+    if not os.access(probe, os.W_OK):
+        _refuse(f"{probe} is not writable.")
+    try:
+        if source.resolve() in dest.resolve().parents or source.resolve() == dest.resolve():
+            _refuse(f"{dest} is inside {source}. A second run would ingest the "
+                    f"output of the first.")
+    except OSError:
+        pass
+
+    kinds = tuple(k for k in (body.kinds or ["image"]) if k in KINDS) or ("image",)
+    unimplemented = [k for k in kinds if k not in IMPLEMENTED]
+    if unimplemented and not [k for k in kinds if k in IMPLEMENTED]:
+        _refuse(f"{', '.join(unimplemented)} cannot be turned into rows yet. "
+                f"This build ingests {', '.join(sorted(IMPLEMENTED))}.")
+
+    return RunRequest(source=str(source), destination=str(dest), name=body.name,
+                      kinds=kinds, limit=body.limit,
+                      hash_contents=body.hash_contents)
+
+
+@router.post("/jobs", status_code=202)
+async def start_job(body: JobBody) -> JSONResponse:
+    """Begin an ingest. Returns immediately; poll the job for progress."""
+    request = _validate(body)
+    try:
+        job = jobs.submit(request, embedder_for(), work_dir=which_work_dir())
+    except jobs.DestinationBusy as e:
+        raise HTTPException(409, str(e)) from e
+    return JSONResponse({**job.as_dict(), "activate": body.activate}, status_code=202)
+
+
+@router.get("/jobs")
+async def list_jobs() -> JSONResponse:
+    """Every job this server knows, including ones a restart interrupted."""
+    return JSONResponse({"jobs": jobs.listing()})
+
+
+@router.get("/jobs/{job_id}")
+async def get_job(job_id: str) -> JSONResponse:
+    """A job's current state. Reads memory; costs no dataset read."""
+    job = jobs.get(job_id)
+    if job is None:
+        raise HTTPException(404, f"no job {job_id} in this process")
+    return JSONResponse(job.as_dict())
+
+
+@router.get("/jobs/{job_id}/events")
+async def job_events(job_id: str, since: int = 0) -> JSONResponse:
+    """The per-file log after a cursor — a stream's content without a stream."""
+    job = jobs.get(job_id)
+    if job is None:
+        raise HTTPException(404, f"no job {job_id} in this process")
+    events = [e for e in list(job.events) if e["n"] > since]
+    return JSONResponse({"events": events, "cursor": job.cursor})
+
+
+@router.post("/jobs/{job_id}/cancel")
+async def cancel_job(job_id: str) -> JSONResponse:
+    """Stop after the current file. Rows already committed are kept, and said so."""
+    job = jobs.cancel(job_id)
+    if job is None:
+        raise HTTPException(404, f"no job {job_id} in this process")
+    return JSONResponse(job.as_dict())
+
+
+@router.post("/jobs/{job_id}/adopt")
+async def adopt_job(job_id: str) -> JSONResponse:
+    """Point the console at what this job wrote.
+
+    Delegates to the settings module rather than saving and rebinding here: one
+    module owns that dance, and it is the one whose docstring already promises it.
+    """
+    job = jobs.get(job_id)
+    if job is None or job.result is None:
+        raise HTTPException(404, f"no finished job {job_id} in this process")
+    return JSONResponse(settings_routes.adopt_root(
+        job.request.destination, Path(job.request.destination).name or job.request.name))
+
+
+@router.post("/jobs/{job_id}/discard")
+async def discard_job(job_id: str) -> JSONResponse:
+    """Delete the table this job created. Refuses one it did not."""
+    removed, detail = jobs.discard(job_id)
+    if not removed:
+        raise HTTPException(409, detail)
+    return JSONResponse({"removed": True, "detail": detail})
+
+
+@router.delete("/jobs/{job_id}")
+async def forget_job(job_id: str) -> JSONResponse:
+    """Forget the record. The table, if any, stays exactly where it is."""
+    jobs.forget(job_id)
+    return JSONResponse({"jobs": jobs.listing()})

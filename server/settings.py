@@ -46,6 +46,15 @@ def settings_path() -> Path:
     return root / "lancescope" / "settings.json"
 
 
+def jobs_dir() -> Path:
+    """Where ingest job records live — beside the settings file, not in the data.
+
+    Deliberately not inside the destination directory: a user's database holds
+    tables and nothing of ours.
+    """
+    return settings_path().parent / "jobs"
+
+
 def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 

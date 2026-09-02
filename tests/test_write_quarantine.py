@@ -129,6 +129,11 @@ def test_the_mcp_surface_reaches_only_the_read_routes():
 # the route does not, and `test_only_ingest_routes_admit_to_writing` holds that line.
 MUTATING_ROUTES = {
     ("POST", "/ingest/scan"): "surveys a directory; opens no file and writes nothing",
+    ("POST", "/ingest/jobs"): "writes a new table — the one thing in the server that does",
+    ("POST", "/ingest/jobs/{job_id}/cancel"): "sets a flag; commits nothing further",
+    ("POST", "/ingest/jobs/{job_id}/adopt"): "writes the settings file, never a dataset",
+    ("POST", "/ingest/jobs/{job_id}/discard"): "deletes a table this job created, and only that",
+    ("DELETE", "/ingest/jobs/{job_id}"): "forgets the record; the data stays",
     ("POST", "/catalog/tables/{name:path}/query"): "a read with a body too big for a query string",
     ("POST", "/catalog/tables/{name:path}/query/explain"): "plans a read without running it",
     ("POST", "/catalog/tables/{name:path}/compare/query"): "a read across two versions",

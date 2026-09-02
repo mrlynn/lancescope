@@ -9,7 +9,10 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from ingest.cli import main as cli_main
+from ingest.core import jobs
 from ingest.core.plan import scan
 
 
@@ -76,3 +79,152 @@ def test_the_cli_doctor_says_what_this_build_can_decode(settings_file, capsys):
     assert cli_main(["doctor", "--json"]) == 0
     body = json.loads(capsys.readouterr().out)
     assert set(body["media"]) == {"image", "video", "audio", "pdf"}
+
+
+# --------------------------------------------------------------------- jobs API
+
+@pytest.fixture(autouse=True)
+def clean_registry():
+    jobs.reset_for_tests()
+    yield
+    jobs.reset_for_tests()
+
+
+def start(client, media_source, dest_root, **kw):
+    body = {"source": str(media_source), "destination": str(dest_root),
+            "name": "photos", "kinds": ["image"], **kw}
+    return client.post("/ingest/jobs", json=body)
+
+
+def test_starting_a_job_returns_immediately_with_something_to_poll(
+        api_ingest, media_source, dest_root, fake_embedder, fake_handlers, monkeypatch):
+    monkeypatch.setattr("server.routes.ingest.embedder_for", lambda *a, **k: fake_embedder)
+    r = start(api_ingest, media_source, dest_root)
+    assert r.status_code == 202
+    job_id = r.json()["id"]
+
+    done = jobs.wait(job_id)
+    body = api_ingest.get(f"/ingest/jobs/{job_id}").json()
+    assert body["state"] == "done"
+    assert body["result"]["rows"] == 4
+    assert done.result.uri.endswith("photos.lance")
+
+
+def test_a_job_that_would_overwrite_an_existing_table_is_refused_before_it_starts(
+        api_ingest, media_source, dest_root, fake_embedder, fake_handlers, monkeypatch):
+    monkeypatch.setattr("server.routes.ingest.embedder_for", lambda *a, **k: fake_embedder)
+    jobs.wait(start(api_ingest, media_source, dest_root).json()["id"])
+    again = start(api_ingest, media_source, dest_root)
+    assert again.status_code == 409
+    assert "only creates new tables" in again.json()["detail"]
+
+
+def test_a_destination_inside_the_source_directory_is_refused(
+        api_ingest, media_source, fake_embedder, fake_handlers, monkeypatch):
+    """A second run would ingest the output of the first."""
+    monkeypatch.setattr("server.routes.ingest.embedder_for", lambda *a, **k: fake_embedder)
+    r = start(api_ingest, media_source, media_source / "out")
+    assert r.status_code == 400
+    assert "would ingest the output" in r.json()["detail"]
+
+
+def test_a_remote_destination_is_declined_with_a_reason(
+        api_ingest, media_source, fake_embedder, fake_handlers, monkeypatch):
+    monkeypatch.setattr("server.routes.ingest.embedder_for", lambda *a, **k: fake_embedder)
+    r = api_ingest.post("/ingest/jobs", json={
+        "source": str(media_source), "destination": "s3://bucket/db", "name": "photos"})
+    assert r.status_code == 503
+    assert "remote" in r.json()["detail"].lower()
+
+
+def test_an_unusable_table_name_is_refused_rather_than_sanitised(
+        api_ingest, media_source, dest_root, fake_embedder, fake_handlers, monkeypatch):
+    """Silently renaming someone's table is worse than declining it."""
+    monkeypatch.setattr("server.routes.ingest.embedder_for", lambda *a, **k: fake_embedder)
+    r = start(api_ingest, media_source, dest_root, name="../escape")
+    assert r.status_code == 400
+    assert "not a usable table name" in r.json()["detail"]
+
+
+def test_read_only_mode_turns_a_write_route_into_a_503_that_says_why(
+        api_ingest, media_source, dest_root, monkeypatch):
+    from ingest.core.capability import READ_ONLY_ENV
+
+    monkeypatch.setenv(READ_ONLY_ENV, "1")
+    r = start(api_ingest, media_source, dest_root)
+    assert r.status_code == 503
+    assert READ_ONLY_ENV in r.json()["detail"]
+    # ...and the read half still answers, because it was never the problem.
+    assert api_ingest.post("/ingest/scan",
+                           json={"source": str(media_source)}).status_code == 200
+
+
+def test_forgetting_a_job_and_discarding_its_table_are_different_requests(
+        api_ingest, media_source, dest_root, fake_embedder, fake_handlers, monkeypatch):
+    from pathlib import Path
+
+    monkeypatch.setattr("server.routes.ingest.embedder_for", lambda *a, **k: fake_embedder)
+    job_id = start(api_ingest, media_source, dest_root).json()["id"]
+    uri = jobs.wait(job_id).result.uri
+
+    assert api_ingest.delete(f"/ingest/jobs/{job_id}").status_code == 200
+    assert Path(uri).exists(), "DELETE forgets the record; the data stays"
+
+
+def test_discarding_deletes_the_table_and_says_so(
+        api_ingest, media_source, dest_root, fake_embedder, fake_handlers, monkeypatch):
+    from pathlib import Path
+
+    monkeypatch.setattr("server.routes.ingest.embedder_for", lambda *a, **k: fake_embedder)
+    job_id = start(api_ingest, media_source, dest_root).json()["id"]
+    uri = jobs.wait(job_id).result.uri
+
+    r = api_ingest.post(f"/ingest/jobs/{job_id}/discard")
+    assert r.status_code == 200
+    assert not Path(uri).exists()
+
+
+def test_a_finished_ingest_can_be_adopted_as_the_active_connection(
+        api_ingest, media_source, dest_root, fake_embedder, fake_handlers, monkeypatch):
+    """Half of what finishing means: the table exists, and the console can see it."""
+    monkeypatch.setattr("server.routes.ingest.embedder_for", lambda *a, **k: fake_embedder)
+    job_id = start(api_ingest, media_source, dest_root).json()["id"]
+    jobs.wait(job_id)
+
+    adopted = api_ingest.post(f"/ingest/jobs/{job_id}/adopt").json()
+    assert adopted["adopted"] is True
+    assert adopted["root"]["root"] == str(dest_root)
+
+    listed = api_ingest.get("/catalog/tables").json()
+    assert "photos" in {t["name"] for t in listed["tables"]}
+
+
+def test_adoption_leaves_an_env_locked_root_alone_and_explains_why(
+        api_ingest, media_source, dest_root, corpus, fake_embedder, fake_handlers,
+        monkeypatch):
+    monkeypatch.setattr("server.routes.ingest.embedder_for", lambda *a, **k: fake_embedder)
+    job_id = start(api_ingest, media_source, dest_root).json()["id"]
+    jobs.wait(job_id)
+
+    monkeypatch.setenv("LANCE_ROOT", str(corpus))
+    adopted = api_ingest.post(f"/ingest/jobs/{job_id}/adopt").json()
+    assert adopted["adopted"] is False
+    assert "LANCE_ROOT is set" in adopted["note"]
+    assert str(dest_root) in adopted["note"]
+
+
+def test_the_event_log_pages_from_a_cursor(
+        api_ingest, media_source, dest_root, fake_embedder, fake_handlers, monkeypatch):
+    monkeypatch.setattr("server.routes.ingest.embedder_for", lambda *a, **k: fake_embedder)
+    job_id = start(api_ingest, media_source, dest_root).json()["id"]
+    jobs.wait(job_id)
+
+    first = api_ingest.get(f"/ingest/jobs/{job_id}/events").json()
+    assert first["events"], "a finished job should have left a trail"
+    tail = api_ingest.get(
+        f"/ingest/jobs/{job_id}/events?since={first['cursor']}").json()
+    assert tail["events"] == []
+
+
+def test_polling_an_unknown_job_is_a_404_not_an_empty_job(api_ingest):
+    assert api_ingest.get("/ingest/jobs/nope").status_code == 404
