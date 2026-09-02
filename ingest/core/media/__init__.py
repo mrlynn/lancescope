@@ -62,6 +62,10 @@ def handler_for(kind: str, copy_mode: str = "none"):
         from ingest.core.media.video import VideoHandler
 
         return VideoHandler(copy_mode=copy_mode)
+    if kind == "audio":
+        from ingest.core.media.audio import AudioHandler
+
+        return AudioHandler(copy_mode=copy_mode)
     raise LookupError(
         f"no handler for {kind!r} yet — this build ingests "
         f"{', '.join(sorted(IMPLEMENTED))}")
@@ -70,4 +74,4 @@ def handler_for(kind: str, copy_mode: str = "none"):
 # Kinds that can actually be turned into rows today, as opposed to kinds this tool
 # can recognise in a directory listing. Discovery knows about all four; the writer
 # only knows about these, and the plan says so rather than discovering it per file.
-IMPLEMENTED = frozenset({"image", "pdf", "video"})
+IMPLEMENTED = frozenset({"image", "pdf", "video", "audio"})

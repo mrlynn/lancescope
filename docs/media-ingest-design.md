@@ -222,9 +222,17 @@ blob mode *would* write, so nobody is surprised.
   | (b) a dedicated text embedder | much better text retrieval | a *different* space — second `text_vector` column, second index, and scores fusable only by rank (RRF, which `routes/demo.py:269` already implements) |
   | (c) transcribe, FTS only, no vector | honest, cheap, useful on day one | no semantic audio search |
 
-  **Recommendation: (c) first, (a) as the default once ASR is solid, (b) behind a
-  flag.** Audio's highest-value query is "find where they said X", and that is
-  lexical — FTS answers it better than any embedding.
+  **Recommendation: (c), and it is now measured rather than predicted.** Option (a)
+  was tried — push the transcript through the same model's text tower, since a joint
+  space accepts both — and it is worse than doing nothing. Over a real mixed corpus
+  with SigLIP, *every* semantic query came back all-audio whatever was asked.
+
+  That is the modality gap: in a CLIP-family space image and text embeddings occupy
+  different regions, and a text query scores systematically higher against a
+  text-derived vector than an image-derived one. Mixing the two in one column does
+  not blur the ranking, it decides it. So a row with nothing to look at gets a null
+  vector, the column keeps meaning one thing, and audio is found by full-text search
+  — which suits "where did they say that" better anyway.
 
   PDF has since made the same argument concretely: a scanned page has no text layer,
   gets `text_source="filename"` rather than nothing, and is still found by *"a blue
@@ -753,8 +761,8 @@ four-page-kind test means new pages need full front matter:
 | **2** | ~~Images end to end~~ — **done**. Schema, writer, indexing, jobs, embedders (Ollama, OpenAI-compatible, multimodal, local SigLIP), the console wizard and `lancescope ingest`. Verified with real SigLIP: *"horizontal stripes"* returns the striped pictures | the whole feature in miniature |
 | **3** | ~~The lifecycle~~ — **mostly done** with phase 2: cancel, discard, the failure taxonomy and the ten-in-a-row stop, the journal and `interrupted`, `?job=` reattach, `/events` paging. **Left: the jobs-list screen** | where the honest messages got written |
 | **4** | ~~PDF~~ — **done**. One row per page via pypdfium2 + pypdf, text layer into the FTS column, scans embedded and labelled. Verified: full-text finds *"logistics"* on the right page, and *"a blue circle"* returns a photograph **and** a scanned page in one query | a page is a keyframe with its transcript already attached, so it reused phase 2's row shape entirely |
-| **5** | Video: blob table, segmentation, adaptive keyframes, sidecar subtitles, `copy_mode="blobs"`. **Plus a read-side dependency:** playback goes through `/video/{talk_id}/{segment_idx}` in `routes/demo.py`, which is FOSDEM-shaped. A generic ranged blob route (`GET /catalog/tables/{name}/blob/{blob_key}`) must exist for a user's video table to be playable — read-only work in the read-only router, but real work | |
-| **6** | Audio: ASR, waveform thumbs, transcript windows. Ships text-only/FTS first, then SigLIP-text vectors, then the optional second space with RRF | |
+| **5** | ~~Video~~ — **done**. Keyframes with adaptive selection, sidecar subtitles, `copy_mode="blobs"` with ~16 MB segments, and the generic ranged blob route that makes a user's video table playable | the blob story, on someone's own files |
+| **6** | ~~Audio~~ — **done**, without ASR. Waveform thumbnails, sidecar and `.txt` transcripts windowed, tags, and null vectors by the finding above. **ASR is still open**: a large dependency and its own decision | |
 | **7** | The two deferred costs, argued on their own numbers: decoders in the packaged app, and the Tauri directory picker | neither blocks anything before it |
 
 ---

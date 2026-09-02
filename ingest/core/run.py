@@ -36,11 +36,10 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-import numpy as np
 import pyarrow as pa
 
 from ingest.core import indexing, writer
-from ingest.core.embedders.base import EmbedderError, NoEmbedder
+from ingest.core.embedders.base import NoEmbedder
 from ingest.core.media import IMPLEMENTED, handler_for, kind_for
 from ingest.core.plan import scan
 from ingest.core.schema import blob_schema, identity_metadata, item_schema
@@ -198,13 +197,11 @@ def _rows_for(src: Path, kind: str, items, *, hash_contents: bool) -> list[dict]
     return out
 
 
-def _table(rows: list[dict], vectors: np.ndarray | None, schema: pa.Schema) -> pa.Table:
+def _table(rows: list[dict], vectors, schema: pa.Schema) -> pa.Table:
+    """Rows to Arrow. `vectors` may contain `None` — see `_embed_batch`."""
     cols = {f.name: [r.get(f.name) for r in rows] for f in schema if f.name != "vector"}
     if vectors is not None:
-        dim = vectors.shape[1]
-        cols["vector"] = pa.FixedSizeListArray.from_arrays(
-            pa.array(np.asarray(vectors, dtype=np.float32).reshape(-1),
-                     type=pa.float32()), dim)
+        cols["vector"] = pa.array(vectors, type=schema.field("vector").type)
     return pa.table(cols, schema=schema)
 
 
@@ -317,9 +314,7 @@ def run(
         if space is not None:
             progress.stage = "embedding"
             tick()
-            if any(p is None for p in pending_paths):
-                raise EmbedderError("an item had nothing to embed")
-            vectors = embedder.embed_images(pending_paths)
+            vectors = _embed_batch(embedder, space, pending_rows, pending_paths)
         progress.stage = "writing"
         tick()
         batch = _table(pending_rows, vectors, schema)
@@ -352,7 +347,7 @@ def run(
                     # the demo's per-talk append exists to avoid.
                     blob_outcome = _write_blobs(
                         req, blob_fields, rows[0]["source_id"], kind,
-                        extraction.chunks, blob_outcome)
+                        extraction.chunks, blob_outcome, scratch)
                     result.blob_uri, result.blob_rows = (
                         blob_outcome.uri, blob_outcome.rows)
                 embed_paths = [it.image_path for it in extraction.items]
@@ -451,7 +446,7 @@ def result_text_probe(uri: str) -> list[dict]:
 
 
 def _write_blobs(req: RunRequest, schema: pa.Table, source_id: str, kind: str,
-                 chunks, previous):
+                 chunks, previous, scratch: Path):
     """Append one file's stored segments to the blob table, creating it if needed.
 
     The bytes are read once, written once, and dropped — never held for the corpus.
@@ -477,6 +472,49 @@ def _write_blobs(req: RunRequest, schema: pa.Table, source_id: str, kind: str,
         out = writer.create_blob_table(req.destination, req.name, batch)
     else:
         out = writer.append(previous.uri, batch)
+
+    # Only ever inside this run's scratch directory. A handler is free to hand over a
+    # path to the user's own file — the audio one did, and deleting the original
+    # after copying it into the table is the worst thing this tool could do. The
+    # guard belongs here rather than in each handler, because it has to hold for
+    # every handler anyone writes later.
+    root = scratch.resolve()
     for c in chunks:
-        c.path.unlink(missing_ok=True)
+        try:
+            if c.path.resolve().is_relative_to(root):
+                c.path.unlink(missing_ok=True)
+        except OSError:
+            pass
+    return out
+
+
+def _embed_batch(embedder, space, rows: list[dict], paths: list):
+    """Vectors for a batch, and `None` for the rows that do not belong in this space.
+
+    Audio has no frame to embed. The obvious repair — push its transcript through the
+    same model's *text* tower, since a joint space accepts both — is worse than doing
+    nothing, and only showed up when a real model ran over a real mixed corpus: every
+    semantic query came back all-audio, whatever was asked.
+
+    That is the modality gap. In a CLIP-family space, image and text embeddings sit in
+    different regions, and a text query scores systematically higher against a
+    text-derived vector than against an image-derived one. Mixing the two in one
+    column does not blur the ranking, it decides it: the text rows win every query.
+
+    So a row with nothing to look at gets a null vector. It is still found by
+    full-text search — which is the better tool for "where did they say that" anyway
+    — and the vector column keeps meaning one thing. Where the embedder cannot see
+    images at all, everything goes through the text tower and the column is
+    consistent again; the plan says which case it is.
+    """
+    if not space.sees_images:
+        texts = [r["text"] or r["title"] or r["source_name"] for r in rows]
+        return [list(v) for v in embedder.embed_texts(texts)]
+
+    picture = [i for i, p in enumerate(paths) if p is not None]
+    out: list[list[float] | None] = [None] * len(rows)
+    if picture:
+        got = embedder.embed_images([paths[i] for i in picture])
+        for slot, i in enumerate(picture):
+            out[i] = [float(x) for x in got[slot]]
     return out
