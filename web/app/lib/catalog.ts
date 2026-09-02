@@ -407,14 +407,23 @@ export const getQueryCompletions = (n: string, values = true) =>
  *  Nothing here reads heavy columns on its own. Asking for this URL is somebody
  *  deciding to spend the bytes, and the response says how many it took.
  */
-export function heavyCellUrl(
-  table: string, column: string, keyColumn: string, key: string | number,
-): string {
-  const q = new URLSearchParams({
-    column, key_column: keyColumn, key: String(key),
-  });
+export function heavyCellUrl(table: string, column: string, row: RowAddress): string {
+  const q = new URLSearchParams({ column });
+  if ("rowid" in row) {
+    q.set("rowid", String(row.rowid));
+  } else {
+    q.set("key_column", row.keyColumn);
+    q.set("key", String(row.key));
+  }
   return `/api/catalog/tables/${table}/blob?${q}`;
 }
+
+/** How to name one row. A row id is exact and every row browse and query result
+ *  now carries one; a key lookup is for a value someone is holding, and for a URL
+ *  that has to survive being written down. */
+export type RowAddress =
+  | { rowid: number }
+  | { keyColumn: string; key: string | number };
 
 async function post<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
   const res = await fetch(`/api/catalog${path}`, {

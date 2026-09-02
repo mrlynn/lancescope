@@ -13,8 +13,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Icon from "@/app/components/Icon";
-import { Cost, Empty, Eyebrow, Td, Th } from "@/app/components/console/atoms";
-import { CellView } from "@/app/components/console/tabs";
+import { Cost, Empty, Eyebrow } from "@/app/components/console/atoms";
+import { DataGrid } from "@/app/components/console/DataGrid";
 import { FilterInput } from "@/app/components/console/FilterInput";
 import {
   ApiError,
@@ -469,26 +469,20 @@ export function QueryTab({ table, root }: { table: string; root: string | null }
           {result.returned === 0 ? (
             <Empty>No rows matched. The query ran; the answer is empty.</Empty>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr>{result.columns.map((c) => <Th key={c}>{c}</Th>)}</tr>
-                </thead>
-                <tbody>
-                  {result.rows.map((r, i) => (
-                    <tr key={i} style={{ borderBottom: "1px solid var(--hairline)" }}>
-                      {result.columns.map((c) => (
-                        <Td key={c} className="max-w-[280px] truncate">
-                          {typeof r[c] === "number" && (c === "_distance" || c === "_score")
-                            ? (r[c] as number).toFixed(4)
-                            : <CellView v={r[c]} />}
-                        </Td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <DataGrid
+              key={`${table}:${result.columns.join(",")}`}
+              storageKey={`query.${table}`}
+              table={table}
+              columns={result.columns}
+              rows={result.rows}
+              totalRows={result.total_rows}
+              omitted={result.omitted_columns}
+              origin="result"
+              renderCell={(c, v) =>
+                typeof v === "number" && (c === "_distance" || c === "_score")
+                  ? v.toFixed(4)
+                  : null}
+            />
           )}
 
           {result.omitted_columns.length > 0 && (

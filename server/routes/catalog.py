@@ -561,7 +561,13 @@ async def rows(
         # caller paging into emptiness.
         total = ds.count_rows(filter=filter or None)
         table = ds.scanner(
-            columns=projected, filter=filter or None, limit=limit, offset=offset
+            columns=projected, filter=filter or None, limit=limit, offset=offset,
+            # Identity, not a column. A heavy cell this page declined to read can
+            # only be fetched later if something can say which row it was in, and a
+            # position on a filtered page is not that — the same predicate run again
+            # after a write puts a different row third. Lance's row id is the thing
+            # `take_blobs` addresses by, so it is the thing to carry.
+            with_row_id=True,
         ).to_table()
     except (ValueError, OSError) as e:
         # A filter the user typed is user input, not a server fault.
@@ -570,7 +576,11 @@ async def rows(
 
     records = table.to_pylist()
     out_rows = [
-        {c: _cell(rec.get(c), schema[c]) for c in projected}
+        # `_rowid` sits beside the columns rather than among them: it is not data
+        # this table holds, and it never appears in `columns`, so nothing renders it
+        # as a field or offers it for sorting.
+        {**{c: _cell(rec.get(c), schema[c]) for c in projected},
+         "_rowid": rec.get("_rowid")}
         for rec in records
     ]
 
@@ -724,8 +734,9 @@ MAX_BLOB_CHUNK = 8 * 1024 * 1024
 # And it is declared *above* the bare `/tables/{name:path}` route, because Starlette
 # matches in definition order and that one would otherwise absorb `.../blob` too.
 @router.get("/tables/{name:path}/blob")
-async def blob(name: str, request: Request, key: str,
-               column: str | None = None, key_column: str = "blob_key") -> Response:
+async def blob(name: str, request: Request, key: str | None = None,
+               column: str | None = None, key_column: str = "blob_key",
+               rowid: int | None = None) -> Response:
     """Stream the bytes of one heavy cell, honouring HTTP Range.
 
     The demo has had this since the beginning, at `/video/{talk_id}/{segment_idx}`,
@@ -758,21 +769,32 @@ async def blob(name: str, request: Request, key: str,
     picked = column or readable[0]
     side_file = picked in blob_columns
 
-    if key_column not in ds.schema.names:
-        raise HTTPException(400, f"{name} has no column {key_column!r} to look up by")
+    # Two ways to name a row, and the first one is exact.
+    #
+    # A row id is what `take_blobs` addresses by, and a row browse now hands one
+    # back with every row — so a table with no unique column of its own, which is
+    # most tables somebody made from a directory of files, can still have its
+    # pictures fetched. A key lookup stays for callers holding a value rather than
+    # an identity, and for URLs that have to survive being written down.
+    predicate = None
+    if rowid is not None:
+        row_id = rowid
+    else:
+        if key is None:
+            raise HTTPException(400, "name a row: pass rowid, or key with key_column")
+        if key_column not in ds.schema.names:
+            raise HTTPException(400, f"{name} has no column {key_column!r} to look up by")
 
-    predicate = _key_predicate(ds, key_column, key)
-    h.drain()
-    # `_rowid` rather than a row number: `take_blobs` addresses rows by identity, and
-    # a filtered scan's position is not one.
-    try:
-        found = ds.to_table(columns=[key_column], filter=predicate,
-                            limit=1, with_row_id=True)
-    except (ValueError, OSError) as e:
-        raise HTTPException(400, f"{key!r} is not a usable {key_column}: {e}") from None
-    if found.num_rows == 0:
-        raise HTTPException(404, f"no row in {name} where {key_column} = {key!r}")
-    row_id = found.column("_rowid")[0].as_py()
+        predicate = _key_predicate(ds, key_column, key)
+        h.drain()
+        try:
+            found = ds.to_table(columns=[key_column], filter=predicate,
+                                limit=1, with_row_id=True)
+        except (ValueError, OSError) as e:
+            raise HTTPException(400, f"{key!r} is not a usable {key_column}: {e}") from None
+        if found.num_rows == 0:
+            raise HTTPException(404, f"no row in {name} where {key_column} = {key!r}")
+        row_id = found.column("_rowid")[0].as_py()
 
     rng = request.headers.get("range")
 
@@ -808,7 +830,11 @@ async def blob(name: str, request: Request, key: str,
         try:
             got = ds._take_rows([row_id], columns=[picked])
         except Exception:                                         # noqa: BLE001
+            if predicate is None:
+                raise HTTPException(404, f"no row in {name} with id {row_id}") from None
             got = ds.to_table(columns=[picked], filter=predicate, limit=1)
+        if got.num_rows == 0:
+            raise HTTPException(404, f"no row in {name} with id {row_id}")
         cell = got.column(picked)[0].as_py()
         if cell is None:
             raise HTTPException(404, f"{picked} is empty in that row")
@@ -820,7 +846,7 @@ async def blob(name: str, request: Request, key: str,
     return Response(
         content=data,
         status_code=206 if rng else 200,
-        media_type=_mime_for(ds, key_column, key, data),
+        media_type=_mime_for(ds, predicate, data),
         headers={
             "Accept-Ranges": "bytes",
             "Content-Range": f"bytes {start}-{start + len(data) - 1}/{size}",
@@ -847,7 +873,7 @@ def _key_predicate(ds, key_column: str, key: str) -> str:
     return f"{key_column} = {key}"
 
 
-def _mime_for(ds, key_column: str, key: str, data: bytes = b"") -> str:
+def _mime_for(ds, predicate: str | None, data: bytes = b"") -> str:
     """The row's own `mime` when it has one, else what the bytes look like.
 
     Ingest writes a `mime` column; a table somebody built themselves usually has a
@@ -856,10 +882,9 @@ def _mime_for(ds, key_column: str, key: str, data: bytes = b"") -> str:
     show — and reading the encoding out of the column's *name* is a guess that works
     on `thumb_jpeg` and on nothing else.
     """
-    if "mime" in ds.schema.names:
+    if predicate is not None and "mime" in ds.schema.names:
         try:
-            got = ds.to_table(columns=["mime"],
-                              filter=_key_predicate(ds, key_column, key), limit=1)
+            got = ds.to_table(columns=["mime"], filter=predicate, limit=1)
             declared = got.column("mime")[0].as_py()
             if declared:
                 return str(declared)

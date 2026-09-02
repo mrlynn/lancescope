@@ -63,6 +63,9 @@ export default function Console() {
   const [findings, setFindings] = useState<Findings | null>(null);
 
   const [offset, setOffset] = useState(0);
+  // How wide a page read is. Kept here rather than in the panel because every
+  // paging control has to agree with it, and because it survives a tab switch.
+  const [limit, setLimit] = useState(PAGE);
   const [filter, setFilter] = useState("");
   const [expanded, setExpanded] = useState<string[]>([]);
   const [rowsError, setRowsError] = useState<string | null>(null);
@@ -142,10 +145,10 @@ export default function Console() {
   }, [loadTables, selectTable]);
 
   const loadRows = useCallback(
-    async (name: string, off: number, f: string, exp: string[]) => {
+    async (name: string, off: number, f: string, exp: string[], lim = PAGE) => {
       try {
         const d = await getRows(name, {
-          offset: off, limit: PAGE, filter: f || null, expand: exp,
+          offset: off, limit: lim, filter: f || null, expand: exp,
         });
         setRows(d);
         setRowsError(null);
@@ -241,7 +244,7 @@ export default function Console() {
 
       {list && list.tables.length === 0 ? (
         <div className="mt-24 text-center">
-          <Mark size={34} className="mx-auto mb-5 text-[var(--rule)]" />
+          <Mark size={34} mono className="mx-auto mb-5 text-[var(--rule)]" />
           {/* Two different facts that used to render as the same sentence: a
               database with nothing in it, and a connection this tool cannot read.
               One is about the data; the other is about us. */}
@@ -353,14 +356,20 @@ export default function Console() {
                   expanded={expanded}
                   table={picked}
                   ai={ai}
-                  onPage={(off) => { setOffset(off); if (picked) loadRows(picked, off, filter, expanded); }}
-                  onFilter={(f) => { setFilter(f); setOffset(0); if (picked) loadRows(picked, 0, f, expanded); }}
+                  onPage={(off) => { setOffset(off); if (picked) loadRows(picked, off, filter, expanded, limit); }}
+                  onPageSize={(n) => {
+                    // Back to the first page: keeping the offset would leave you
+                    // somewhere you did not ask to be, in a page of a new width.
+                    setLimit(n); setOffset(0);
+                    if (picked) loadRows(picked, 0, filter, expanded, n);
+                  }}
+                  onFilter={(f) => { setFilter(f); setOffset(0); if (picked) loadRows(picked, 0, f, expanded, limit); }}
                   onExpand={(col) => {
                     const next = expanded.includes(col)
                       ? expanded.filter((c) => c !== col)
                       : [...expanded, col];
                     setExpanded(next);
-                    if (picked) loadRows(picked, offset, filter, next);
+                    if (picked) loadRows(picked, offset, filter, next, limit);
                   }}
                 />
               )}

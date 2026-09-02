@@ -703,7 +703,10 @@ def run(handle: Handle, spec: QuerySpec, *, cell) -> QueryOutcome:
     # anything is executed. Whatever Lance raises, this is the user's query being
     # wrong, so it becomes a QueryError and the route makes it a 400.
     try:
-        scanner = build_scanner(handle, spec, projected)
+        # Identity, so a heavy cell this result declined to read can still be
+        # fetched afterwards. A row's position in an answer is not a way to name it:
+        # the same search run again after a write returns a different third hit.
+        scanner = build_scanner(handle, spec, projected, with_row_id=True)
         plan = read_plan(scanner.explain_plan(verbose=False))
     except QueryError:
         raise
@@ -728,10 +731,14 @@ def run(handle: Handle, spec: QuerySpec, *, cell) -> QueryOutcome:
             for rec in records]
     # Lance adds `_distance` and `_score` to search results; they are the answer, not
     # a column of the table, so they are carried through rather than dropped.
-    extras = [c for c in table.column_names if c not in schema]
+    # `_rowid` is neither: it is how to ask for this row again, so it rides along on
+    # every row and stays out of `columns`, where it would be rendered as a field
+    # and offered for sorting.
+    extras = [c for c in table.column_names if c not in schema and c != "_rowid"]
     for row, rec in zip(rows, records, strict=True):
         for c in extras:
             row[c] = rec.get(c)
+        row["_rowid"] = rec.get("_rowid")
 
     return QueryOutcome(
         rows=rows,

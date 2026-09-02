@@ -14,7 +14,7 @@ import type { Cell } from "@/app/lib/catalog";
 /** A cell as text. The summaries the server sends in place of heavy values stay
  *  summaries: writing `blob 16.7 MB` into a CSV is honest, and writing an empty
  *  column would suggest the value was null rather than never read. */
-function cellText(v: Cell): string {
+export function cellText(v: Cell): string {
   if (v === null || v === undefined) return "";
   if (typeof v === "object") {
     if ("blob" in v) {

@@ -21,7 +21,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Icon from "@/app/components/Icon";
 import { fmtBytes } from "@/app/lib/api";
-import { heavyCellUrl } from "@/app/lib/catalog";
+import { type RowAddress, heavyCellUrl } from "@/app/lib/catalog";
 
 type Loaded = {
   url: string;
@@ -46,13 +46,13 @@ function shape(mediaType: string): "image" | "video" | "audio" | "other" {
 }
 
 export function CellMedia({
-  table, column, keyColumn, keyValue, bytes, className = "",
+  table, column, row, bytes, className = "",
 }: {
   table: string;
   column: string;
-  /** The column that names a row — whatever this table uses. */
-  keyColumn: string;
-  keyValue: string | number;
+  /** Which row. A row id when the caller has one, which every row browse and
+   *  query result now hands back; a key column and value otherwise. */
+  row: RowAddress;
   /** The cell's size when it is already known, so the button can say what pressing
    *  it will cost. `expand` on the rows route reports exactly this. */
   bytes?: number | null;
@@ -73,13 +73,18 @@ export function CellMedia({
     }
   };
 
+  // Compared by value: a caller rebuilding `{rowid: 4}` inline on every render
+  // hands us a new object each time, and depending on the object itself would clear
+  // the picture it just asked for, forever.
+  const address = JSON.stringify(row);
+
   // A different row in the same component: drop what was shown rather than leaving
   // one row's picture under another row's name.
   useEffect(() => {
     release();
     setLoaded(null);
     setError(null);
-  }, [table, column, keyColumn, keyValue]);
+  }, [table, column, address]);
 
   useEffect(() => release, []);
 
@@ -87,8 +92,7 @@ export function CellMedia({
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(heavyCellUrl(table, column, keyColumn, keyValue),
-                              { cache: "no-store" });
+      const res = await fetch(heavyCellUrl(table, column, row), { cache: "no-store" });
       if (!res.ok) {
         let detail = `${res.status}`;
         try { detail = (await res.json()).detail ?? detail; } catch { /* not JSON */ }
@@ -107,7 +111,7 @@ export function CellMedia({
     } finally {
       setBusy(false);
     }
-  }, [table, column, keyColumn, keyValue]);
+  }, [table, column, address]);
 
   if (error) {
     return (
@@ -147,7 +151,7 @@ export function CellMedia({
         // bytes this page just fetched; there is no remote to optimise.
         <img
           src={loaded.url}
-          alt={`${column} of the row where ${keyColumn} is ${keyValue}`}
+          alt={`the ${column} of this row`}
           className="max-w-full rounded-sm border border-[var(--rule)]"
         />
       )}
