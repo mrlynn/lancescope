@@ -115,3 +115,69 @@ written keeps the whole thing near 6 GB.
 A threshold tuned on one conference's framing produced 13 keyframes for a 52-minute
 talk on another. Measure the delta distribution on the actual corpus and pick from
 the percentiles rather than carrying a constant across sources.
+
+---
+
+# Ingest measurements — what pylance alone can do
+
+Reproducible with `uv run python scripts/ingest_spike.py --embed`, pylance 11.0.0.
+These three questions gated the media-ingest design
+([docs/media-ingest-design.md](docs/media-ingest-design.md)), because their answers
+decide whether the packaged desktop app can ever create a database.
+
+## Ingest needs no `lancedb`
+
+`ingest/build_lance.py` reaches for `lancedb` to create a table and both indices, but
+`lancedb` is deliberately absent from the `console` dependency group. Had ingest
+inherited it, the packaged app could create tables it could not index.
+
+It does not have to. **pylance builds every index ingest needs, and the read path
+recognises all of them:**
+
+| call | index | `capabilities()` sees | planner uses |
+|---|---|---|---|
+| `create_scalar_index("text", index_type="INVERTED")` | `Inverted` | `fts available` | `MatchQuery` |
+| `create_index("vector", index_type="IVF_PQ", metric="cosine")` | `IVF_PQ` | `vector available` | `ANNIvfPartition`, `ANNSubIndex` |
+| `create_scalar_index("item_id", index_type="BTREE")` | `BTree` | — | `ScalarIndexQuery` |
+
+`index_metrics()` reads `cosine` back off the vector index, so the metric-mismatch
+warning keeps working on tables ingest wrote. `lancedb` opens and queries the result
+without complaint — it reports the inverted index as `FTS` where pylance calls it
+`Inverted`, which matters only if you match on that string (`capabilities()` matches
+`"inverted"` against pylance's spelling, so it is fine).
+
+**Consequence:** ingest adds zero heavy dependencies, `lancedb` never becomes a server
+dependency, and the deprecated-`create_fts_index` workaround below stays confined to
+the demo pipeline that needs it.
+
+## Embedder identity survives in schema metadata
+
+All seven `b"lancescope.*"` keys round-trip `lance.write_dataset` and reopen
+byte-identical. So which embedding space a vector column lives in is a property of the
+table, readable a month later without consulting a settings file that has since
+changed. No sidecar and no `_meta` table needed.
+
+## An embeddings endpoint's advertised dimension is not evidence
+
+Measured against Ollama's OpenAI-compatible `/v1/embeddings`, which is the same wire
+format a hosted backend speaks:
+
+| model | observed dim | normalised | 3 inputs, warm |
+|---|---|---|---|
+| `nomic-embed-text` | 768 | pre-normalised (‖v‖ = 1.0) | 110 ms |
+| `nomic-embed-text-v2-moe` | 768 | pre-normalised (‖v‖ = 1.0) | 75 ms |
+
+Two things this changes.
+
+**There is a third embedder backend worth shipping: local Ollama.** No key, no network,
+no torch — just HTTP to `localhost:11434`. It works in the packaged app, which the
+local SigLIP backend cannot. It is **text-only**, so it cannot embed an image.
+
+**A modality mismatch is detectable at plan time.** Asked for an image, a text-only
+model returns a clean `400 invalid input type` rather than a vector of nothing. That is
+what makes `Embedder.probe()` worth running before a byte is touched: the plan can say
+*"this embedder cannot see images; your 312 photos would be embedded from their
+filenames and EXIF alone"* instead of producing a table that is quietly useless.
+
+First call to a cold Ollama model took 12.2 s against 1.45 s warm — `probe()` at plan
+time also pays that cost up front rather than charging it to the first batch.
