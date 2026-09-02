@@ -43,7 +43,7 @@ def kind_for(path: Path | str) -> str | None:
     return _BY_EXTENSION.get(Path(path).suffix.lower())
 
 
-def handler_for(kind: str):
+def handler_for(kind: str, copy_mode: str = "none"):
     """The handler for a kind, imported now rather than at module load.
 
     This late import is the whole reason the registry exists. A build with no PDF
@@ -58,6 +58,14 @@ def handler_for(kind: str):
         from ingest.core.media.pdf import PdfHandler
 
         return PdfHandler()
+    if kind == "video":
+        from ingest.core.media.video import VideoHandler
+
+        return VideoHandler(copy_mode=copy_mode)
+    if kind == "audio":
+        from ingest.core.media.audio import AudioHandler
+
+        return AudioHandler(copy_mode=copy_mode)
     raise LookupError(
         f"no handler for {kind!r} yet — this build ingests "
         f"{', '.join(sorted(IMPLEMENTED))}")
@@ -66,4 +74,4 @@ def handler_for(kind: str):
 # Kinds that can actually be turned into rows today, as opposed to kinds this tool
 # can recognise in a directory listing. Discovery knows about all four; the writer
 # only knows about these, and the plan says so rather than discovering it per file.
-IMPLEMENTED = frozenset({"image", "pdf"})
+IMPLEMENTED = frozenset({"image", "pdf", "video", "audio"})

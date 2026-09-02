@@ -222,9 +222,17 @@ blob mode *would* write, so nobody is surprised.
   | (b) a dedicated text embedder | much better text retrieval | a *different* space — second `text_vector` column, second index, and scores fusable only by rank (RRF, which `routes/demo.py:269` already implements) |
   | (c) transcribe, FTS only, no vector | honest, cheap, useful on day one | no semantic audio search |
 
-  **Recommendation: (c) first, (a) as the default once ASR is solid, (b) behind a
-  flag.** Audio's highest-value query is "find where they said X", and that is
-  lexical — FTS answers it better than any embedding.
+  **Recommendation: (c), and it is now measured rather than predicted.** Option (a)
+  was tried — push the transcript through the same model's text tower, since a joint
+  space accepts both — and it is worse than doing nothing. Over a real mixed corpus
+  with SigLIP, *every* semantic query came back all-audio whatever was asked.
+
+  That is the modality gap: in a CLIP-family space image and text embeddings occupy
+  different regions, and a text query scores systematically higher against a
+  text-derived vector than an image-derived one. Mixing the two in one column does
+  not blur the ranking, it decides it. So a row with nothing to look at gets a null
+  vector, the column keeps meaning one thing, and audio is found by full-text search
+  — which suits "where did they say that" better anyway.
 
   PDF has since made the same argument concretely: a scanned page has no text layer,
   gets `text_source="filename"` rather than nothing, and is still found by *"a blue
@@ -553,28 +561,30 @@ Seven mechanisms, ordered by how hard they are to route around.
    that can create tables on someone's disk is a different product with a different
    consent story.
 
-### Can the packaged desktop app ingest? Not as it stands — and that is a decoder problem, not a policy one.
+### Can the packaged desktop app ingest? Yes — measured, built, and run.
 
-`packaging/lancescope.spec` excludes `torch, open_clip, embed, av, yt_dlp,
-transformers, PIL`. Note `PIL` — the frozen build cannot decode a JPEG. So it can
-create a Lance table (pylance is there) and cannot read a single input file.
+It could not, and the reason was one line: `packaging/lancescope.spec` excluded
+`PIL`, so a frozen build could create a Lance table and could not decode a JPEG to
+put in one.
 
-The honest UI: the entry point is **present, not hidden**.
-`GET /ingest/capabilities` returns `writes: available` with every `media` entry
-`unsupported` and the reason, and the New-database screen renders one paragraph plus
-the remedy — run from a checkout (`make ingest-media SRC=… NAME=…`), then open the
-result here as a connection. That is the posture `capabilities_for()` already takes
-toward a remote root: *"connected, and this cannot be browsed yet"*, not *"nothing here"*.
+The numbers settle it. pillow 14.1 MB, pypdfium2 8.0 MB and pypdf 3.9 MB come to
+**26 MB** — against the **493 MB** of torch this dependency group exists to leave
+out, and the **127 MB** of pyarrow it already ships. That is not the trade the group's
+docstring refuses; it is a rounding error against one dependency already in the
+bundle, and it is the difference between a desktop app that creates databases and
+one that only describes them.
 
-The upgrade is small and worth naming with numbers, because **the API-first embedder
-means torch is still not needed**: adding `pillow` + `pypdfium2` + `pypdf` to the
-`console` group and dropping them from the spec `excludes` is tens of megabytes, not
-the two gigabytes that group's docstring argues against — and it buys images and PDF
-in the desktop app. `av`/ffmpeg for video and audio is a separate licensing and size
-decision. This is why `media` is a `dict[str, Capability]`: a build with pillow but
-not av reports images available and video unsupported, rather than failing at file 3.
+Built and run, not assumed: the frozen server ingests 8 images and 5 PDF pages into
+a real table with 768-dimensional vectors, and there is no torch anywhere in the
+bundle. The embedder is Ollama over HTTP — the Phase 0 finding doing exactly the job
+it was found for.
 
----
+**ffmpeg turns out not to be a packaging question at all.** It is invoked as a
+subprocess, so it is a PATH dependency rather than a bundled one: the packaged app
+reports video and audio as available wherever the user has ffmpeg, and declines them
+where they do not. Bundling it would be an order of magnitude larger and carries a
+licensing decision nobody has made — and now nobody has to, because per-medium
+capability reporting makes a partial answer a legitimate one.
 
 ## UI
 
@@ -753,8 +763,8 @@ four-page-kind test means new pages need full front matter:
 | **2** | ~~Images end to end~~ — **done**. Schema, writer, indexing, jobs, embedders (Ollama, OpenAI-compatible, multimodal, local SigLIP), the console wizard and `lancescope ingest`. Verified with real SigLIP: *"horizontal stripes"* returns the striped pictures | the whole feature in miniature |
 | **3** | ~~The lifecycle~~ — **mostly done** with phase 2: cancel, discard, the failure taxonomy and the ten-in-a-row stop, the journal and `interrupted`, `?job=` reattach, `/events` paging. **Left: the jobs-list screen** | where the honest messages got written |
 | **4** | ~~PDF~~ — **done**. One row per page via pypdfium2 + pypdf, text layer into the FTS column, scans embedded and labelled. Verified: full-text finds *"logistics"* on the right page, and *"a blue circle"* returns a photograph **and** a scanned page in one query | a page is a keyframe with its transcript already attached, so it reused phase 2's row shape entirely |
-| **5** | Video: blob table, segmentation, adaptive keyframes, sidecar subtitles, `copy_mode="blobs"`. **Plus a read-side dependency:** playback goes through `/video/{talk_id}/{segment_idx}` in `routes/demo.py`, which is FOSDEM-shaped. A generic ranged blob route (`GET /catalog/tables/{name}/blob/{blob_key}`) must exist for a user's video table to be playable — read-only work in the read-only router, but real work | |
-| **6** | Audio: ASR, waveform thumbs, transcript windows. Ships text-only/FTS first, then SigLIP-text vectors, then the optional second space with RRF | |
+| **5** | ~~Video~~ — **done**. Keyframes with adaptive selection, sidecar subtitles, `copy_mode="blobs"` with ~16 MB segments, and the generic ranged blob route that makes a user's video table playable | the blob story, on someone's own files |
+| **6** | ~~Audio~~ — **done**, without ASR. Waveform thumbnails, sidecar and `.txt` transcripts windowed, tags, and null vectors by the finding above. **ASR is still open**: a large dependency and its own decision | |
 | **7** | The two deferred costs, argued on their own numbers: decoders in the packaged app, and the Tauri directory picker | neither blocks anything before it |
 
 ---

@@ -9,10 +9,11 @@ how a UI ends up saying "unavailable" to someone whose only problem is a missing
 * **this build cannot write** — the writer is not present, which is true of a
   checkout partway through the build order and would be true of any distribution
   that shipped the console alone;
-* **this build cannot decode** — per medium, and the interesting case: the packaged
-  desktop app can create a Lance table perfectly well and has no image decoder, so
-  the honest answer is *"images, no; PDF, no; and here is the one command that
-  fixes it"* rather than a single grey button.
+* **this build cannot decode** — per medium, and the interesting case. The packaged
+  app used to be able to create a Lance table and unable to decode a JPEG to put in
+  one; 26 MB of decoders fixed that, and ffmpeg is a PATH dependency rather than a
+  bundled one, so video works there too for anyone who has it. What remains is
+  genuinely per-medium, which is why this is a dict rather than a boolean.
 
 Reporting them separately is what lets the New-database screen stay present instead
 of hidden. The posture is `server/catalog.py::capabilities_for`'s: *"connected, and

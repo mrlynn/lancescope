@@ -88,12 +88,20 @@ export default function Console() {
     setRows(null); setOffset(0); setFilter(""); setExpanded([]); setRowsError(null);
   }, []);
 
-  const loadTables = useCallback((want?: string | null) => {
+  const loadTables = useCallback((want?: string | null, wantTab?: string | null) => {
     listTables()
       .then((d) => {
         setList(d);
         const has = (n: string | null | undefined) => !!n && d.tables.some((t) => t.name === n);
-        setPicked((p) => (has(want) ? want! : has(p) ? p : d.tables[0]?.name ?? null));
+        const picked = has(want) ? want! : null;
+        setPicked((p) => picked ?? (has(p) ? p : d.tables[0]?.name ?? null));
+        // `?tab=` opens the console on the question rather than the schema — "here
+        // are your 23 columns" is a strange first answer to "find my photos". Set
+        // here, alongside the table it belongs to, rather than in an effect of its
+        // own: a synchronous setState in an effect is a cascading render.
+        if (picked && wantTab && TABS.some((x) => x.id === wantTab)) {
+          setTab(wantTab as Tab);
+        }
       })
       .catch((e) => setListError(e instanceof Error ? e.message : "unreachable"));
   }, []);
@@ -106,8 +114,13 @@ export default function Console() {
     return new URLSearchParams(window.location.search).get("table");
   };
 
+  const wantedTab = () => {
+    if (typeof window === "undefined") return null;
+    return new URLSearchParams(window.location.search).get("tab");
+  };
+
   useEffect(() => {
-    loadTables(wanted());
+    loadTables(wanted(), wantedTab());
     getSettings().then(setSettings).catch(() => setSettings(null));
     getCapabilities().then(setAi).catch(() => setAi(null));
   }, [loadTables]);

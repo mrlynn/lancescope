@@ -62,6 +62,20 @@ dev = ["ruff>=0.9"]
 # report that they are unavailable, which they already do when the corpus is absent.
 console = [
     "pylance>=0.38",
+    # The media decoders, so the packaged app can create a database and not merely
+    # promise to. Measured rather than guessed: pillow 14.1 MB, pypdfium2 8.0 MB and
+    # pypdf 3.9 MB come to 26 MB, against the 493 MB of torch this group exists to
+    # leave out and the 127 MB of pyarrow it already ships. That is the whole
+    # argument — 26 MB turns "this build cannot decode a JPEG" into "this build
+    # ingests images and PDFs", and it is not the trade the paragraph above refuses.
+    #
+    # ffmpeg is still absent, so video and audio remain checkout-only. It is a
+    # binary rather than a wheel, an order of magnitude larger, and carries a
+    # licensing decision nobody has made. `ingest/core/binaries.py` reports that per
+    # medium, which is why this can be a partial answer instead of an all-or-nothing.
+    "pillow>=11",
+    "pypdfium2>=4.30",
+    "pypdf>=5",
     "pyarrow>=18",
     "numpy>=2.0",
     "fastapi>=0.115",

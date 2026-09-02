@@ -110,8 +110,8 @@ export function Outcome({
         {wrote && (
           <button className="btn btn-accent" disabled={busy !== null}
                   onClick={async () => { setBusy("open"); await onOpen(); }}>
-            <Icon name="database" size={14} />
-            {busy === "open" ? "Opening…" : "Open in the console"}
+            <Icon name="search" size={14} />
+            {busy === "open" ? "Opening…" : "Search it"}
           </button>
         )}
         {canDiscard && (

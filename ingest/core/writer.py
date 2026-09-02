@@ -69,6 +69,23 @@ def create_table(
     return WriteOutcome(str(uri), ds.count_rows(), ds.version, created=True)
 
 
+def create_blob_table(destination: Path | str, name: str,
+                      first_batch: pa.Table) -> WriteOutcome:
+    """The side table holding originals. Same rules, separate name.
+
+    `<name>_blobs` rather than a column on the item table, because the cardinalities
+    differ by an order of magnitude: one video is ~200 item rows and ~15 blob rows.
+    Folding them together would mean either 199 null blob cells per video or a blob
+    column whose rows are mostly small — and under about 8 MB, Blob V2 packs rows and
+    reading one drags in its neighbours. See FINDINGS.md.
+    """
+    return create_table(destination, blob_table_name(name), first_batch)
+
+
+def blob_table_name(name: str) -> str:
+    return f"{name}_blobs"
+
+
 def append(uri: str, batch: pa.Table) -> WriteOutcome:
     """Add a batch to a table **this run created**.
 

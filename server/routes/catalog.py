@@ -17,7 +17,7 @@ from decimal import Decimal
 from pathlib import Path
 
 import pyarrow as pa
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -671,6 +671,132 @@ async def compare_versions(name: str, a: int, b: int) -> JSONResponse:
 
 # Registered last on purpose. `{name:path}` matches slashes, so this would swallow
 # `/tables/x/versions` if it came first; Starlette resolves in definition order.
+# --------------------------------------------------------------------------- blobs
+
+# One response is capped here rather than left to the caller. A player asking for a
+# whole segment should get a whole segment; a player asking for the entire file in
+# one range should not be able to make this process hold it in memory.
+MAX_BLOB_CHUNK = 8 * 1024 * 1024
+
+
+# Two things about this route's shape, both learned the same way — by getting a 404
+# naming a table called `talks_blobs/blob/abc:0`.
+#
+# The key is a query parameter rather than a path segment, because `{name:path}` is
+# greedy: tables nest, so `data/train` has to be a legal name, and any suffix after
+# it is swallowed whole. Keys also carry a colon, which is a second reason not to
+# spend a path segment on one.
+#
+# And it is declared *above* the bare `/tables/{name:path}` route, because Starlette
+# matches in definition order and that one would otherwise absorb `.../blob` too.
+@router.get("/tables/{name:path}/blob")
+async def blob(name: str, request: Request, key: str,
+               column: str | None = None, key_column: str = "blob_key") -> Response:
+    """Stream bytes out of a Blob V2 column, honouring HTTP Range.
+
+    The demo has had this since the beginning, at `/video/{talk_id}/{segment_idx}`,
+    shaped entirely around one FOSDEM corpus. A table someone made from their own
+    video needs the same thing without those two column names baked in, so this asks
+    for the row by whatever key the table uses and finds the blob column from the
+    schema.
+
+    Reading it is a read: the bytes move because somebody pressed play, and the cost
+    is reported the way every other read here is.
+    """
+    h = open_table(name)
+    ds = h.ds
+
+    blob_columns = [f.name for f in ds.schema if is_blob_field(f)]
+    if not blob_columns:
+        raise HTTPException(404, f"{name} has no blob column to stream")
+    if column is not None and column not in blob_columns:
+        raise HTTPException(
+            404, f"{column!r} is not a blob column here — try {', '.join(blob_columns)}")
+    picked = column or blob_columns[0]
+
+    if key_column not in ds.schema.names:
+        raise HTTPException(400, f"{name} has no column {key_column!r} to look up by")
+
+    predicate = _key_predicate(ds, key_column, key)
+    h.drain()
+    # `_rowid` rather than a row number: `take_blobs` addresses rows by identity, and
+    # a filtered scan's position is not one.
+    try:
+        found = ds.to_table(columns=[key_column], filter=predicate,
+                            limit=1, with_row_id=True)
+    except (ValueError, OSError) as e:
+        raise HTTPException(400, f"{key!r} is not a usable {key_column}: {e}") from None
+    if found.num_rows == 0:
+        raise HTTPException(404, f"no row in {name} where {key_column} = {key!r}")
+    row_id = found.column("_rowid")[0].as_py()
+
+    try:
+        handle = ds.take_blobs(picked, ids=[row_id])[0]
+    except Exception as e:                                        # noqa: BLE001
+        raise HTTPException(500, f"could not open that blob: {e}") from e
+
+    try:
+        size = handle.size()
+        rng = request.headers.get("range")
+        start, end = 0, size - 1
+        if rng and rng.startswith("bytes="):
+            lo, _, hi = rng[6:].split(",")[0].strip().partition("-")
+            start = int(lo) if lo else 0
+            end = int(hi) if hi else size - 1
+        end = min(end, size - 1, start + MAX_BLOB_CHUNK - 1)
+        if start >= size:
+            raise HTTPException(416, f"range starts past the end of a {size}-byte blob")
+        handle.seek(start)
+        data = handle.read(end - start + 1)
+    finally:
+        try:
+            handle.close()
+        except Exception:                                          # noqa: BLE001
+            pass
+
+    d = h.drain()
+    return Response(
+        content=data,
+        status_code=206 if rng else 200,
+        media_type=_mime_for(ds, key_column, key),
+        headers={
+            "Accept-Ranges": "bytes",
+            "Content-Range": f"bytes {start}-{start + len(data) - 1}/{size}",
+            "Content-Length": str(len(data)),
+            # Never let the browser hide what a seek costs.
+            "Cache-Control": "no-store",
+            "X-Read-Bytes": str(d.read_bytes),
+            "X-Read-Iops": str(d.read_iops),
+        },
+    )
+
+
+def _key_predicate(ds, key_column: str, key: str) -> str:
+    """`key_column = <key>`, quoted according to the column's own type.
+
+    Ingest keys blobs by a string, but nothing says a table has to: the fixture
+    corpus keys by an `int64` id, and quoting that as a string is a 500 rather than
+    a miss. Quotes inside a key are doubled, because a key with an apostrophe in it
+    should be a lookup that finds nothing, not a filter that fails to parse.
+    """
+    field = ds.schema.field(key_column)
+    if pa.types.is_string(field.type) or pa.types.is_large_string(field.type):
+        return f"{key_column} = \'{key.replace(chr(39), chr(39) * 2)}\'"
+    return f"{key_column} = {key}"
+
+
+def _mime_for(ds, key_column: str, key: str) -> str:
+    """The row's own `mime` when it has one. Ingest writes it; other tables may not."""
+    if "mime" not in ds.schema.names:
+        return "application/octet-stream"
+    try:
+        got = ds.to_table(columns=["mime"],
+                          filter=_key_predicate(ds, key_column, key), limit=1)
+        return str(got.column("mime")[0].as_py() or "application/octet-stream")
+    except (ValueError, OSError, IndexError):
+        return "application/octet-stream"
+
+
 @router.get("/tables/{name:path}")
 async def table(name: str) -> JSONResponse:
     """One table in full: schema, stats, and the real on-disk byte split.
