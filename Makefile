@@ -1,3 +1,4 @@
+.PHONY: local
 .PHONY: help setup download prepare prepare-force embed build ingest scan doctor verify test docs ui sidecar app api mcp web demo dev tidy bench clean
 
 PY := .venv/bin/python
@@ -14,6 +15,7 @@ help:
 	@echo "make app               build LanceScope.app (unsigned)"
 	@echo "make verify            green-room preflight, real corpus (~15s)"
 	@echo "make demo              run API + web together"
+	@echo "make local            serve the app the way the .app does, on one port"
 
 setup:
 	uv sync
@@ -117,6 +119,32 @@ web:
 	cd web && npm run dev
 
 # Stage mode: production web build, API warmed before the browser can reach it.
+
+# The app, without the app: the same server the .app runs, serving the same
+# exported interface on one origin. `make dev` is the loop to write code in —
+# two processes, hot reload, port 3000. This is the one to check what shipped,
+# because a static export has no rewrites and no dev server, and that difference
+# has broken things `make dev` could not see.
+#
+# The port is the kernel's choice unless you name one, for the same reason the
+# desktop app does it that way: a fixed port is a support ticket the first time
+# somebody already has something on it. The server prints the port it got.
+#
+#   make local            build the interface if needed, serve it, open a browser
+#   make local PORT=9000  on a port you choose, if it is free
+#   make local FRESH=1    rebuild the interface first
+#   make local OPEN=0     do not open a browser
+
+local:
+	@if [ -n "$(FRESH)" ] || [ ! -d web/out ]; then \
+	  echo "==> exporting the interface"; \
+	  $(MAKE) ui; \
+	else \
+	  echo "==> serving the interface already in web/out (FRESH=1 rebuilds it)"; \
+	fi
+	@LANCESCOPE_PORT=$(PORT) OPEN=$(if $(OPEN),$(OPEN),1) $(PY) scripts/serve_local.py
+
+
 demo:
 	@./scripts/demo.sh
 
