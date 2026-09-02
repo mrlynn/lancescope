@@ -34,8 +34,24 @@ Where the root comes from, in order:
 | `data/lance` | first run with nothing configured, **and only if it holds tables** |
 | nothing | the console says so and points at settings |
 
-`LANCESCOPE_CONFIG` moves the settings file. Connections may be local directories or
-`s3://` / `db://` URIs; remote ones are saved unverified rather than falsely ticked.
+`LANCESCOPE_CONFIG` moves the settings file. Connections may be local directories,
+`hf://datasets/…` roots, or `s3://` / `db://` URIs.
+
+The **datasets LanceDB publishes** on HuggingFace open directly — the settings page
+offers five of them, so a fresh install has something to look at without building
+anything first:
+
+```
+hf://datasets/lance-format/openvid-lance/data
+```
+
+937,957 rows carrying the MP4s themselves beside their embeddings. Opening it costs
+24,568 bytes; browsing five rows costs about 73 KB and reads no video at all. The
+same claim this repo makes about its own corpus, checked against someone else's.
+
+`s3://` and `db://` are still saved unverified rather than falsely ticked: discovery
+there needs an adapter that does not exist yet, and the console says so instead of
+showing an empty database.
 
 ## The macOS app
 

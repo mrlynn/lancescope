@@ -4,6 +4,53 @@
 **Planning mode:** scope expansion — a new product surface deserves an ambitious
 end state, but its first releases must earn trust before it gains write authority.
 
+---
+
+> ## Amendment, 2026-09-02 — the goal is advocacy, not retention
+>
+> Everything below was written for a product goal this project does not have. It aims
+> at a *loved daily tool*: Phase 3 write authority, managed operations, teams, audit
+> history, credential vaults. The actual goal is a **DevRel artifact** — success is the
+> argument landing with an audience, not daily actives. Under that goal most of Phase 3
+> is cost without payoff, and the prioritisation below should be read with these
+> corrections on top of it.
+>
+> The correction came from comparing this repo against what LanceDB itself now says.
+> Three findings, in order of how much they change:
+>
+> 1. **The thesis is more on-message than this document assumed.** LanceDB's own
+>    OpenVid dataset page argues that "metadata scans, search, and filtering never read
+>    a single byte of video data" — which is this repo's headline claim almost verbatim.
+>    "The video and its index are the same table" is not adjacent to their positioning;
+>    it *is* their positioning. Lead with it harder, not more carefully.
+>
+> 2. **Reach was the binding constraint, and it is now partly lifted.** LanceDB's
+>    distribution is `hf://datasets/lance-format/*` — around thirty canonical datasets
+>    re-encoded into Lance — plus `s3://` and `db://`. This console could open none of
+>    them, so its first screen asked for a path the user was assumed to already have.
+>    `server/hf.py` closes that for the Hub: pylance opens `hf://` natively (measured:
+>    OpenVid's 937,957 rows open in 0.3 s for 24,568 bytes, and the IO counters return
+>    real deltas), so only *listing* needed an adapter. `s3://` and `db://` remain
+>    honestly unsupported.
+>
+> 3. **The audience and the verbs have drifted.** LanceDB repositioned from an embedded
+>    vector database to an "AI-native Multimodal Lakehouse" aimed at ML teams, around
+>    four pillars — Curation, Feature Engineering, Search, Training. This console's
+>    vocabulary and findings still address an app developer debugging a slow query. And
+>    the things LanceDB is betting on next — branches, tags and shallow clone
+>    ("Git for AI data"), zero-copy column addition, video and robotics — are the ones
+>    this repo's README lists as "doors not walked through".
+>
+> **Revised priority order**, replacing the P0–P3 table below: reach (done for the Hub)
+> → finish ingest through video and blob writing, so the tool can produce the table
+> shape the demo argues about → reframe findings toward training-set health → branches
+> and a zero-copy column-addition demo. **Dropped:** managed operations, teams, audit
+> history, and hosted accounts. They were never the point.
+>
+> One competitive note this document did not have: `lance-format/lance-data-viewer`
+> already exists as a community read-only Lance browser. The differentiator here is
+> cost accounting and derived findings, so those must stay sharp and stated.
+
 ## Executive position
 
 LanceScope has a credible and differentiated starting point: it makes LanceDB's

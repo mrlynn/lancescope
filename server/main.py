@@ -44,9 +44,15 @@ async def lifespan(app: FastAPI):
         print(f"catalog: nothing configured — {ROOT.detail} Add a connection at "
               f"/console/settings.")
     else:
-        tables = CATALOG.discover()
+        found = CATALOG.discover_detail()
+        tables = found.tables
         print(f"catalog: {CATALOG.root_uri} ({ROOT.source}) — {len(tables)} table(s): "
               f"{', '.join(tables) or 'none'}")
+        if found.error:
+            # A remote listing can fail for reasons that have nothing to do with the
+            # database — no network, a repository gone private. Saying so at startup
+            # is the difference between a puzzling empty console and a known cause.
+            print(f"catalog: could not list this root — {found.error}")
 
     if demo.load(CATALOG):
         demo.warm()
