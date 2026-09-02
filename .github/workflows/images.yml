@@ -1,0 +1,143 @@
+# The container images, one per Lance reader.
+#
+# Separate from release.yml on purpose. That workflow builds one signed artifact for
+# one platform and takes twenty minutes of Apple's time; this builds a matrix of
+# images and has nothing to do with notarisation. Coupling them would mean a failed
+# staple blocks a container that was already fine.
+#
+# Nothing here publishes by accident. Images are pushed only from a `v*` tag or a
+# deliberate `workflow_dispatch` with `publish` ticked; every other trigger builds
+# and throws the result away, which is still worth doing because a build that only
+# happens at release time is a build that breaks at release time.
+
+name: Images
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Push to ghcr.io (off = build only, a dry run)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: images-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  image:
+    name: pylance ${{ matrix.pylance }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The supported range, from the floor to the version this project develops
+        # against. Measured, not assumed — docs/guide/reference-versions.md has the
+        # matrix and says what breaks below 3.0.0.
+        pylance: ["3.0.0", "4.0.2", "6.0.1", "7.1.0", "8.0.1", "9.0.1", "10.0.0", "11.0.0"]
+        include:
+          # Only the newest reader also answers to `latest`. A `latest` that could
+          # mean any row of the matrix is worse than no `latest` at all.
+          - pylance: "11.0.0"
+            latest: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: decide whether this publishes
+        id: mode
+        run: |
+          if [ "${{ github.event_name }}" = "push" ] \
+             || [ "${{ inputs.publish }}" = "true" ]; then
+            echo "push=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "push=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "publishing: $(cat "$GITHUB_OUTPUT")"
+
+      # Logged in only when something is actually going to be pushed, so a dry run
+      # needs no credentials and cannot use any.
+      - uses: docker/login-action@v3
+        if: steps.mode.outputs.push == 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: tags
+        id: tags
+        run: |
+          REPO="ghcr.io/${GITHUB_REPOSITORY,,}"
+          TAGS="${REPO}:pylance-${{ matrix.pylance }}"
+          # A tagged release also pins the app version beside the reader version,
+          # so an image can be identified by both and neither moves under anyone.
+          if [ "${{ github.event_name }}" = "push" ]; then
+            APP="${GITHUB_REF_NAME}"
+            TAGS="${TAGS},${REPO}:${APP}_pylance-${{ matrix.pylance }}"
+          fi
+          if [ "${{ matrix.latest }}" = "true" ]; then
+            TAGS="${TAGS},${REPO}:latest"
+          fi
+          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
+          echo "$TAGS"
+
+      # Built for the runner's own architecture first and loaded locally, because
+      # the check below has to actually run the thing. A multi-arch manifest cannot
+      # be loaded into the daemon, so the arm64 build happens in the push step.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          build-args: PYLANCE_VERSION=${{ matrix.pylance }}
+          push: false
+          load: true
+          tags: lancescope:check
+          cache-from: type=gha,scope=pylance-${{ matrix.pylance }}
+          cache-to: type=gha,mode=max,scope=pylance-${{ matrix.pylance }}
+
+      # No image is published without answering for itself. This is the gate: the
+      # reader inside has to be the one the tag claims, and it has to support
+      # everything the console asks of it.
+      - name: it is the reader it says it is
+        run: |
+          docker run -d --name probe -p 8080:8080 lancescope:check
+          for _ in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:8080/health >/dev/null 2>&1 && break
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:8080/api/catalog/runtime > runtime.json
+          cat runtime.json
+          python3 - <<'PY'
+          import json, sys
+          r = json.load(open("runtime.json"))
+          want = "${{ matrix.pylance }}"
+          got = r["versions"]["lance"]
+          if got != want:
+              sys.exit(f"image reports pylance {got}, tag claims {want}")
+          missing = [f["name"] for f in r["features"] if not f["supported"]]
+          if missing:
+              sys.exit(f"pylance {got} is missing: {missing}")
+          print("ok:", r["versions"])
+          PY
+          docker rm -f probe
+
+      - name: publish
+        if: steps.mode.outputs.push == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          build-args: PYLANCE_VERSION=${{ matrix.pylance }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          cache-from: type=gha,scope=pylance-${{ matrix.pylance }}
+          cache-to: type=gha,mode=max,scope=pylance-${{ matrix.pylance }}

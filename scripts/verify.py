@@ -679,13 +679,53 @@ def console_checks() -> None:
 
         # Regression: a filtered page used to report the whole table's row count,
         # which paged the UI off the end of the results.
-        rows = api.get(f"/catalog/tables/{heavy_table}/rows",
-                       params={"limit": 5, "filter": "track = 'Go'"})
-        body = rows.json()
+        #
+        # The predicate was `track = 'Go'`, which is a column of the FOSDEM corpus
+        # and of nothing else, against whichever table `heavy_table` happened to
+        # pick. The moment the first table with heavy columns was one without a
+        # `track` — which is what adding claude-triage-api to the corpus did — the
+        # request 400d, and the detail string read `total_rows` off an error body
+        # and raised KeyError. A check that cannot fail is not a check; one that
+        # crashes instead of failing is worse, because it takes the run with it.
+        #
+        # So the predicate is written against the table that was actually picked,
+        # the same way the console writes its own example filter, and the columns
+        # are tried until one of them names a strict subset. If none does, that is
+        # a FAIL — the regression this guards makes every filter report the whole
+        # table, and every candidate would then be rejected for exactly that.
         unfiltered = api.get(f"/catalog/tables/{heavy_table}/rows?limit=5").json()["total_rows"]
+        sample = api.get(f"/catalog/tables/{heavy_table}/rows?limit=1").json()
+        first = (sample["rows"] or [{}])[0]
+        candidates = []
+        for column in sample["columns"]:
+            value = first.get(column)
+            if isinstance(value, bool) or value is None:
+                continue
+            if isinstance(value, str):
+                # Long prose is a poor equality predicate and a quote would need
+                # escaping the filter parser has its own opinions about.
+                if len(value) > 80 or "'" in value:
+                    continue
+                candidates.append(f"{column} = '{value}'")
+            elif isinstance(value, (int, float)):
+                candidates.append(f"{column} = {value}")
+
+        narrowed = None
+        for predicate in candidates:
+            page = api.get(f"/catalog/tables/{heavy_table}/rows",
+                           params={"limit": 5, "filter": predicate})
+            if page.status_code != 200:
+                continue
+            counted = page.json()["total_rows"]
+            if 0 < counted < unfiltered:
+                narrowed = (predicate, counted)
+                break
+
         check("a filtered page counts the filtered rows",
-              rows.status_code == 200 and 0 < body["total_rows"] < unfiltered,
-              f"{body['total_rows']} of {unfiltered}")
+              narrowed is not None,
+              f"{narrowed[1]} of {unfiltered} on {narrowed[0]}" if narrowed
+              else f"no column of {heavy_table} narrowed {unfiltered:,} rows"
+                   f" ({len(candidates)} tried)")
 
         bad = api.get(f"/catalog/tables/{heavy_table}/rows", params={"filter": "nope = 1"})
         check("a bad filter is the caller's fault, not a 500", bad.status_code == 400)

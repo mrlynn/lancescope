@@ -16,7 +16,12 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
         <Link href="/console" className="pill">Console</Link>
       </AppBar>
 
-      <div className="flex flex-col lg:flex-row gap-10 items-start mt-7">
+      {/* `items-start` only once there is a row to start in. In the stacked
+          column layout it is align-items on the cross axis, which is horizontal:
+          it sized the article to its own max-content (651px inside 307px of
+          phone) and widened the whole page. The rail and the article should
+          stretch to the column's width until `lg` turns the axis. */}
+      <div className="flex flex-col lg:flex-row gap-6 lg:gap-10 lg:items-start mt-7">
         <DocsNav docs={docIndex()} sections={SECTIONS} />
         {children}
       </div>

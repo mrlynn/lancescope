@@ -44,7 +44,15 @@ console is pointed at.
 Start with list_tables, then table_findings for what the console has already worked
 out about a table: an unindexed vector column, small-file counts that would be
 misleading to act on, tombstone debt. Those findings are derived from metadata, not
-generated, and each carries the numbers it was computed from."""
+generated, and each carries the numbers it was computed from.
+
+Asked whether a table is ready to train on, call table_findings with
+facet='training'. That narrows the same rules to the ones a training run pays for —
+a fragment split too coarse to feed a loader's workers, a straggler fragment that
+decides how long an epoch takes, an unindexed vector column costing a full scan per
+eval query. It reports the layout and nothing about the data: it cannot tell you
+whether the labels are right or whether a split leaks, and saying so is part of the
+answer."""
 
 # Snake case: the MCP 2.x models accept the wire names as aliases and expose these.
 # Using the field names means an attribute read here matches what was set.
@@ -138,12 +146,15 @@ async def describe_table(name: str) -> dict:
              description="What this console has worked out about a table — an "
                          "unindexed vector column, small-file counts that would be "
                          "misleading to act on, tombstone debt — each with the "
-                         "numbers it was derived from. No model wrote these.")
-async def table_findings(name: str) -> dict:
+                         "numbers it was derived from. No model wrote these. Pass "
+                         "facet='training' for only the ones a training run pays "
+                         "for: how few workers the fragment split can feed, what an "
+                         "epoch reads, and what an unindexed vector costs per query.")
+async def table_findings(name: str, facet: str | None = None) -> dict:
     if catalog() is None:
         return NOT_CONFIGURED
     try:
-        return await _body(await routes.findings(name))
+        return await _body(await routes.findings(name, facet=facet))
     except Exception as e:                                   # noqa: BLE001
         return _missing(name, e)
 

@@ -19,7 +19,7 @@ The console's read surface, as tools an agent can call. Every one is the HTTP ro
 | `describe_table` | yes | One table in full: every column with its type, whether it is a blob column, dataset statistics, and the real on-disk byte split between blob side files and everything else. |
 | `list_tables` | yes | Every table in the database: rows, version, fragments, indices and columns, plus what listing them cost. Reads manifests, never data. |
 | `read_rows` | yes | A page of rows, with an optional SQL filter. Heavy columns — vectors, images, blobs — are described rather than read, and cannot be expanded through this tool. The response says what the read cost. |
-| `table_findings` | yes | What this console has worked out about a table — an unindexed vector column, small-file counts that would be misleading to act on, tombstone debt — each with the numbers it was derived from. No model wrote these. |
+| `table_findings` | yes | What this console has worked out about a table — an unindexed vector column, small-file counts that would be misleading to act on, tombstone debt — each with the numbers it was derived from. No model wrote these. Pass facet='training' for only the ones a training run pays for: how few workers the fragment split can feed, what an epoch reads, and what an unindexed vector costs per query. |
 | `table_fragments` | yes | Physical layout: what each fragment holds and what it weighs, in both the figure Lance reports and the bytes it actually occupies, which differ by orders of magnitude for a blob table. |
 | `table_indices` | yes | Indices on a table, their coverage, and — more usefully — which columns have none. An unindexed vector column is why a similarity search reads every row. |
 | `table_versions` | yes | Version history: what each version did, when, and how the row, fragment and byte counts moved between them. |
@@ -44,4 +44,12 @@ Start with list_tables, then table_findings for what the console has already wor
 out about a table: an unindexed vector column, small-file counts that would be
 misleading to act on, tombstone debt. Those findings are derived from metadata, not
 generated, and each carries the numbers it was computed from.
+
+Asked whether a table is ready to train on, call table_findings with
+facet='training'. That narrows the same rules to the ones a training run pays for —
+a fragment split too coarse to feed a loader's workers, a straggler fragment that
+decides how long an epoch takes, an unindexed vector column costing a full scan per
+eval query. It reports the layout and nothing about the data: it cannot tell you
+whether the labels are right or whether a split leaks, and saying so is part of the
+answer.
 ```

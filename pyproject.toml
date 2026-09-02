@@ -6,7 +6,13 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     # data layer
     "lancedb>=0.26",
-    "pylance>=0.38",
+    # 3.0.0 and not lower, measured rather than assumed. `scripts/compat/probe.py`
+    # installs each candidate and reads a real blob table with it: 0.38 has no
+    # `io_stats_incremental`, so every byte figure in the console is missing; 1.0.4
+    # does not recognise a Blob V2 column at all; 2.0.1 sees the column and then
+    # fails to open it against storage format 2.2. 3.0.0 is the first release that
+    # does all three. The old floor of 0.38 was a number nobody had checked.
+    "pylance>=3",
     "pyarrow>=18",
     "numpy>=2.0",
     # media
@@ -61,7 +67,7 @@ dev = ["ruff>=0.9"]
 # The demo stays a thing you run from a checkout. In a packaged build its routes
 # report that they are unavailable, which they already do when the corpus is absent.
 console = [
-    "pylance>=0.38",
+    "pylance>=3",
     # The media decoders, so the packaged app can create a database and not merely
     # promise to. Measured rather than guessed: pillow 14.1 MB, pypdfium2 8.0 MB and
     # pypdf 3.9 MB come to 26 MB, against the 493 MB of torch this group exists to
@@ -108,7 +114,7 @@ ingest = [
 # will keep green. `make verify` remains the integration gate, on the real corpus.
 test = [
     "pytest>=8.3",
-    "pylance>=0.38",
+    "pylance>=3",
     "pyarrow>=18",
     "numpy>=2.0",
     "fastapi>=0.115",

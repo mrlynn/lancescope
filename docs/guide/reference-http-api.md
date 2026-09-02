@@ -20,6 +20,7 @@ Read-only. Nothing here writes to a dataset, and nothing materialises a blob col
 
 | method | path | what it does |
 | --- | --- | --- |
+| `GET` | `/catalog/runtime` | Which Lance is underneath, and what this build of it can do. |
 | `GET` | `/catalog/tables` | Every table under the root. |
 | `GET` | `/catalog/tables/{name:path}` | One table in full: schema, stats, and the real on-disk byte split. |
 | `GET` | `/catalog/tables/{name:path}/blob` | Stream the bytes of one heavy cell, honouring HTTP Range. |

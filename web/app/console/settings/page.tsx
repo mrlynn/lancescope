@@ -2,17 +2,24 @@
 
 /** Settings — the one page in the console that writes anything.
  *
- *  Two things are configured here and they are deliberately on one page: which
- *  database the console is reading, and how the intelligence layer is powered. Both
- *  used to be environment variables, which meant changing either one meant a
- *  restart, and neither could be discovered by looking at the app. */
+ *  Three things are configured or explained here: which database the console is
+ *  reading, how the intelligence layer is powered, and where the root it landed on
+ *  actually came from. They used to be four panels stacked down a single column,
+ *  which meant the page was mostly scrolling past the two subjects you did not come
+ *  for. They are tabs now — one subject on screen at a time, each addressable by
+ *  `?tab=`, so a link can drop someone on the panel the sentence was about.
+ *
+ *  All three stay mounted. A half-typed URI or an unsaved API key surviving a tab
+ *  switch is worth more than the DOM it costs. */
 
-import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import Icon, { type IconName } from "@/app/components/Icon";
 import AppBar from "@/app/components/nav/AppBar";
 import SampleDatasets from "@/app/components/samples/SampleDatasets";
 import { Caveat, Empty, Eyebrow, fmtWhen } from "@/app/components/console/atoms";
 import { dbParent } from "@/app/lib/dbname";
+import { type RuntimeReport, getRuntime } from "@/app/lib/catalog";
 import {
   type Capabilities, type IntelProbe, type IntelligenceView, type Probe,
   type SelfTest, type SettingsState,
@@ -20,12 +27,62 @@ import {
   probeIntelligence, removeConnection, runSelfTest, saveIntelligence,
 } from "@/app/lib/settings";
 
+/* ---------------------------------------------------------------------- tabs */
+
+/** The three subjects, each with the one line that says why you would open it. */
+const TABS = [
+  {
+    id: "connections",
+    icon: "database",
+    label: "connections",
+    blurb: "Which database the console reads, and the ones it can read without a download.",
+  },
+  {
+    id: "intelligence",
+    icon: "spark",
+    label: "intelligence",
+    blurb: "The optional language layer — provider, models, key, and what it costs.",
+  },
+  {
+    id: "provenance",
+    icon: "system",
+    label: "provenance",
+    blurb: "Which rung set the root, where the settings file is, and what this Lance can do.",
+  },
+] as const satisfies readonly { id: string; icon: IconName; label: string; blurb: string }[];
+
+type TabId = (typeof TABS)[number]["id"];
+
+/** The URL is the tab, rather than a copy of it.
+ *
+ *  Holding the selection in `useState` and seeding it from `?tab=` inside an effect
+ *  would render the wrong panel first and then correct itself; subscribing to the
+ *  location renders the right one and lets the server snapshot stay honest about
+ *  knowing nothing. `replaceState` fires no event of its own, so `pick` says so. */
+const URL_CHANGED = "lancescope:tab";
+
+function readTab(): TabId {
+  const want = new URLSearchParams(window.location.search).get("tab");
+  return TABS.some((t) => t.id === want) ? (want as TabId) : "connections";
+}
+
+function subscribeToTab(onChange: () => void) {
+  window.addEventListener("popstate", onChange);
+  window.addEventListener(URL_CHANGED, onChange);
+  return () => {
+    window.removeEventListener("popstate", onChange);
+    window.removeEventListener(URL_CHANGED, onChange);
+  };
+}
 
 export default function SettingsPage() {
   const [state, setState] = useState<SettingsState | null>(null);
   const [probe, setProbe] = useState<IntelProbe | null>(null);
   const [caps, setCaps] = useState<Capabilities | null>(null);
+  const [runtime, setRuntime] = useState<RuntimeReport | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const tab = useSyncExternalStore(subscribeToTab, readTab, (): TabId => "connections");
+  const router = useRouter();
 
   useEffect(() => {
     getSettings()
@@ -33,7 +90,19 @@ export default function SettingsPage() {
       .catch((e) => setError(e instanceof Error ? e.message : "settings unreachable"));
     probeIntelligence().then(setProbe).catch(() => setProbe(null));
     getCapabilities().then(setCaps).catch(() => setCaps(null));
+    getRuntime().then(setRuntime).catch(() => setRuntime(null));
   }, []);
+
+  /* A link can name a tab, but switching one is a view change rather than a
+     navigation — replaceState keeps it out of the back button. */
+  const pick = (id: TabId) => {
+    const u = new URL(window.location.href);
+    u.searchParams.set("tab", id);
+    window.history.replaceState(null, "", u);
+    window.dispatchEvent(new Event(URL_CHANGED));
+  };
+
+  const current = TABS.find((t) => t.id === tab) ?? TABS[0];
 
   return (
     <main className="relative z-10 min-h-screen px-[var(--stage-pad)] pt-7 pb-16">
@@ -44,34 +113,84 @@ export default function SettingsPage() {
 
       {error && <Banner tone="video">{error}</Banner>}
 
-      <div className="max-w-[860px] space-y-6">
-        <Connections state={state} onChange={setState} onError={setError} />
+      <div className="max-w-[1100px]">
+        {/* Full width and even thirds on a phone, where three words at this
+            tracking do not fit beside their glyphs; the glyphs go first. */}
+        <div className="seg mb-3 w-full sm:w-auto" role="tablist"
+             aria-label="Settings sections">
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              role="tab"
+              id={`settings-tab-${t.id}`}
+              aria-selected={tab === t.id}
+              aria-controls={`settings-panel-${t.id}`}
+              onClick={() => pick(t.id)}
+              data-on={tab === t.id}
+              className="mono flex-1 sm:flex-none !px-2 sm:!px-3.5
+                         text-[10px] tracking-[0.14em] uppercase"
+            >
+              <span className="hidden sm:inline-flex"><Icon name={t.icon} size={14} /></span>
+              {t.label}
+            </button>
+          ))}
+        </div>
 
-        {/* Below the connection form, not above it: someone on this page usually
-            came to point at their own database. The offer should be what they find
-            next, rather than what they scroll past.
+        {/* The strip is three words wide; this is the sentence those words stand
+            for, and it changes with the tab rather than repeating in every panel. */}
+        <p className="text-[12px] text-[var(--haze)] mb-6 leading-relaxed max-w-[70ch]">
+          {current.blurb}
+        </p>
 
-            One list, not two. There used to be a row of chips here filled from a
-            hardcoded array; these cards say the same thing with measured numbers,
-            a reason to open each one, and the sentence that actually decides it —
-            that nothing is downloaded. */}
-        <section className="panel p-6">
-          <Eyebrow>Sample datasets</Eyebrow>
-          <SampleDatasets onOpened={() => getSettings().then(setState).catch(() => undefined)} />
-        </section>
+        <div hidden={tab !== "connections"} role="tabpanel"
+             id="settings-panel-connections" aria-labelledby="settings-tab-connections">
+          <div className="space-y-6">
+            <Connections state={state} onChange={setState} onError={setError} />
 
-        <Intelligence
-          intel={state?.intelligence ?? null}
-          probe={probe}
-          caps={caps}
-          onProbe={() => {
-            probeIntelligence().then(setProbe).catch(() => setProbe(null));
-            getCapabilities().then(setCaps).catch(() => setCaps(null));
-          }}
-          onSaved={(i) => setState((s) => (s ? { ...s, intelligence: i } : s))}
-          onError={setError}
-        />
-        <Where state={state} />
+            {/* Below the connection form, not above it: someone on this page usually
+                came to point at their own database. The offer should be what they find
+                next, rather than what they scroll past.
+
+                One list, not two. There used to be a row of chips here filled from a
+                hardcoded array; these cards say the same thing with measured numbers,
+                a reason to open each one, and the sentence that actually decides it —
+                that nothing is downloaded. */}
+            <section className="panel p-6">
+              <Eyebrow>Sample datasets</Eyebrow>
+              <SampleDatasets onOpened={async () => {
+                /* "Open it" adopted the URI and made it active. Staying here would
+                   leave that button having visibly done nothing. */
+                await getSettings().then(setState).catch(() => undefined);
+                router.push("/console");
+              }} />
+            </section>
+          </div>
+        </div>
+
+        <div hidden={tab !== "intelligence"} role="tabpanel"
+             id="settings-panel-intelligence" aria-labelledby="settings-tab-intelligence">
+          <Intelligence
+            intel={state?.intelligence ?? null}
+            probe={probe}
+            caps={caps}
+            onProbe={() => {
+              probeIntelligence().then(setProbe).catch(() => setProbe(null));
+              getCapabilities().then(setCaps).catch(() => setCaps(null));
+            }}
+            onSaved={(i) => setState((s) => (s ? { ...s, intelligence: i } : s))}
+            onError={setError}
+          />
+        </div>
+
+        {/* Two panels that answer the same question from opposite ends — which
+            database, and which reader — so they sit side by side once there is room. */}
+        <div hidden={tab !== "provenance"} role="tabpanel"
+             id="settings-panel-provenance" aria-labelledby="settings-tab-provenance">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+            <Where state={state} />
+            <Reader runtime={runtime} />
+          </div>
+        </div>
       </div>
     </main>
   );
@@ -96,10 +215,12 @@ function Connections({ state, onChange, onError }: {
   onChange: (s: SettingsState) => void;
   onError: (e: string | null) => void;
 }) {
+  const router = useRouter();
   const [uri, setUri] = useState("");
   const [label, setLabel] = useState("");
   const [found, setFound] = useState<Probe | null>(null);
   const [busy, setBusy] = useState(false);
+  const [opening, setOpening] = useState<string | null>(null);
 
   const run = async (fn: () => Promise<SettingsState>) => {
     setBusy(true);
@@ -115,13 +236,38 @@ function Connections({ state, onChange, onError }: {
 
   const locked = state?.env_locked ?? false;
 
+  /** The row is the way in.
+   *
+   *  Switching a connection and then looking at it were two clicks in two places —
+   *  Use here, then the breadcrumb — and the first of them gave no evidence it had
+   *  worked beyond a border changing colour. Opening a connection is what anyone
+   *  came to this list to do, so the row does it: activate if it is not already
+   *  active, then go and read it. `Use` stays for the narrower case of repointing
+   *  the catalog without leaving this page. */
+  const open = async (c: SettingsState["connections"][number]) => {
+    if (!c.active) {
+      if (locked) return;
+      setOpening(c.id);
+      try {
+        onChange(await activateConnection(c.id));
+        onError(null);
+      } catch (e) {
+        onError(e instanceof Error ? e.message : "failed");
+        setOpening(null);
+        return;
+      }
+    }
+    router.push("/console");
+  };
+
   return (
     <section className="panel p-6">
       <Eyebrow>Connections</Eyebrow>
       <p className="text-[13px] text-[var(--body)] leading-relaxed mb-5 max-w-[62ch]">
         Any directory holding <span className="mono text-[var(--bright)]">.lance</span> tables.
-        Switching is immediate — the catalog is repointed in place, no restart. Everything
-        the console does against a connection is read-only.
+        Click one to open it in the console — switching is immediate, the catalog is
+        repointed in place, no restart. Everything the console does against a connection
+        is read-only.
       </p>
 
       {state === null ? (
@@ -137,23 +283,38 @@ function Connections({ state, onChange, onError }: {
           <div className="space-y-2 mb-6">
             {state.connections.map((c) => (
               <div key={c.id}
-                   className="flex items-start gap-4 px-4 py-3 rounded-sm border"
+                   className="group flex items-stretch rounded-sm border
+                              focus-within:border-[var(--index)]"
                    style={c.active
                      ? { borderColor: "var(--video)", background: "rgb(var(--video-rgb) / 0.09)" }
                      : { borderColor: "var(--rule)" }}>
+                <button
+                  type="button"
+                  disabled={busy || opening !== null || (locked && !c.active)}
+                  onClick={() => open(c)}
+                  title={locked && !c.active
+                    ? "LANCE_ROOT is pinning the root — this cannot be made active"
+                    : `Open ${c.label} in the console`}
+                  className="flex items-start gap-4 flex-1 min-w-0 px-4 py-3 text-left
+                             rounded-sm transition-colors
+                             hover:bg-[rgb(var(--index-rgb)/0.11)]
+                             disabled:hover:bg-transparent disabled:cursor-default"
+                >
                 <span className="pt-0.5 shrink-0"
                       style={{ color: c.active ? "var(--video)" : "var(--dim)" }}>
-                  <Icon name={c.active ? "check" : "database"} size={16} />
+                  <Icon name={opening === c.id ? "clock" : c.active ? "check" : "database"}
+                        size={16} />
                 </span>
-                <div className="min-w-0 flex-1">
-                  <div className="text-[14px] font-medium"
-                       style={{ color: c.active ? "var(--video)" : "var(--bright)" }}>
+                <span className="min-w-0 flex-1 block">
+                  <span className="block text-[14px] font-medium"
+                        style={{ color: c.active ? "var(--video)" : "var(--bright)" }}>
                     {c.label}
-                  </div>
-                  <div className="mono text-[10px] text-[var(--haze)] truncate" title={c.uri}>
+                  </span>
+                  <span className="mono block text-[10px] text-[var(--haze)] truncate"
+                        title={c.uri}>
                     {dbParent(c.uri) || c.uri}
-                  </div>
-                  <div className="mono flex items-center gap-1.5 text-[10px] mt-1 text-[var(--haze)]">
+                  </span>
+                  <span className="mono flex items-center gap-1.5 text-[10px] mt-1 text-[var(--haze)]">
                     {c.reachable === false
                       ? <span className="flex items-center gap-1.5" style={{ color: "var(--video)" }}>
                           <Icon name="warning" size={11} />unreachable — {c.note}
@@ -167,33 +328,47 @@ function Connections({ state, onChange, onError }: {
                         : <><Icon name="table" size={11} />
                             {c.tables.length} table{c.tables.length === 1 ? "" : "s"}</>}
                     {c.last_used && <span className="text-[var(--dim)]">· last used {fmtWhen(c.last_used)}</span>}
-                  </div>
+                  </span>
                   {c.capabilities?.remote && (
-                    <div className="text-[11px] text-[var(--haze)] leading-relaxed mt-1.5">
+                    <span className="block text-[11px] text-[var(--haze)] leading-relaxed mt-1.5">
                       {c.capabilities.discover.reason}
-                    </div>
+                    </span>
                   )}
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
+                </span>
+
+                {/* The row goes somewhere, so it says so — quietly until it is
+                    pointed at, because three permanent arrows down the list would
+                    be louder than the one connection that is active. */}
+                <span className="self-center shrink-0 pl-3 opacity-0 transition-opacity
+                                 group-hover:opacity-100 group-focus-within:opacity-100"
+                      style={{ color: c.active ? "var(--video)" : "var(--index)" }}>
+                  <Icon name="chevronRight" size={16} />
+                </span>
+                </button>
+
+                <span className="flex items-center gap-2 shrink-0 pr-3">
                   {!c.active && (
-                    <button className="btn" disabled={busy || locked}
+                    <button className="btn" disabled={busy || opening !== null || locked}
+                            data-tip="Switch the catalog without leaving this page"
+                            data-tip-side="left"
                             onClick={() => run(() => activateConnection(c.id))}>
                       <Icon name="check" size={14} />
                       Use
                     </button>
                   )}
-                  <button className="iconbtn" disabled={busy} data-tip="Remove" data-tip-side="left"
+                  <button className="iconbtn" disabled={busy || opening !== null}
+                          data-tip="Remove" data-tip-side="left"
                           aria-label={`Remove ${c.label}`}
                           onClick={() => run(() => removeConnection(c.id))}>
                     <Icon name="trash" size={14} />
                   </button>
-                </div>
+                </span>
               </div>
             ))}
           </div>
 
           <div className="flex flex-wrap items-end gap-3">
-            <Field label="path or URI" wide>
+            <Field label="path or URI" wide className="max-w-[520px] min-w-[260px] flex-1">
               <input
                 className="inp mono"
                 placeholder="/path/to/lance  ·  hf://datasets/…  ·  s3://bucket/prefix"
@@ -349,14 +524,14 @@ function Intelligence({ intel, probe, caps, onProbe, onSaved, onError }: {
         </div>
       )}
 
-      <div className="flex flex-wrap gap-3 mb-4">
-        <Field label="provider">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-4 gap-y-3 mb-4">
+        <Field label="provider" wide>
           <select className="inp mono" value={provider}
                   onChange={(e) => set("provider", e.target.value)}>
             {intel.providers.map((p) => <option key={p} value={p}>{p}</option>)}
           </select>
         </Field>
-        <Field label="model">
+        <Field label="model" wide>
           {provider === "ollama" && probe?.ollama.models.length ? (
             <select className="inp mono" value={v("model", intel.model ?? "")}
                     onChange={(e) => set("model", e.target.value)}>
@@ -369,12 +544,12 @@ function Intelligence({ intel, probe, caps, onProbe, onSaved, onError }: {
                    onChange={(e) => set("model", e.target.value)} />
           )}
         </Field>
-        <Field label="fast model">
+        <Field label="fast model" wide>
           <input className="inp mono" placeholder="for NL → filter"
                  value={v("model_fast", intel.model_fast ?? "")}
                  onChange={(e) => set("model_fast", e.target.value)} />
         </Field>
-        <Field label="spend ceiling (USD)">
+        <Field label="spend ceiling (USD)" wide>
           <input className="inp mono" placeholder="none" inputMode="decimal"
                  value={String(v("spend_ceiling_usd", intel.spend_ceiling_usd ?? ""))}
                  onChange={(e) => set("spend_ceiling_usd",
@@ -385,7 +560,7 @@ function Intelligence({ intel, probe, caps, onProbe, onSaved, onError }: {
       <p className="text-[12px] text-[var(--haze)] mb-5">{ROLE_HINT[provider]}</p>
 
       {provider === "ollama" && (
-        <Field label="ollama host" wide>
+        <Field label="ollama host" wide className="max-w-[520px]">
           <input className="inp mono" placeholder="http://localhost:11434"
                  value={v("ollama_host", intel.ollama_host ?? "")}
                  onChange={(e) => set("ollama_host", e.target.value)} />
@@ -393,7 +568,7 @@ function Intelligence({ intel, probe, caps, onProbe, onSaved, onError }: {
       )}
 
       {provider === "openai-compat" && (
-        <Field label="base URL" wide>
+        <Field label="base URL" wide className="max-w-[520px]">
           <input className="inp mono" placeholder="http://localhost:1234/v1"
                  value={v("base_url", intel.base_url ?? "")}
                  onChange={(e) => set("base_url", e.target.value)} />
@@ -402,7 +577,7 @@ function Intelligence({ intel, probe, caps, onProbe, onSaved, onError }: {
 
       {provider !== "ollama" && provider !== "none" && (
         <div className="mt-4">
-          <Field label="api key" wide>
+          <Field label="api key" wide className="max-w-[520px]">
             <input className="inp mono" type="password" autoComplete="off"
                    placeholder={intel.api_key_set
                      ? `set — ${intel.api_key_source} ${intel.api_key_hint ?? ""}`
@@ -563,7 +738,7 @@ const RUNGS: { source: string; icon: IconName; name: string; what: string }[] = 
     source: "connection",
     icon: "database",
     name: "The active connection",
-    what: "Whichever saved connection is marked Use, above. This is the normal case.",
+    what: "Whichever saved connection is marked Use, on the Connections tab. This is the normal case.",
   },
   {
     source: "default",
@@ -578,6 +753,69 @@ const RUNGS: { source: string; icon: IconName; name: string; what: string }[] = 
     what: "No root resolved. The console has nothing to read until a connection is added.",
   },
 ];
+
+/** Which Lance is doing the reading, and what this build of it can do.
+ *
+ *  Here rather than in a panel because it is a property of the install, not of the
+ *  table being looked at — and because the question it answers ("why is there no
+ *  cost column?") is asked on a screen that is already missing the thing that would
+ *  have explained it. A build with everything says so in one line and takes up no
+ *  more room than that; only a degraded one spends space on the detail. */
+function Reader({ runtime }: { runtime: RuntimeReport | null }) {
+  if (!runtime) return null;
+  const missing = runtime.features.filter((f) => !f.supported);
+
+  return (
+    <section className="panel p-6">
+      <Eyebrow>The reader</Eyebrow>
+
+      <div className="flex flex-wrap gap-x-6 gap-y-2 mb-4">
+        {([["lance", "pylance"], ["pyarrow", "pyarrow"],
+           ["python", "python"]] as const).map(([key, label]) => (
+          <div key={key}>
+            <div className="eyebrow mb-0.5">{label}</div>
+            <div className="mono text-[13px] text-[var(--bright)]">
+              {runtime.versions[key]}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {missing.length === 0 ? (
+        <p className="text-[13px] text-[var(--body)] leading-relaxed max-w-[62ch]">
+          This Lance supports everything the console asks of it — cost accounting,
+          Blob V2, indices, versions and fragment statistics.
+        </p>
+      ) : (
+        <>
+          <p className="text-[13px] leading-relaxed max-w-[62ch] mb-4"
+             style={{ color: "var(--video)" }}>
+            {runtime.summary}
+          </p>
+          <ul className="space-y-2.5">
+            {missing.map((f) => (
+              <li key={f.name} className="flex items-start gap-3 px-3.5 py-2.5 rounded-sm
+                                          border" style={{ borderColor: "var(--rule)" }}>
+                <span className="pt-0.5 shrink-0" style={{ color: "var(--video)" }}>
+                  <Icon name="warning" size={15} />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[13px] text-[var(--bright)]">{f.name}</span>
+                  <span className="block text-[12px] text-[var(--haze)] mt-1 leading-relaxed">
+                    {f.lost}
+                  </span>
+                  <span className="block mono text-[11px] text-[var(--dim)] mt-1.5 break-all">
+                    {f.probe}
+                  </span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </section>
+  );
+}
 
 function Where({ state }: { state: SettingsState | null }) {
   if (!state) return null;
@@ -692,11 +930,11 @@ function Copy({ value, what }: { value: string; what: string }) {
   );
 }
 
-function Field({ label, wide = false, children }: {
-  label: string; wide?: boolean; children: React.ReactNode;
+function Field({ label, wide = false, className = "", children }: {
+  label: string; wide?: boolean; className?: string; children: React.ReactNode;
 }) {
   return (
-    <label className={`block ${wide ? "w-full" : "w-[190px]"}`}>
+    <label className={`block ${wide ? "w-full" : "w-[190px]"} ${className}`}>
       <span className="eyebrow block mb-1.5">{label}</span>
       {children}
     </label>

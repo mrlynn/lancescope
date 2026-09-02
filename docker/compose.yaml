@@ -1,0 +1,36 @@
+# LanceScope beside whatever already has the data.
+#
+#   docker compose -f docker/compose.yaml up
+#
+# The point of this file rather than a `docker run` line is the shared volume: a
+# pipeline that writes Lance tables and a console that reads them, with the console
+# mounted read-only so it cannot be the thing that corrupted your dataset.
+
+services:
+  lancescope:
+    image: ghcr.io/mrlynn/lancescope:pylance-11.0.0
+    # Or build it here instead, pinned to the reader your data needs:
+    #   build:
+    #     context: ..
+    #     dockerfile: docker/Dockerfile
+    #     args:
+    #       PYLANCE_VERSION: "11.0.0"
+    ports:
+      # 8080 inside; 8088 outside, because 8080 on a developer's machine is usually
+      # already something else.
+      - "8088:8080"
+    volumes:
+      # Read-only, and the console never writes to a dataset anyway — this is the
+      # belt to that pair of braces.
+      - lance-data:/data:ro
+      # The settings file. Without this the connection list and the intelligence
+      # settings reset every time the container is replaced.
+      - lancescope-config:/config
+    environment:
+      # Pinning the root means the settings page reports it as fixed by the
+      # environment, which is the honest thing to show for a container.
+      LANCE_ROOT: /data
+
+volumes:
+  lance-data:
+  lancescope-config:

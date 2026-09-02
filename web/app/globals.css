@@ -16,18 +16,29 @@
   --ink:    #171513;   /* canvas */
   --ink-2:  #1e1b19;   /* raised panel */
   --ink-3:  #241f1c;   /* wells, inputs */
-  --rule:   #4c443f;   /* borders */
-  --haze:   #847770;   /* de-emphasised text */
-  --body:   #ad9e95;   /* body copy */
-  --bright: #f4ebe8;   /* headings, numbers */
-  --dim:    #5c524c;   /* the quietest text that is still text */
+  /* The four text tiers, measured against --ink rather than chosen by eye. The
+     originals were a ladder of greys that looked right in a dark room and failed
+     in daylight: --haze at 4.2:1 and --dim at 2.4:1, which is not a quiet colour
+     but an unreadable one — and between them they carry every eyebrow, unit,
+     placeholder, row number and null in the console. Each tier now clears 4.5:1
+     on the canvas, and the steps between them are wide enough that the hierarchy
+     still reads as a hierarchy. The light palette had the same fault and gets the
+     same four ratios. Change one of these and re-measure. */
+  --rule:   #5d534d;   /* borders */
+  --haze:   #a3958c;   /* de-emphasised text — 6.3:1 */
+  --body:   #c3b5ab;   /* body copy — 9.1:1 */
+  --bright: #f4ebe8;   /* headings, numbers — 15.5:1 */
+  --dim:    #918379;   /* the quietest text that is still text — 5.0:1 */
 
+  /* Both accents already cleared 4.5:1 on this ground (7.9 and 6.8), so they are
+     exactly what they were. The coral is the identity; it does not move for a
+     contrast pass that did not ask it to. */
   --index:  #d9a05b;   /* what finding it costs */
   --video:  #ff734a;   /* what playing it costs — LanceDB coral */
   --index-rgb: 217 160 91;
   --video-rgb: 255 115 74;
 
-  --hairline: rgb(76 68 63 / 0.4);      /* table row separators */
+  --hairline: rgb(93 83 77 / 0.45);     /* table row separators */
   --scrim:    rgb(12 11 10 / 0.97);     /* full-screen overlays */
   --scrim-2:  rgb(12 11 10 / 0.94);
   --rail:     rgb(23 21 19 / 0.97);     /* the byte instrument's own ground */
@@ -36,6 +47,13 @@
   --scrollbar: #332c28;
 
   --stage-pad: 34px;
+}
+
+/* The stage gutter is a proportion of a desktop window, not a constant. Kept at
+   34px on a phone it spends 18% of a 375px screen on empty margin, which is the
+   difference between a reference table showing two columns and showing one. */
+@media (max-width: 640px) {
+  :root { --stage-pad: 18px; }
 }
 
 /* The light palette, defined twice on purpose: once for "the OS says light and
@@ -49,10 +67,10 @@
     --ink-2:  #ffffff;
     --ink-3:  #f2ede9;
     --rule:   #ddd2ca;
-    --haze:   #8a7d74;
-    --body:   #4a423c;
-    --bright: #1a1614;
-    --dim:    #a89a90;
+    --haze:   #615850;   /* 6.5:1 */
+    --body:   #4a423c;   /* 9.2:1 */
+    --bright: #1a1614;   /* 16.8:1 */
+    --dim:    #75695f;   /* 5.0:1 */
 
     /* Both accents are darkened for a light ground. The stage values sit at about
        2:1 against white, which is unreadable; these clear 4.5:1 while staying
@@ -77,10 +95,10 @@
   --ink-2:  #ffffff;
   --ink-3:  #f2ede9;
   --rule:   #ddd2ca;
-  --haze:   #8a7d74;
-  --body:   #4a423c;
-  --bright: #1a1614;
-  --dim:    #a89a90;
+  --haze:   #615850;   /* 6.5:1 */
+  --body:   #4a423c;   /* 9.2:1 */
+  --bright: #1a1614;   /* 16.8:1 */
+  --dim:    #75695f;   /* 5.0:1 */
 
   --index:  #9c5f14;
   --video:  #cc3d10;
@@ -169,7 +187,9 @@ body::before {
   border-color: var(--haze);
   background: rgb(var(--index-rgb) / 0.06);
 }
-.btn:disabled, .iconbtn:disabled { opacity: .4; cursor: not-allowed; }
+/* Disabled, not invisible. At .4 over the dark canvas a greyed `prev` landed at
+   about 2:1 — a control you cannot read is not the same as one you cannot press. */
+.btn:disabled, .iconbtn:disabled { opacity: .55; cursor: not-allowed; }
 
 /* The one control on a page that is the thing you came to do. Coral, filled, and
    deliberately rare — two of these next to each other means neither is primary. */
@@ -264,7 +284,7 @@ body::before {
   transition: color .15s, border-color .15s;
 }
 .pill:hover:not(:disabled) { color: var(--bright); border-color: var(--haze); }
-.pill:disabled { opacity: .4; cursor: not-allowed; }
+.pill:disabled { opacity: .55; cursor: not-allowed; }
 
 .inp {
   width: 100%;
@@ -406,6 +426,13 @@ body::before {
 
 /* Tables are how reference pages carry most of their content, so they get the same
    care as the prose: no zebra striping, one hairline per row, numbers legible. */
+/* `display: block; overflow-x: auto` lets a wide reference table scroll, but it
+   does not stop the table's min-content width from propagating up through the
+   article to the page: on a phone the HTTP API page widened the layout viewport
+   to 644px and cut every paragraph off at the right edge. `contain: inline-size`
+   is what actually seals it — the table sizes from its container, never the
+   container from the table — and the horizontal scroll then happens inside the
+   table, where it belongs. */
 .prose table {
   width: 100%;
   border-collapse: collapse;
@@ -413,6 +440,7 @@ body::before {
   margin-top: 1.3em;
   display: block;
   overflow-x: auto;
+  contain: inline-size;
 }
 .prose thead th {
   font-family: var(--font-mono), ui-monospace, monospace;
