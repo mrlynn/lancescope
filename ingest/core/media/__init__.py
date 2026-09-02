@@ -41,3 +41,25 @@ _BY_EXTENSION: dict[str, str] = {
 def kind_for(path: Path | str) -> str | None:
     """The media kind for a path, or None if this tool has no handler for it."""
     return _BY_EXTENSION.get(Path(path).suffix.lower())
+
+
+def handler_for(kind: str):
+    """The handler for a kind, imported now rather than at module load.
+
+    This late import is the whole reason the registry exists. A build with no PDF
+    renderer must report `pdf: unsupported` and keep working, not fail on import —
+    and the tests substitute handlers here so CI needs neither ffmpeg nor Pillow.
+    """
+    if kind == "image":
+        from ingest.core.media.image import ImageHandler
+
+        return ImageHandler()
+    raise LookupError(
+        f"no handler for {kind!r} yet — this build ingests "
+        f"{', '.join(sorted(IMPLEMENTED))}")
+
+
+# Kinds that can actually be turned into rows today, as opposed to kinds this tool
+# can recognise in a directory listing. Discovery knows about all four; the writer
+# only knows about these, and the plan says so rather than discovering it per file.
+IMPLEMENTED = frozenset({"image"})

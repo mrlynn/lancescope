@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ingest.core.binaries import Readiness, preflight
-from ingest.core.media import KINDS
+from ingest.core.media import IMPLEMENTED, KINDS
 from server import settings as cfg
 from server.catalog import AVAILABLE, UNSUPPORTED, Capability
 
@@ -92,7 +92,8 @@ def writes_capability(destination: str | Path | None = None) -> Capability:
 class IngestCapabilities:
     writes: Capability
     media: dict[str, Readiness]
-    embedders: tuple[str, ...]
+    implemented: tuple[str, ...]
+    embedder: dict
     destination_default: str
     note: str
 
@@ -100,7 +101,8 @@ class IngestCapabilities:
         return {
             "writes": self.writes.as_dict(),
             "media": {k: r.as_dict() for k, r in self.media.items()},
-            "embedders": list(self.embedders),
+            "implemented": list(self.implemented),
+            "embedder": self.embedder,
             "destination_default": self.destination_default,
             "note": self.note,
         }
@@ -110,6 +112,12 @@ def ingest_capabilities(destination: str | Path | None = None) -> IngestCapabili
     writes = writes_capability(destination)
     media = preflight(KINDS)
     undecodable = [k for k, r in media.items() if not r.capability.ok]
+
+    # Resolved rather than constructed: this says what *would* run, without loading a
+    # model or spending a request to find out.
+    from ingest.core.embedders.config import resolve
+
+    embedder = resolve(cfg.load().embeddings)
 
     if not writes.ok:
         note = writes.reason
@@ -123,7 +131,8 @@ def ingest_capabilities(destination: str | Path | None = None) -> IngestCapabili
     return IngestCapabilities(
         writes=writes,
         media=media,
-        embedders=(),          # populated once the embedder registry lands
+        implemented=tuple(sorted(IMPLEMENTED)),
+        embedder=embedder.as_dict(),
         destination_default=str(default_destination()),
         note=note,
     )

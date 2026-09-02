@@ -176,12 +176,24 @@ def test_an_extension_registry_that_does_not_know_a_file_says_none():
 
 # ----------------------------------------------------------------- capabilities
 
-def test_capabilities_says_it_cannot_write_yet_rather_than_pretending(settings_file):
+def test_capabilities_distinguishes_what_is_decodable_from_what_is_implemented(
+        settings_file):
+    """Discovery knows four media; the writer knows fewer. Reporting them as one
+    number would promise an audio ingest this build cannot perform."""
     caps = ingest_capabilities()
-    assert caps.writes.ok is False
-    assert "no writer yet" in caps.writes.reason
-    # Present, not hidden: the media report is the useful half and still answers.
     assert set(caps.media) == {"image", "video", "audio", "pdf"}
+    assert set(caps.implemented) <= set(caps.media)
+    assert "image" in caps.implemented
+
+
+def test_capabilities_reports_which_embedder_would_run_without_loading_one(
+        settings_file):
+    """`resolve` is a decision, not an attempt: it must not load a model or spend a
+    request to say what it would do."""
+    caps = ingest_capabilities()
+    assert "backend" in caps.embedder
+    assert "sees_images" in caps.embedder
+    assert caps.embedder["reason"]
 
 
 def test_read_only_mode_says_the_operator_forbade_it_not_that_it_is_broken(

@@ -286,3 +286,115 @@ def api_ingest(settings_file):
     app = FastAPI()
     app.include_router(ingest_routes.router)
     return TestClient(app)
+
+
+@pytest.fixture
+def fake_embedder(monkeypatch):
+    """An embedder with no model behind it.
+
+    Vectors are derived from a sha256 of the input, so they are deterministic and
+    two different pictures are two different points — enough for "did the right row
+    come back" without a gigabyte of weights. `VECTOR_DIM` is shared with the other
+    fixtures so a test can mix them.
+
+    It records every call, and can be told to fail, so the failure paths are testable
+    without arranging for a real endpoint to break.
+    """
+    import hashlib
+
+    from ingest.core.embedders.base import EmbedderError, EmbeddingSpace
+
+    class Fake:
+        def __init__(self) -> None:
+            self.space = EmbeddingSpace("fake", "fake-embed", VECTOR_DIM,
+                                        ("image", "text"), True, "cosine")
+            self.calls: list[tuple[str, int]] = []
+            self.fail_on_call: int | None = None
+            self.fail_with = EmbedderError("the fake embedder was told to fail")
+            self.sees_images = True
+
+        def probe(self) -> EmbeddingSpace:
+            if not self.sees_images:
+                self.space = EmbeddingSpace("fake", "fake-text-only", VECTOR_DIM,
+                                            ("text",), True, "cosine")
+            return self.space
+
+        def _vectors(self, keys) -> np.ndarray:
+            out = np.zeros((len(keys), VECTOR_DIM), dtype=np.float32)
+            for i, k in enumerate(keys):
+                digest = hashlib.sha256(str(k).encode()).digest()
+                raw = np.frombuffer(digest[:VECTOR_DIM], dtype=np.uint8)
+                v = raw.astype(np.float32) - 128.0
+                out[i] = v / (np.linalg.norm(v) or 1.0)
+            return out
+
+        def _record(self, what, n):
+            self.calls.append((what, n))
+            if self.fail_on_call is not None and len(self.calls) >= self.fail_on_call:
+                raise self.fail_with
+
+        def embed_images(self, paths) -> np.ndarray:
+            self._record("images", len(paths))
+            return self._vectors(paths)
+
+        def embed_texts(self, texts) -> np.ndarray:
+            self._record("texts", len(texts))
+            return self._vectors(texts)
+
+    return Fake()
+
+
+@pytest.fixture
+def fake_handlers(monkeypatch):
+    """Handlers that turn bytes into rows without decoding anything.
+
+    This is what keeps Pillow, ffmpeg and a PDF renderer out of CI — and it is the
+    reason `ingest.core.media` resolves handlers through a registry instead of
+    importing decoders at module scope. Preflight is pinned alongside them, since a
+    machine with no decoders would otherwise refuse the kinds these handle.
+    """
+    from ingest.core.binaries import Capability, Readiness
+    from ingest.core.media.base import Extraction, Item
+
+    class FakeHandler:
+        def __init__(self, kind: str, items_per_file: int = 1) -> None:
+            self.kind = kind
+            self.items_per_file = items_per_file
+            self.raise_for: set[str] = set()
+
+        def extract(self, src: Path, work: Path) -> Extraction:
+            if src.name in self.raise_for:
+                raise ValueError("this file was rigged to fail")
+            return Extraction(items=[
+                Item(ordinal=i, text=f"{src.stem} item {i}", text_source="filename",
+                     image_path=src, thumb_jpeg=b"\xff\xd8fake", title=src.stem,
+                     width=320, height=240)
+                for i in range(self.items_per_file)
+            ])
+
+    handlers = {k: FakeHandler(k) for k in ("image", "video", "audio", "pdf")}
+
+    import ingest.core.plan as plan_mod
+    import ingest.core.run as run_mod
+
+    monkeypatch.setattr(run_mod, "handler_for", lambda kind: handlers[kind])
+    monkeypatch.setattr(run_mod, "IMPLEMENTED", frozenset(handlers))
+    monkeypatch.setattr(plan_mod, "preflight",
+                        lambda kinds: {k: Readiness(k, Capability("available"))
+                                       for k in kinds})
+    return handlers
+
+
+@pytest.fixture
+def dest_root(tmp_path) -> Path:
+    """An empty, writable directory for a table to be created in."""
+    d = tmp_path / "db"
+    d.mkdir()
+    return d
+
+
+@pytest.fixture
+def work_dir(tmp_path) -> Path:
+    d = tmp_path / "work"
+    d.mkdir()
+    return d

@@ -18,7 +18,8 @@ def test_the_capabilities_route_answers_before_anything_is_configured(api_ingest
     assert r.status_code == 200
     body = r.json()
     assert set(body["media"]) == {"image", "video", "audio", "pdf"}
-    assert body["writes"]["available"] is False
+    assert "image" in body["implemented"]
+    assert body["embedder"]["reason"]
     assert body["destination_default"]
 
 

@@ -33,6 +33,8 @@ PROVIDERS = ("auto", "anthropic", "ollama", "openai-compat", "none")
 
 DEFAULT_OLLAMA_HOST = "http://localhost:11434"
 
+EMBED_BACKENDS = ("auto", "multimodal", "openai-compat", "siglip-local", "ollama", "none")
+
 
 def settings_path() -> Path:
     """Where the settings file lives. `LANCESCOPE_CONFIG` overrides."""
@@ -87,11 +89,34 @@ class Intelligence:
 
 
 @dataclass
+class Embeddings:
+    """How new tables get their vectors. Consumed by `ingest/core/embedders/`.
+
+    Separate from `Intelligence` on purpose. They share a shape and nothing else: a
+    chat model and an embedding model are different endpoints, with different keys
+    and different failure modes, and folding them together is how a chat model's id
+    ends up recorded as the space a vector column lives in — a claim that outlives
+    the settings file it came from, because it is written into the table.
+    """
+
+    backend: str = "auto"
+    base_url: str | None = None
+    model: str | None = None
+    api_key: str | None = None          # only if the operator chose to store it
+    dim: int | None = None
+    batch_size: int = 32
+
+    def as_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
 class Settings:
     version: int = SCHEMA_VERSION
     connections: list[Connection] = field(default_factory=list)
     active_id: str | None = None
     intelligence: Intelligence = field(default_factory=Intelligence)
+    embeddings: Embeddings = field(default_factory=Embeddings)
 
     # ------------------------------------------------------------- serialisation
 
@@ -114,11 +139,18 @@ class Settings:
         intel = Intelligence(**{k: v for k, v in intel_raw.items() if k in known})
         if intel.provider not in PROVIDERS:
             intel.provider = "auto"
+        embed_raw = raw.get("embeddings") or {}
+        embed_known = {f for f in Embeddings.__dataclass_fields__}
+        embeddings = Embeddings(**{k: v for k, v in embed_raw.items()
+                                   if k in embed_known})
+        if embeddings.backend not in EMBED_BACKENDS:
+            embeddings.backend = "auto"
+
         active = raw.get("active_id")
         if active is not None and not any(c.id == active for c in conns):
             active = None
         return cls(version=SCHEMA_VERSION, connections=conns, active_id=active,
-                   intelligence=intel)
+                   intelligence=intel, embeddings=embeddings)
 
     def as_dict(self) -> dict:
         return {
@@ -126,6 +158,7 @@ class Settings:
             "connections": [c.as_dict() for c in self.connections],
             "active_id": self.active_id,
             "intelligence": self.intelligence.as_dict(),
+            "embeddings": self.embeddings.as_dict(),
         }
 
 
@@ -299,6 +332,21 @@ def api_key_for(intel: Intelligence, provider: str) -> tuple[str | None, str | N
         return v, "env"
     if intel.api_key and (intel.provider or "auto") in (provider, "auto"):
         return intel.api_key, "settings"
+    return None, None
+
+
+def embed_api_key_for(e: Embeddings) -> tuple[str | None, str | None]:
+    """The embedding key to use, and where it came from. The environment wins.
+
+    Deliberately not a branch inside `api_key_for`: that function scopes a stored key
+    against `Intelligence.provider`, and an embedding key has to be scoped against
+    `Embeddings.backend`. Sharing the logic would mean one of the two scopings is
+    wrong, which is exactly the bug `api_key_for` was written to fix.
+    """
+    if v := os.environ.get("LANCESCOPE_EMBED_API_KEY"):
+        return v, "env"
+    if e.api_key:
+        return e.api_key, "settings"
     return None, None
 
 
