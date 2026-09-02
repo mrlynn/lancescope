@@ -18,7 +18,7 @@ import pathlib
 
 from PIL import Image, ImageDraw, ImageFont
 
-W, H = 660, 400          # must match bundle.macOS.dmg.windowSize
+W, H = 660, 348          # must match bundle.macOS.dmg.windowSize
 SS = 3                   # supersample factor
 
 INK = (23, 21, 19)       # --ink
@@ -29,8 +29,8 @@ CORAL = (255, 115, 74)   # --video, LanceDB coral
 
 # Icon centres, in window points. These MUST match appPosition and
 # applicationFolderPosition in tauri.conf.json or the arrow will point at nothing.
-APP = (170, 205)
-APPLICATIONS = (490, 205)
+APP = (170, 188)
+APPLICATIONS = (490, 188)
 
 FONTS = ["/System/Library/Fonts/SFNS.ttf", "/System/Library/Fonts/Helvetica.ttc"]
 

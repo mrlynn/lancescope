@@ -36,15 +36,15 @@
         "background": "dmg-background.png",
         "windowSize": {
           "width": 660,
-          "height": 400
+          "height": 348
         },
         "appPosition": {
           "x": 170,
-          "y": 205
+          "y": 188
         },
         "applicationFolderPosition": {
           "x": 490,
-          "y": 205
+          "y": 188
         }
       }
     }
