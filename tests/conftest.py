@@ -206,3 +206,32 @@ def api_intel(catalog):
     catalog_routes.bind(catalog)
     app.include_router(intel_routes.router)
     return TestClient(app)
+
+
+@pytest.fixture
+def frozen_corpus(corpus, tmp_path) -> Path:
+    """A private copy of the corpus, for tests that assert nothing on disk moved.
+
+    A copy rather than the session fixture itself, because the claim being tested is
+    about a whole read surface run end to end, and a shared root would make the
+    result depend on what ran before it.
+    """
+    root = tmp_path / "frozen"
+    shutil.copytree(corpus, root)
+    return root
+
+
+def snapshot(root: Path) -> dict[str, tuple[int, int]]:
+    """Every file under `root` by size and modification time.
+
+    Size alone would miss an in-place rewrite of the same length, and hashing 40 MB
+    of fixtures on every assertion is a cost with no reader. `mtime_ns` catches the
+    rewrite; the manifests, which are the files that would actually have to change
+    for a version to appear, are hashed as well by the caller.
+    """
+    out: dict[str, tuple[int, int]] = {}
+    for p in sorted(root.rglob("*")):
+        if p.is_file():
+            st = p.stat()
+            out[str(p.relative_to(root))] = (st.st_size, st.st_mtime_ns)
+    return out
