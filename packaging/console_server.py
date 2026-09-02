@@ -45,6 +45,23 @@ def bundle_dir() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
+def ui_dir() -> Path | None:
+    """The exported interface, wherever this build keeps it.
+
+    Frozen, PyInstaller lays `web/out` down as `ui` beside the executable — see
+    `datas` in lancescope.spec. Unfrozen, that directory does not exist and the
+    export is still sitting where Next.js wrote it, so this looks there too.
+
+    Worth the four lines: running the packaged arrangement locally otherwise meant
+    knowing to symlink `web/out` to a directory named `ui` that appears nowhere in
+    the repository, which is a piece of folklore rather than a step.
+    """
+    for candidate in (bundle_dir() / "ui", bundle_dir() / "web" / "out"):
+        if candidate.is_dir():
+            return candidate
+    return None
+
+
 def watch_parent(interval: float = 2.0) -> None:
     """Exit when whoever started us is gone.
 
@@ -85,9 +102,9 @@ def main() -> int:
     sys.stdout.reconfigure(line_buffering=True)
 
     # The interface, exported as static files at build time and carried inside the
-    # bundle. Absent in a development run, which is fine: there the browser talks to
-    # the Next.js dev server instead.
-    ui = bundle_dir() / "ui"
+    # bundle. Absent until something has exported it, which is fine: until then the
+    # browser talks to the Next.js dev server instead.
+    ui = ui_dir()
 
     from fastapi import FastAPI
 
@@ -114,9 +131,12 @@ def main() -> int:
         api.include_router(router)
     app.mount("/api", api)
 
-    if ui.is_dir():
+    if ui is not None:
         # Mounted last, at the root, so every API route above still wins.
         app.mount("/", ExportedSite(directory=str(ui), html=True), name="ui")
+    else:
+        print("no exported interface found — API only. Build one with `make ui`.",
+              flush=True)
 
     port = int(os.environ.get("LANCESCOPE_PORT") or free_port())
 

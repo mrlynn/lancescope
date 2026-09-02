@@ -354,6 +354,77 @@ export type QueryResult = {
 export const getQueryCapabilities = (n: string) =>
   get<QueryCapabilities>(`/tables/${n}/query/capabilities`);
 
+/** One column, as something to finish typing rather than as something to display.
+ *  Shapes mirror `Column` in server/query.py. */
+export type CompletionColumn = {
+  name: string;
+  type: string;
+  /** string | number | boolean | temporal | vector | blob | other. Decides which
+   *  operators are offered and whether a value needs quoting. */
+  kind: string;
+  filterable: boolean;
+  operators: string[];
+  /** Already rendered as SQL literals, quotes and all, ready to insert. Empty for
+   *  a column that is not a facet — which is not the same as one with no values. */
+  values: string[];
+  /** Whether `values` is the whole column or what a sample found. The dropdown says
+   *  which, because "these are the values" is a bigger promise than we can keep on
+   *  a table too large to read. */
+  values_complete: boolean;
+  values_scanned: number;
+};
+
+export type QueryCompletions = {
+  name: string;
+  columns: CompletionColumn[];
+  rows: number;
+  values_included: boolean;
+  read_bytes: number;
+  read_iops: number;
+};
+
+export type FilterValidation = {
+  valid: boolean;
+  error: string | null;
+  filter: string;
+  matched_rows: number | null;
+  total_rows: number | null;
+  read_bytes: number;
+  read_iops: number;
+};
+
+/** Read once when the workspace opens, so finishing a predicate is local rather
+ *  than a request per keystroke. */
+export const getQueryCompletions = (n: string, values = true) =>
+  get<QueryCompletions>(`/tables/${n}/query/completions?values=${values}`);
+
+/** Where the bytes of one heavy cell live.
+ *
+ *  A URL rather than a fetch, because the caller decides what to do with it — read
+ *  it to get at `X-Read-Bytes`, or hand it straight to a `<video>` that will make
+ *  its own range requests as somebody scrubs.
+ *
+ *  Nothing here reads heavy columns on its own. Asking for this URL is somebody
+ *  deciding to spend the bytes, and the response says how many it took.
+ */
+export function heavyCellUrl(table: string, column: string, row: RowAddress): string {
+  const q = new URLSearchParams({ column });
+  if ("rowid" in row) {
+    q.set("rowid", String(row.rowid));
+  } else {
+    q.set("key_column", row.keyColumn);
+    q.set("key", String(row.key));
+  }
+  return `/api/catalog/tables/${table}/blob?${q}`;
+}
+
+/** How to name one row. A row id is exact and every row browse and query result
+ *  now carries one; a key lookup is for a value someone is holding, and for a URL
+ *  that has to survive being written down. */
+export type RowAddress =
+  | { rowid: number }
+  | { keyColumn: string; key: string | number };
+
 async function post<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
   const res = await fetch(`/api/catalog${path}`, {
     method: "POST",
@@ -373,6 +444,11 @@ async function post<T>(path: string, body: unknown, signal?: AbortSignal): Promi
   }
   return res.json();
 }
+
+/** Does this predicate parse, and how many rows does it match. Asked while someone
+ *  is still typing, so an invalid filter is an ordinary answer rather than a throw. */
+export const validateFilter = (n: string, filter: string, signal?: AbortSignal) =>
+  post<FilterValidation>(`/tables/${n}/query/validate`, { filter }, signal);
 
 export const runQuery = (n: string, spec: QuerySpec, signal?: AbortSignal) =>
   post<QueryResult>(`/tables/${n}/query`, spec, signal);

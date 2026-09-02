@@ -13,12 +13,14 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Icon from "@/app/components/Icon";
-import { Cost, Empty, Eyebrow, Td, Th } from "@/app/components/console/atoms";
-import { CellView } from "@/app/components/console/tabs";
+import { Cost, Empty, Eyebrow } from "@/app/components/console/atoms";
+import { DataGrid } from "@/app/components/console/DataGrid";
+import { FilterInput } from "@/app/components/console/FilterInput";
 import {
   ApiError,
+  type CompletionColumn, type FilterValidation,
   type QueryCapabilities, type QueryCapability, type QueryResult, type QuerySpec,
-  getQueryCapabilities, runQuery,
+  getQueryCapabilities, getQueryCompletions, runQuery, validateFilter,
 } from "@/app/lib/catalog";
 import { fmtBytes } from "@/app/lib/api";
 import { download, toCsv, toJson } from "@/app/lib/export";
@@ -37,6 +39,21 @@ const MODE_LABEL: Record<string, string> = {
 };
 
 const MODES = ["scan", "fts", "vector", "hybrid"] as const;
+
+/** A placeholder written against this table's own columns.
+ *
+ *  It used to read `track = 'Go' and year = 2025`, which is the demo corpus. On any
+ *  other table that is a worked example guaranteed to fail, offered at the exact
+ *  moment somebody is trying to learn the syntax.
+ */
+function filterExample(columns: CompletionColumn[]): string {
+  const faceted = columns.find((c) => c.kind === "string" && c.values.length > 0);
+  if (faceted) return `${faceted.name} = ${faceted.values[0]}`;
+  const num = columns.find((c) => c.kind === "number");
+  if (num) return `${num.name} > 0`;
+  const any = columns.find((c) => c.filterable);
+  return any ? `${any.name} IS NOT NULL` : "a predicate over this table's columns";
+}
 
 export function QueryTab({ table, root }: { table: string; root: string | null }) {
   const [caps, setCaps] = useState<QueryCapabilities | null>(null);
@@ -66,6 +83,9 @@ export function QueryTab({ table, root }: { table: string; root: string | null }
   const [describe, setDescribe] = useState("");
   const describeRef = useRef<HTMLInputElement>(null);
   const [textSearch, setTextSearch] = useState<TextSearchCapability | null>(null);
+  const [columns, setColumns] = useState<CompletionColumn[]>([]);
+  const [check, setCheck] = useState<FilterValidation | null>(null);
+  const [checking, setChecking] = useState(false);
   const [showPlan, setShowPlan] = useState(false);
   const [showRepro, setShowRepro] = useState(false);
 
@@ -73,6 +93,11 @@ export function QueryTab({ table, root }: { table: string; root: string | null }
   // (`key={table}`) rather than resetting six pieces of state by hand — which is
   // also what stops a result from one table being shown under another's name.
   useEffect(() => {
+    // Once per table, not once per keystroke: the columns and their facets are the
+    // same for every predicate anyone types against it.
+    getQueryCompletions(table)
+      .then((c) => setColumns(c.columns))
+      .catch(() => setColumns([]));
     getQueryCapabilities(table)
       .then((c) => {
         setCaps(c);
@@ -97,6 +122,25 @@ export function QueryTab({ table, root }: { table: string; root: string | null }
       })
       .catch(() => setTextSearch(null));
   }, [table]);
+
+  // Whether the predicate parses, and what it matches, before anything is run.
+  //
+  // Debounced rather than per keystroke, and aborted when the text moves on, so a
+  // slow count against a large table cannot land after the filter it described has
+  // been edited — the stale answer being the one failure that would make this worse
+  // than saying nothing.
+  useEffect(() => {
+    const text = filter.trim();
+    if (!text) { setCheck(null); setChecking(false); return; }
+    const controller = new AbortController();
+    setChecking(true);
+    const t = setTimeout(() => {
+      validateFilter(table, text, controller.signal)
+        .then((v) => { setCheck(v); setChecking(false); })
+        .catch(() => { if (!controller.signal.aborted) { setCheck(null); setChecking(false); } });
+    }, 400);
+    return () => { clearTimeout(t); controller.abort(); setChecking(false); };
+  }, [table, filter]);
 
   const capFor = (m: string): QueryCapability | undefined =>
     caps?.capabilities.find((c) => c.mode === m);
@@ -260,10 +304,13 @@ export function QueryTab({ table, root }: { table: string; root: string | null }
         )}
 
         <Field label={mode === "vector" ? "filter (applied before search)" : "filter"} grow>
-          <input className="qin mono" value={filter}
-                 onChange={(e) => setFilter(e.target.value)}
-                 onKeyDown={(e) => e.key === "Enter" && run()}
-                 placeholder="track = 'Go' and year = 2025" />
+          <FilterInput
+            value={filter}
+            onChange={setFilter}
+            onEnter={run}
+            columns={columns}
+            placeholder={filterExample(columns)}
+          />
         </Field>
 
         {mode === "scan" || mode === "fts" ? (
@@ -286,6 +333,33 @@ export function QueryTab({ table, root }: { table: string; root: string | null }
           </button>
         )}
       </div>
+
+      {filter.trim() && (
+        <div className="mono text-[11px] mb-4 flex items-baseline gap-2 flex-wrap">
+          {checking && !check && <span className="text-[var(--dim)]">checking…</span>}
+          {check?.valid && check.matched_rows !== null && (
+            <>
+              <span style={{ color: check.matched_rows === 0 ? "var(--video)" : "var(--index)" }}>
+                matches {check.matched_rows.toLocaleString()} of{" "}
+                {(check.total_rows ?? 0).toLocaleString()} rows
+              </span>
+              <span className="text-[var(--dim)]">
+                · counted for {fmtBytes(check.read_bytes).value}{" "}
+                {fmtBytes(check.read_bytes).unit}
+              </span>
+              {check.matched_rows === 0 && (
+                <span className="text-[var(--haze)]">
+                  — the filter is valid, so this is what the table says, not a mistake
+                  in the predicate
+                </span>
+              )}
+            </>
+          )}
+          {check && !check.valid && (
+            <span style={{ color: "var(--video)" }}>{check.error}</span>
+          )}
+        </div>
+      )}
 
       {(mode === "vector" || mode === "hybrid") && (
         <label className="flex items-center gap-2 mb-4 text-[12px] text-[var(--haze)]">
@@ -395,26 +469,20 @@ export function QueryTab({ table, root }: { table: string; root: string | null }
           {result.returned === 0 ? (
             <Empty>No rows matched. The query ran; the answer is empty.</Empty>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr>{result.columns.map((c) => <Th key={c}>{c}</Th>)}</tr>
-                </thead>
-                <tbody>
-                  {result.rows.map((r, i) => (
-                    <tr key={i} style={{ borderBottom: "1px solid var(--hairline)" }}>
-                      {result.columns.map((c) => (
-                        <Td key={c} className="max-w-[280px] truncate">
-                          {typeof r[c] === "number" && (c === "_distance" || c === "_score")
-                            ? (r[c] as number).toFixed(4)
-                            : <CellView v={r[c]} />}
-                        </Td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <DataGrid
+              key={`${table}:${result.columns.join(",")}`}
+              storageKey={`query.${table}`}
+              table={table}
+              columns={result.columns}
+              rows={result.rows}
+              totalRows={result.total_rows}
+              omitted={result.omitted_columns}
+              origin="result"
+              renderCell={(c, v) =>
+                typeof v === "number" && (c === "_distance" || c === "_score")
+                  ? v.toFixed(4)
+                  : null}
+            />
           )}
 
           {result.omitted_columns.length > 0 && (

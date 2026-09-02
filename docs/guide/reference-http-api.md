@@ -22,7 +22,7 @@ Read-only. Nothing here writes to a dataset, and nothing materialises a blob col
 | --- | --- | --- |
 | `GET` | `/catalog/tables` | Every table under the root. |
 | `GET` | `/catalog/tables/{name:path}` | One table in full: schema, stats, and the real on-disk byte split. |
-| `GET` | `/catalog/tables/{name:path}/blob` | Stream bytes out of a Blob V2 column, honouring HTTP Range. |
+| `GET` | `/catalog/tables/{name:path}/blob` | Stream the bytes of one heavy cell, honouring HTTP Range. |
 | `GET` | `/catalog/tables/{name:path}/compare` | Two versions of one table, side by side and pinned. |
 | `POST` | `/catalog/tables/{name:path}/compare/query` | The same query against both versions — the before and after of an operation. |
 | `GET` | `/catalog/tables/{name:path}/findings` | What is worth saying about this table, derived rather than generated. |
@@ -30,7 +30,9 @@ Read-only. Nothing here writes to a dataset, and nothing materialises a blob col
 | `GET` | `/catalog/tables/{name:path}/indices` | What is indexed on this table — and, more usefully, what isn't. |
 | `POST` | `/catalog/tables/{name:path}/query` | Run it, and report what it cost and which path it took. |
 | `GET` | `/catalog/tables/{name:path}/query/capabilities` | What this table can be asked, and why not where it cannot. |
+| `GET` | `/catalog/tables/{name:path}/query/completions` | The columns, the operators each one accepts, and what is in the short ones. |
 | `POST` | `/catalog/tables/{name:path}/query/explain` | The plan, without running the query. |
+| `POST` | `/catalog/tables/{name:path}/query/validate` | Does this predicate parse, and how many rows does it match. |
 | `GET` | `/catalog/tables/{name:path}/rows` | Browse rows, without ever materialising a blob. |
 | `GET` | `/catalog/tables/{name:path}/versions` | The table's history, newest first, with what each version changed. |
 

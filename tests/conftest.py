@@ -118,6 +118,26 @@ def _blobs(root: Path) -> None:
     lance.write_dataset(table, str(root / "blobs.lance"), data_storage_version="2.2")
 
 
+def _thumbnails(root: Path) -> None:
+    """A table whose pictures live in an ordinary `binary` column.
+
+    Not every heavy column is a Blob V2 side file. A table somebody builds from
+    their own images usually has a thumbnail column that is plain `binary`, with
+    nothing anywhere declaring what encoding is inside it — which is why the console
+    has to recognise the bytes rather than trust a column name or a `mime` field
+    that is not there.
+    """
+    # Real magic bytes, so sniffing has something true to find. The rest is padding:
+    # what matters is the first few bytes and that the column is heavy.
+    jpeg = b"\xff\xd8\xff\xe0" + b"\x00" * 512
+    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 512
+    lance.write_dataset(pa.table({
+        "item_id": ["a", "b", "c"],
+        "kind": ["image", "image", "other"],
+        "thumb": [jpeg, png, None],
+    }), str(root / "thumbnails.lance"))
+
+
 def _versioned(root: Path) -> None:
     """Three versions: a write, an append, and an index build.
 
@@ -171,6 +191,7 @@ def corpus(tmp_path_factory) -> Path:
     _vectors(root, "indexed", indexed=True)
     _searchable(root)
     _blobs(root)
+    _thumbnails(root)
     _versioned(root)
     _temporal(root)
     _decoy(root)

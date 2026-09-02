@@ -3,9 +3,11 @@
 import { useState } from "react";
 import Icon from "@/app/components/Icon";
 import { Bytes, Caveat, Cost, Empty, Eyebrow, Td, Th, fmtWhen } from "@/app/components/console/atoms";
+import { DataGrid } from "@/app/components/console/DataGrid";
 import { fmtBytes } from "@/app/lib/api";
+import { download, toCsv, toJson } from "@/app/lib/export";
 import type {
-  Cell, Fragments, Indices, Rows, TableDetail, Versions,
+  Fragments, Indices, Rows, TableDetail, Versions,
 } from "@/app/lib/catalog";
 import {
   type Capabilities, type FilterDraft, askForFilter,
@@ -290,31 +292,6 @@ export function FragmentsTab({ d }: { d: Fragments }) {
 
 // --------------------------------------------------------------------- rows
 
-export function CellView({ v }: { v: Cell }) {
-  if (v === null) return <span className="text-[var(--dim)]">null</span>;
-  if (typeof v === "object") {
-    if ("blob" in v) {
-      const b = fmtBytes(v.size_bytes ?? 0);
-      return (
-        <span style={{ color: "var(--video)" }} title="described from its Blob V2 descriptor — not read">
-          blob {b.value} {b.unit}
-        </span>
-      );
-    }
-    if ("vector_dim" in v) {
-      return (
-        <span className="text-[var(--haze)]" title={v.head.join(", ")}>
-          [{v.head.slice(0, 3).map((n) => n.toFixed(3)).join(", ")}, …] ×{v.vector_dim}
-        </span>
-      );
-    }
-    const b = fmtBytes(v.bytes);
-    return <span style={{ color: "var(--index)" }}>{b.value} {b.unit}</span>;
-  }
-  if (typeof v === "number") return <>{Number.isInteger(v) ? v.toLocaleString() : v.toFixed(3)}</>;
-  return <>{String(v)}</>;
-}
-
 /** Ask in English, get a predicate to read before you run it.
  *
  *  Three things make this a draft rather than an answer. It lands in the filter box
@@ -448,10 +425,11 @@ function exampleFilter(d: Rows | null): string {
 }
 
 export function RowsTab({
-  d, onPage, onFilter, onExpand, expanded, error, table, ai,
+  d, onPage, onPageSize, onFilter, onExpand, expanded, error, table, ai,
 }: {
   d: Rows | null;
   onPage: (offset: number) => void;
+  onPageSize: (limit: number) => void;
   onFilter: (f: string) => void;
   onExpand: (col: string) => void;
   expanded: string[];
@@ -532,34 +510,51 @@ export function RowsTab({
             </div>
           )}
 
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr>{d.columns.map((c) => <Th key={c}>{c}</Th>)}</tr>
-              </thead>
-              <tbody>
-                {d.rows.map((r, i) => (
-                  <tr key={i} style={{ borderBottom: "1px solid var(--hairline)" }}>
-                    {d.columns.map((c) => (
-                      <Td key={c} className="max-w-[280px] truncate">
-                        <CellView v={r[c]} />
-                      </Td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          {d.returned === 0 ? (
+            <Empty>No rows here.</Empty>
+          ) : (
+            <DataGrid
+              // Widths and hidden columns are remembered per table, and a filter
+              // does not change what the columns are — so it is not part of the key.
+              key={`${table}:${d.columns.join(",")}`}
+              storageKey={table ?? undefined}
+              table={table ?? undefined}
+              columns={d.columns}
+              rows={d.rows}
+              startIndex={d.offset}
+              totalRows={d.total_rows}
+              omitted={d.omitted_columns}
+            />
+          )}
 
-          {d.returned === 0 && <Empty>No rows here.</Empty>}
-
-          <div className="flex items-center justify-between mt-5">
+          <div className="flex flex-wrap items-center gap-3 mt-5">
             <span className="mono text-[11px] text-[var(--haze)]">
               {d.total_rows === 0
                 ? "0 rows"
-                : `${d.offset + 1}–${d.offset + d.returned} of ${d.total_rows.toLocaleString()}`}
+                : `${(d.offset + 1).toLocaleString()}–${(d.offset + d.returned).toLocaleString()} of ${d.total_rows.toLocaleString()}`}
             </span>
-            <div className="flex gap-2">
+
+            {/* How many rows a page read is, stated as the read it is. Twenty-five
+                at a time is a defensible default and a poor way to look for
+                something; four hundred is the same read, four hundred rows wide. */}
+            <label className="flex items-center gap-1.5 mono text-[11px] text-[var(--haze)]
+                              whitespace-nowrap">
+              <span>rows per read</span>
+              <select
+                className="qin !h-[26px] !py-0 !px-1.5 !text-[11px] w-[68px]"
+                value={String(d.limit)}
+                onChange={(e) => onPageSize(Number(e.target.value))}
+              >
+                {[25, 50, 100, 250, 500].map((n) => (
+                  <option key={n} value={n}>{n}</option>
+                ))}
+              </select>
+            </label>
+
+            <div className="flex gap-2 ml-auto">
+              <PageBtn disabled={d.offset === 0} onClick={() => onPage(0)}>
+                first
+              </PageBtn>
               <PageBtn
                 disabled={d.offset === 0}
                 onClick={() => onPage(Math.max(0, d.offset - d.limit))}
@@ -574,7 +569,33 @@ export function RowsTab({
                 next
                 <Icon name="chevronRight" size={13} />
               </PageBtn>
+              <PageBtn
+                disabled={d.offset + d.returned >= d.total_rows}
+                onClick={() =>
+                  onPage(Math.max(0, (Math.ceil(d.total_rows / d.limit) - 1) * d.limit))}
+              >
+                last
+              </PageBtn>
             </div>
+          </div>
+
+          {/* Taking the page with you, on the same terms as a query result: what
+              leaves is what was read, and the summaries stay summaries. */}
+          <div className="flex flex-wrap items-center gap-2 mt-4">
+            <span className="eyebrow">this page</span>
+            <button className="btn mono !h-[26px] !px-2.5 text-[10px] tracking-[0.14em] uppercase"
+                    onClick={() => download(`${table}-rows-${d.offset}.csv`,
+                                            toCsv(d.columns, d.rows), "text/csv")}>
+              <Icon name="external" size={12} />csv
+            </button>
+            <button className="btn mono !h-[26px] !px-2.5 text-[10px] tracking-[0.14em] uppercase"
+                    onClick={() => download(`${table}-rows-${d.offset}.json`,
+                                            toJson(d.columns, d.rows), "application/json")}>
+              <Icon name="external" size={12} />json
+            </button>
+            <span className="mono text-[10px] text-[var(--haze)]">
+              the {d.returned} rows on screen — heavy columns were never read
+            </span>
           </div>
         </>
       )}

@@ -145,6 +145,8 @@ MUTATING_ROUTES: dict[tuple[str, str], tuple[bool, str]] = {
         (READS, "a read with a body too big for a query string"),
     ("POST", "/catalog/tables/{name:path}/query/explain"):
         (READS, "plans a read without running it"),
+    ("POST", "/catalog/tables/{name:path}/query/validate"):
+        (READS, "counts what a predicate matches; writes nothing"),
     ("POST", "/catalog/tables/{name:path}/compare/query"): (READS, "a read across two versions"),
     ("POST", "/search"): (READS, "the demo's search, a read with a body"),
     ("POST", "/meter/reset"): (READS, "zeroes an in-memory counter"),
