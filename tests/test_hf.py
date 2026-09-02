@@ -176,3 +176,20 @@ def test_a_local_root_still_joins_through_path(corpus):
     cat = Catalog(corpus)
     assert cat.uri_for("moments").endswith("moments.lance")
     assert "://" not in cat.uri_for("moments")
+
+
+def test_a_remote_root_with_no_demo_corpus_does_not_take_the_server_down(monkeypatch):
+    """Pointing the console at any remote root used to kill it at startup.
+
+    `demo.load` promised to return False rather than take the process down, but it
+    caught only `FileNotFoundError`; a missing remote table raises `ValueError` from
+    deep inside Lance, so the exception escaped the lifespan handler and the console
+    never came up at all — over a demo it was never going to run.
+    """
+    from server.routes import demo
+
+    class Exploding:
+        def open(self, *a, **kw):
+            raise ValueError("Dataset at path moments.lance was not found")
+
+    assert demo.load(Exploding()) is False

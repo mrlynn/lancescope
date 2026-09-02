@@ -75,9 +75,27 @@ def parse(uri: str) -> HfRoot | None:
     return HfRoot(repo=f"{parts[0]}/{parts[1]}", path="/".join(parts[2:]))
 
 
+def _headers() -> dict[str, str]:
+    """A bearer token when one is configured, and nothing otherwise.
+
+    Public datasets need none, which is why this is optional rather than required.
+    A token buys two things: gated and private repositories, and a rate limit that
+    an unauthenticated client shares with everyone else on its address.
+    """
+    from server import credentials
+
+    headers = {"User-Agent": "lancescope"}
+    token, _ = credentials.resolve("HF_TOKEN")
+    if not token:
+        token, _ = credentials.resolve("HUGGING_FACE_HUB_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+
 def _tree(repo: str, path: str) -> list[dict]:
     url = API.format(repo=repo, path=path)
-    req = urllib.request.Request(url, headers={"User-Agent": "lancescope"})
+    req = urllib.request.Request(url, headers=_headers())
     try:
         with urllib.request.urlopen(req, timeout=TIMEOUT_S) as r:
             return json.loads(r.read().decode("utf-8"))
@@ -88,9 +106,16 @@ def _tree(repo: str, path: str) -> list[dict]:
             # The Hub answers 401 for a private repository *and* for one that does
             # not exist, deliberately, so as not to leak which. Saying "private"
             # here would be a guess, and the likelier cause is a typo.
+            from server import credentials
+
+            _, source = credentials.resolve("HF_TOKEN")
+            hint = (f"A token from {source} was sent, so this account cannot see it."
+                    if source else
+                    "No token was sent — set HF_TOKEN, or add it to .cred, if this "
+                    "repository is private.")
             raise HfUnavailable(
                 f"the Hub refused this repository ({e.code}) — it is private, or "
-                f"there is no such dataset. Public datasets need no token.") from e
+                f"there is no such dataset. {hint}") from e
         raise HfUnavailable(f"the Hub answered {e.code} for {repo}") from e
     except urllib.error.URLError as e:
         raise HfUnavailable(f"could not reach huggingface.co: {e.reason}") from e

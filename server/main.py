@@ -23,6 +23,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "ingest"))
 
+from server import credentials
 from server import settings as cfg
 from server.catalog import Catalog
 from server.routes import catalog as catalog_routes
@@ -31,12 +32,20 @@ from server.routes import ingest as ingest_routes
 from server.routes import intel as intel_routes
 from server.routes import settings as settings_routes
 
+# Before the catalog resolves: Lance reads `HF_TOKEN` from the environment when it
+# opens an `hf://` dataset, so a token that only exists in `.cred` has to be there by
+# the time the first table is opened.
+_ARMED = credentials.arm()
+
 ROOT = cfg.resolve_root(cfg.load())
 CATALOG = Catalog(ROOT.uri or ROOT.root or Path())
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    if _ARMED:
+        # Names only. A startup log is the last place a token should appear.
+        print(f"credentials: {', '.join(_ARMED)} loaded from {credentials.cred_path()}")
     catalog_routes.bind(CATALOG)
     settings_routes.bind(CATALOG)
     ingest_routes.bind(CATALOG)
