@@ -561,28 +561,30 @@ Seven mechanisms, ordered by how hard they are to route around.
    that can create tables on someone's disk is a different product with a different
    consent story.
 
-### Can the packaged desktop app ingest? Not as it stands — and that is a decoder problem, not a policy one.
+### Can the packaged desktop app ingest? Yes — measured, built, and run.
 
-`packaging/lancescope.spec` excludes `torch, open_clip, embed, av, yt_dlp,
-transformers, PIL`. Note `PIL` — the frozen build cannot decode a JPEG. So it can
-create a Lance table (pylance is there) and cannot read a single input file.
+It could not, and the reason was one line: `packaging/lancescope.spec` excluded
+`PIL`, so a frozen build could create a Lance table and could not decode a JPEG to
+put in one.
 
-The honest UI: the entry point is **present, not hidden**.
-`GET /ingest/capabilities` returns `writes: available` with every `media` entry
-`unsupported` and the reason, and the New-database screen renders one paragraph plus
-the remedy — run from a checkout (`make ingest-media SRC=… NAME=…`), then open the
-result here as a connection. That is the posture `capabilities_for()` already takes
-toward a remote root: *"connected, and this cannot be browsed yet"*, not *"nothing here"*.
+The numbers settle it. pillow 14.1 MB, pypdfium2 8.0 MB and pypdf 3.9 MB come to
+**26 MB** — against the **493 MB** of torch this dependency group exists to leave
+out, and the **127 MB** of pyarrow it already ships. That is not the trade the group's
+docstring refuses; it is a rounding error against one dependency already in the
+bundle, and it is the difference between a desktop app that creates databases and
+one that only describes them.
 
-The upgrade is small and worth naming with numbers, because **the API-first embedder
-means torch is still not needed**: adding `pillow` + `pypdfium2` + `pypdf` to the
-`console` group and dropping them from the spec `excludes` is tens of megabytes, not
-the two gigabytes that group's docstring argues against — and it buys images and PDF
-in the desktop app. `av`/ffmpeg for video and audio is a separate licensing and size
-decision. This is why `media` is a `dict[str, Capability]`: a build with pillow but
-not av reports images available and video unsupported, rather than failing at file 3.
+Built and run, not assumed: the frozen server ingests 8 images and 5 PDF pages into
+a real table with 768-dimensional vectors, and there is no torch anywhere in the
+bundle. The embedder is Ollama over HTTP — the Phase 0 finding doing exactly the job
+it was found for.
 
----
+**ffmpeg turns out not to be a packaging question at all.** It is invoked as a
+subprocess, so it is a PATH dependency rather than a bundled one: the packaged app
+reports video and audio as available wherever the user has ffmpeg, and declines them
+where they do not. Bundling it would be an order of magnitude larger and carries a
+licensing decision nobody has made — and now nobody has to, because per-medium
+capability reporting makes a partial answer a legitimate one.
 
 ## UI
 

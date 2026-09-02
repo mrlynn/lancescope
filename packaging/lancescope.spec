@@ -40,8 +40,12 @@ a = Analysis(
         # imports `embed` inside the two functions that use it, so excluding these
         # leaves the module importable and its routes describable — they simply cannot
         # run, which in a packaged build is the truth.
+        #
+        # `PIL` used to be on this list, which meant the packaged app could create a
+        # Lance table and could not decode a JPEG to put in one. 26 MB of decoders
+        # buys image and PDF ingest; see the `console` group in pyproject.toml.
         "torch", "open_clip", "embed", "av", "yt_dlp", "transformers",
-        "matplotlib", "PIL", "tkinter", "pytest",
+        "matplotlib", "tkinter", "pytest",
     ],
     noarchive=False,
 )
