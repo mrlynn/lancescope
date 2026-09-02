@@ -79,6 +79,12 @@ version:
 
 # --- desktop ------------------------------------------------------------------
 
+# The picture behind the icons in the disk image. Generated from the palette in
+# web/app/globals.css, so run this after changing a brand colour.
+dmg-background:
+	uv run --with pillow python desktop/dmg_background.py
+
+
 # The interface as static files, for the app bundle to carry. Not used by `make dev`
 # or `make demo`, which run the Next.js server.
 ui:
