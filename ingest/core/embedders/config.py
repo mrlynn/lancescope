@@ -191,3 +191,85 @@ def space_of(embedder: Embedder) -> EmbeddingSpace | None:
     """The space, or None when there is no embedder. Used when stamping a table."""
     space = getattr(embedder, "space", None)
     return None if space is None or space.dim == 0 else space
+
+
+@dataclass(frozen=True)
+class QueryEmbedder:
+    """An embedder chosen to match a table, rather than to match the settings.
+
+    Searching a vector column with a model other than the one that built it does not
+    fail. It returns confident nonsense — nearest neighbours in a space the query
+    never entered — which is the worst failure mode a search can have, because it
+    looks exactly like a working search that found poor results.
+
+    So the identity written into the table at ingest is checked before anything is
+    embedded, and a mismatch is refused with both names in the message.
+    """
+
+    embedder: Embedder | None
+    reason: str
+    available: bool
+    space: dict | None = None
+
+    def as_dict(self) -> dict:
+        return {"available": self.available, "reason": self.reason, "space": self.space}
+
+
+def embedder_matching(identity: dict, e: Embeddings | None = None) -> QueryEmbedder:
+    """The embedder that made this table's vectors, if it can be had here.
+
+    `identity` is `schema.read_identity()`'s output — the `lancescope.*` block, which
+    is empty for any table this tool did not write.
+    """
+    from server import settings as cfg
+
+    backend = identity.get("embedder.backend")
+    model = identity.get("embedder.model")
+    dim = identity.get("embedder.dim")
+    # Reported whether or not the search can run. "This table's vectors came from X"
+    # is the useful half of a refusal, and hiding it would leave the reader with a no
+    # and no idea what to point the setting at.
+    space = ({"backend": backend, "model": model, "dim": dim}
+             if backend and backend != "none" else None)
+
+    if not backend or backend == "none":
+        return QueryEmbedder(
+            None,
+            "This table does not record which model produced its vectors — it was "
+            "not written by LanceScope, or it was written without an embedder. "
+            "Searching it by text would mean guessing at the space, so this offers "
+            "'rows like row N' instead, which cannot be wrong about the model.",
+            False, space)
+
+    # The local model is reproducible from its name alone, so it needs no settings.
+    if backend == "siglip-local":
+        try:
+            from ingest.core.embedders.local_siglip import SigLipEmbedder
+
+            return QueryEmbedder(SigLipEmbedder(), f"{model}, running locally.",
+                                 True, space)
+        except ImportError:
+            return QueryEmbedder(
+                None,
+                f"This table's vectors came from {model} running locally, and this "
+                f"build has no torch. Run LanceScope from a checkout to search it "
+                f"by text.", False, space)
+
+    if e is None:
+        e = cfg.load().embeddings
+    resolved = resolve(e)
+    if not resolved.available:
+        return QueryEmbedder(
+            None,
+            f"This table's vectors came from {model}, and no embedder is configured "
+            f"here to reproduce it. {resolved.setup_hint}", False, space)
+    if resolved.model and model and resolved.model != model:
+        return QueryEmbedder(
+            None,
+            f"This table's vectors came from {model}, but this console is configured "
+            f"for {resolved.model}. Searching one space with the other's vectors "
+            f"returns confident nonsense rather than an error, so it is refused. "
+            f"Point the embedder setting at {model} to search this table by text.",
+            False, space)
+    return QueryEmbedder(embedder_for(e), f"{model} via {resolved.backend}.",
+                         True, space)

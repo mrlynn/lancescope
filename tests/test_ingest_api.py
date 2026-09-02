@@ -228,3 +228,85 @@ def test_the_event_log_pages_from_a_cursor(
 
 def test_polling_an_unknown_job_is_a_404_not_an_empty_job(api_ingest):
     assert api_ingest.get("/ingest/jobs/nope").status_code == 404
+
+
+# ------------------------------------------------- searching a table by typing
+
+def test_a_table_names_the_model_that_made_it_even_when_the_search_is_refused(
+        api_ingest, media_source, dest_root, fake_embedder, fake_handlers, monkeypatch):
+    monkeypatch.setattr("server.routes.ingest.embedder_for", lambda *a, **k: fake_embedder)
+    job_id = start(api_ingest, media_source, dest_root).json()["id"]
+    jobs.wait(job_id)
+    api_ingest.post(f"/ingest/jobs/{job_id}/adopt")
+
+    # "This table's vectors came from X" is the useful half of a refusal; without it
+    # the reader gets a no and no idea what to point the setting at.
+    cap = api_ingest.get("/ingest/tables/photos/text-search").json()
+    assert cap["space"]["model"] == "fake-embed"
+    assert cap["space"]["dim"] == "8"
+
+
+def test_a_table_that_records_no_model_is_refused_rather_than_guessed_at(api_ingest):
+    """Searching a vector column with the wrong model does not fail — it returns
+    confident nonsense, which is the worst outcome a search can have."""
+    cap = api_ingest.get("/ingest/tables/vectors/text-search").json()
+    assert cap["available"] is False
+    assert "does not record which model" in cap["reason"]
+    assert "rows like row N" in cap["reason"], "it must say what to do instead"
+
+
+def test_embedding_a_query_against_a_table_with_no_identity_is_a_409(api_ingest):
+    r = api_ingest.post("/ingest/query-vector",
+                        json={"table": "vectors", "text": "anything"})
+    assert r.status_code == 409
+    assert "does not record" in r.json()["detail"]
+
+
+def test_a_typed_query_comes_back_in_the_tables_own_space(
+        api_ingest, media_source, dest_root, fake_embedder, fake_handlers, monkeypatch):
+    monkeypatch.setattr("server.routes.ingest.embedder_for", lambda *a, **k: fake_embedder)
+    from ingest.core.embedders import config as embed_config
+
+    monkeypatch.setattr(embed_config, "embedder_for", lambda *a, **k: fake_embedder)
+    monkeypatch.setattr(
+        embed_config, "resolve",
+        lambda e: embed_config.ResolvedEmbedder("fake", "the fake one", True,
+                                                "fake-embed", modalities=("image", "text")))
+
+    job_id = start(api_ingest, media_source, dest_root).json()["id"]
+    jobs.wait(job_id)
+    api_ingest.post(f"/ingest/jobs/{job_id}/adopt")
+
+    r = api_ingest.post("/ingest/query-vector",
+                        json={"table": "photos", "text": "a picture of a harbour"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["dim"] == 8
+    assert len(body["vector"]) == 8
+
+
+def test_a_console_configured_for_a_different_model_refuses_to_search(
+        api_ingest, media_source, dest_root, fake_embedder, fake_handlers, monkeypatch):
+    """The failure this check exists to prevent looks exactly like a working search
+    that found poor results, which is why it is refused rather than warned about."""
+    monkeypatch.setattr("server.routes.ingest.embedder_for", lambda *a, **k: fake_embedder)
+    from ingest.core.embedders import config as embed_config
+
+    job_id = start(api_ingest, media_source, dest_root).json()["id"]
+    jobs.wait(job_id)
+    api_ingest.post(f"/ingest/jobs/{job_id}/adopt")
+
+    monkeypatch.setattr(
+        embed_config, "resolve",
+        lambda e: embed_config.ResolvedEmbedder("ollama", "ollama answered", True,
+                                                "nomic-embed-text", modalities=("text",)))
+    r = api_ingest.post("/ingest/query-vector",
+                        json={"table": "photos", "text": "a harbour"})
+    assert r.status_code == 409
+    detail = r.json()["detail"]
+    assert "fake-embed" in detail and "nomic-embed-text" in detail
+    assert "confident nonsense" in detail
+
+
+def test_asking_about_a_table_that_is_not_there_is_a_404(api_ingest):
+    assert api_ingest.get("/ingest/tables/nope/text-search").status_code == 404

@@ -23,6 +23,9 @@ import {
 import { fmtBytes } from "@/app/lib/api";
 import { download, toCsv, toJson } from "@/app/lib/export";
 import {
+  type TextSearchCapability, embedQuery, getTextSearchCapability,
+} from "@/app/lib/ingest";
+import {
   type StoredQuery, describeSpec, useQueryHistory, useSavedQueries,
 } from "@/app/lib/queries";
 
@@ -60,6 +63,8 @@ export function QueryTab({ table, root }: { table: string; root: string | null }
   // a query written against one database means nothing against another.
   const { history, record, clear } = useQueryHistory(root);
   const { saved, save, remove } = useSavedQueries(root);
+  const [describe, setDescribe] = useState("");
+  const [textSearch, setTextSearch] = useState<TextSearchCapability | null>(null);
   const [showPlan, setShowPlan] = useState(false);
   const [showRepro, setShowRepro] = useState(false);
 
@@ -74,6 +79,10 @@ export function QueryTab({ table, root }: { table: string; root: string | null }
         setVectorColumn(vector?.columns[0] ?? "");
       })
       .catch(() => setCaps(null));
+    // Asked before the box is drawn, so a table whose vectors came from a model this
+    // console cannot reproduce says so rather than offering an input that will
+    // refuse whatever is typed into it.
+    getTextSearchCapability(table).then(setTextSearch).catch(() => setTextSearch(null));
   }, [table]);
 
   const capFor = (m: string): QueryCapability | undefined =>
@@ -83,14 +92,34 @@ export function QueryTab({ table, root }: { table: string; root: string | null }
     const controller = new AbortController();
     setAborter(controller);
     setBusy(true); setError(null); setCancelled(false);
+    const wantsDescription =
+      (mode === "vector" || mode === "hybrid") && describe.trim().length > 0;
+
+    let queryVector: number[] | null = null;
+    if (wantsDescription) {
+      try {
+        queryVector = (await embedQuery(table, describe.trim(), controller.signal)).vector;
+      } catch (e) {
+        setError(e instanceof ApiError ? e.message : String(e));
+        setBusy(false); setAborter(null);
+        return;
+      }
+    }
+
     const spec: QuerySpec = {
       mode,
       filter: filter.trim() || null,
       limit: Number(limit) || 25,
       ...(mode === "fts" || mode === "hybrid" ? { text } : {}),
       ...(mode === "vector" || mode === "hybrid"
-        ? { vector_column: vectorColumn, like_row: Number(likeRow) || 0,
-            k: Number(k) || 10, prefilter }
+        ? {
+            vector_column: vectorColumn,
+            k: Number(k) || 10,
+            prefilter,
+            // A described query and "rows like row N" are the same search with a
+            // different source for the vector, so only one of them is sent.
+            ...(queryVector ? { vector: queryVector } : { like_row: Number(likeRow) || 0 }),
+          }
         : {}),
     };
     try {
@@ -110,7 +139,8 @@ export function QueryTab({ table, root }: { table: string; root: string | null }
       setBusy(false);
       setAborter(null);
     }
-  }, [table, mode, filter, limit, text, vectorColumn, likeRow, k, prefilter, record]);
+  }, [table, mode, filter, limit, text, vectorColumn, likeRow, k, prefilter, describe,
+      record]);
 
   /** Put a stored query back in the form. It is not run: a saved query is a
    *  question, and running it is still the reader's decision — especially since the
@@ -187,10 +217,19 @@ export function QueryTab({ table, root }: { table: string; root: string | null }
                   <option key={c} value={c}>{c}</option>)}
               </select>
             </Field>
-            {/* Searching by a row's own vector needs no embedding model, and cannot
-                be wrong about which model produced the column. */}
-            <Field label="rows like row">
+            {/* Two ways to get a query vector. Describing one needs the model that
+                built the column; a row's own vector needs nothing and cannot be
+                wrong about which model that was. */}
+            {textSearch?.available && (
+              <Field label="describe what you want" grow>
+                <input className="qin" value={describe}
+                       placeholder={`in the words of ${textSearch.space?.model ?? "this table's model"}`}
+                       onChange={(e) => setDescribe(e.target.value)} />
+              </Field>
+            )}
+            <Field label={describe.trim() ? "rows like row (unused)" : "rows like row"}>
               <input className="qin" value={likeRow} inputMode="numeric"
+                     disabled={describe.trim().length > 0}
                      onChange={(e) => setLikeRow(e.target.value)} />
             </Field>
             <Field label="k">
@@ -198,6 +237,13 @@ export function QueryTab({ table, root }: { table: string; root: string | null }
                      onChange={(e) => setK(e.target.value)} />
             </Field>
           </>
+        )}
+
+        {(mode === "vector" || mode === "hybrid") && textSearch
+          && !textSearch.available && (
+          <p className="text-[11px] text-[var(--haze)] leading-relaxed basis-full">
+            {textSearch.reason}
+          </p>
         )}
 
         <Field label={mode === "vector" ? "filter (applied before search)" : "filter"} grow>

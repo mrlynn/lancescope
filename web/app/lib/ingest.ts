@@ -193,3 +193,35 @@ export const adoptJob = (id: string) =>
   request<{ adopted: boolean; note: string }>(`/jobs/${id}/adopt`, { method: "POST" });
 export const discardJob = (id: string) =>
   request<{ removed: boolean; detail: string }>(`/jobs/${id}/discard`, { method: "POST" });
+
+// ------------------------------------------------------- searching by typing
+
+/** Whether a table can be searched with a sentence, and if not, why not.
+ *
+ *  A vector column alone is not enough: the query has to be embedded by the same
+ *  model that produced the column, and a table that does not record which model
+ *  that was cannot be searched this way at all. */
+export type TextSearchCapability = {
+  available: boolean;
+  reason: string;
+  space: { backend: string; model: string; dim: string } | null;
+};
+
+export type QueryVector = {
+  vector: number[];
+  dim: number;
+  space: { backend: string; model: string; dim: string } | null;
+  reason: string;
+  ms: number;
+};
+
+export const getTextSearchCapability = (table: string) =>
+  request<TextSearchCapability>(`/tables/${encodeURIComponent(table)}/text-search`);
+
+export const embedQuery = (table: string, text: string, signal?: AbortSignal) =>
+  request<QueryVector>("/query-vector", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ table, text }),
+    signal,
+  });

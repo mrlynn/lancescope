@@ -37,9 +37,20 @@ from ingest.core.media import IMPLEMENTED, KINDS
 from ingest.core.plan import DEFAULT_MAX_FILES, scan
 from ingest.core.run import RunRequest
 from ingest.core.writer import table_uri
+from server.catalog import Catalog
 from server.routes import settings as settings_routes
 
 router = APIRouter(prefix="/ingest")
+
+# Bound for one read: a table's own record of which model produced its vectors.
+# The writer never sees this — `writer.create_table` takes a path string precisely
+# so a `Catalog` cannot reach it.
+CATALOG: Catalog | None = None
+
+
+def bind(catalog: Catalog) -> None:
+    global CATALOG
+    CATALOG = catalog
 
 
 @router.get("/capabilities")
@@ -201,3 +212,66 @@ async def forget_job(job_id: str) -> JSONResponse:
     """Forget the record. The table, if any, stays exactly where it is."""
     jobs.forget(job_id)
     return JSONResponse({"jobs": jobs.listing()})
+
+
+# ------------------------------------------------------------------ text search
+
+class QueryVectorBody(BaseModel):
+    table: str = Field(min_length=1)
+    text: str = Field(min_length=1, max_length=2_000)
+
+
+@router.get("/tables/{name:path}/text-search")
+async def text_search_capability(name: str) -> JSONResponse:
+    """Can this table be searched by typing? And if not, why not.
+
+    Asked before the box is drawn, so a table that cannot answer says so instead of
+    offering an input that will refuse whatever is typed into it.
+    """
+    if CATALOG is None or not CATALOG.exists(name):
+        raise HTTPException(404, f"no table {name!r} under the current root")
+    import lance
+
+    from ingest.core.embedders.config import embedder_matching
+    from ingest.core.schema import read_identity
+
+    identity = read_identity(lance.dataset(CATALOG.uri_for(name)).schema)
+    return JSONResponse(embedder_matching(identity).as_dict())
+
+
+@router.post("/query-vector")
+async def query_vector(body: QueryVectorBody) -> JSONResponse:
+    """Turn a sentence into a vector in *this table's* space.
+
+    Two calls rather than one — this, then the ordinary `/catalog/query` with the
+    vector it returns — because embedding needs the ingest package and the read
+    router may not import it. The boundary is worth one extra round trip of a few
+    kilobytes.
+    """
+    if CATALOG is None or not CATALOG.exists(body.table):
+        raise HTTPException(404, f"no table {body.table!r} under the current root")
+    import time
+
+    import lance
+
+    from ingest.core.embedders.base import EmbedderError, NoEmbedder
+    from ingest.core.embedders.config import embedder_matching
+    from ingest.core.schema import read_identity
+
+    identity = read_identity(lance.dataset(CATALOG.uri_for(body.table)).schema)
+    match = embedder_matching(identity)
+    if not match.available or match.embedder is None:
+        raise HTTPException(409, match.reason)
+
+    t0 = time.perf_counter()
+    try:
+        vector = match.embedder.embed_texts([body.text])[0]
+    except (NoEmbedder, EmbedderError) as e:
+        raise HTTPException(502, str(e)) from e
+    return JSONResponse({
+        "vector": [round(float(x), 6) for x in vector],
+        "dim": len(vector),
+        "space": match.space,
+        "reason": match.reason,
+        "ms": round((time.perf_counter() - t0) * 1000, 1),
+    })

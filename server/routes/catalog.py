@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import date, datetime, time, timedelta
+from decimal import Decimal
 from pathlib import Path
 
 import pyarrow as pa
@@ -464,6 +466,17 @@ def _cell(value, field):
     """Render one cell for JSON, without letting a column's weight into the page."""
     if value is None:
         return None
+    # Arrow's temporal and decimal types arrive as Python objects `json.dumps` cannot
+    # encode, and the failure is a 500 from the response layer rather than anything
+    # this module can catch — so a table with an ordinary timestamp column made the
+    # whole rows tab unopenable. ISO 8601 for the temporal ones because it sorts,
+    # round-trips, and is what the rest of the API already emits for `modified`.
+    if isinstance(value, (datetime, date, time)):
+        return value.isoformat()
+    if isinstance(value, timedelta):
+        return value.total_seconds()
+    if isinstance(value, Decimal):
+        return float(value)
     if is_blob_field(field):
         # A projected Blob V2 column yields its descriptor, not its bytes — position
         # and size, for 2.6 KB a page. The size here is measured, read off the

@@ -129,6 +129,7 @@ def test_the_mcp_surface_reaches_only_the_read_routes():
 # the route does not, and `test_only_ingest_routes_admit_to_writing` holds that line.
 MUTATING_ROUTES = {
     ("POST", "/ingest/scan"): "surveys a directory; opens no file and writes nothing",
+    ("POST", "/ingest/query-vector"): "embeds a sentence; reads one schema, writes nothing",
     ("POST", "/ingest/jobs"): "writes a new table — the one thing in the server that does",
     ("POST", "/ingest/jobs/{job_id}/cancel"): "sets a flag; commits nothing further",
     ("POST", "/ingest/jobs/{job_id}/adopt"): "writes the settings file, never a dataset",

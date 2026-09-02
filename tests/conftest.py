@@ -15,6 +15,8 @@ console has to handle rather than the one corpus it was written against:
 - an **indexed table**, so "an index was used" has something to be true of
 - a **blob table**, because the claim this repository exists to make is about blobs
 - a **multi-version table**, so comparing two of them has two to compare
+- a **temporal table**, whose timestamps, dates, durations and decimals are the
+  Python objects `json.dumps` refuses
 - a **decoy directory** named like a table and holding nothing
 
 Built once per test session into a temporary directory. Nothing here writes inside
@@ -128,6 +130,29 @@ def _versioned(root: Path) -> None:
     lance.dataset(uri).create_scalar_index("body", index_type="INVERTED")  # v3
 
 
+def _temporal(root: Path) -> None:
+    """A table with the types Arrow hands back as Python objects.
+
+    Not exotic: a timestamp column is one of the most ordinary things a table can
+    have, and until `_cell` learned to render them the rows tab returned a 500 from
+    the response layer for every table that had one.
+    """
+    from datetime import UTC, date, datetime, timedelta
+    from decimal import Decimal
+
+    n = 8
+    base = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
+    lance.write_dataset(pa.table({
+        "id": list(range(n)),
+        "at": [base + timedelta(hours=i) for i in range(n)],
+        "day": [date(2026, 1, 1 + i) for i in range(n)],
+        "took": pa.array([timedelta(seconds=i * 30) for i in range(n)],
+                         type=pa.duration("us")),
+        "amount": pa.array([Decimal(f"{i}.50") for i in range(n)],
+                           type=pa.decimal128(10, 2)),
+    }), str(root / "temporal.lance"))
+
+
 def _decoy(root: Path) -> None:
     """A directory named like a table with nothing in it.
 
@@ -147,6 +172,7 @@ def corpus(tmp_path_factory) -> Path:
     _searchable(root)
     _blobs(root)
     _versioned(root)
+    _temporal(root)
     _decoy(root)
     yield root
     shutil.rmtree(root, ignore_errors=True)
@@ -314,6 +340,8 @@ def api_ingest(settings_file, catalog, monkeypatch, tmp_path):
     app = FastAPI()
     catalog_routes.bind(catalog)
     settings_routes.bind(catalog)
+    # Bound for one read: a table's own record of which model made its vectors.
+    ingest_routes.bind(catalog)
     app.include_router(ingest_routes.router)
     app.include_router(settings_routes.router)
     app.include_router(catalog_routes.router)

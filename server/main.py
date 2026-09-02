@@ -39,6 +39,7 @@ CATALOG = Catalog(ROOT.uri or ROOT.root or Path())
 async def lifespan(app: FastAPI):
     catalog_routes.bind(CATALOG)
     settings_routes.bind(CATALOG)
+    ingest_routes.bind(CATALOG)
     if ROOT.root is None:
         print(f"catalog: nothing configured — {ROOT.detail} Add a connection at "
               f"/console/settings.")
