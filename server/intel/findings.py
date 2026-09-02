@@ -27,13 +27,21 @@ from dataclasses import asdict, dataclass, field
 
 import pyarrow as pa
 
-from server.catalog import Handle, disk_usage, is_blob_field
+from server.catalog import Handle, disk_usage, fragment_blob_bytes, is_blob_field
 
 log = logging.getLogger(__name__)
 
 # Which console panel shows the evidence. A finding belongs next to the number that
 # produced it; this is what lets the UI put it there instead of in a list far away.
 PANELS = ("schema", "versions", "indices", "fragments", "rows")
+
+# Who is asking. A finding's panel says where its evidence lives; a facet says whose
+# question it answers, and the two are not the same axis. An unindexed vector column
+# is evidence on the Indices panel and a cost to anyone running a retrieval eval; a
+# fragment split is evidence on the Fragments panel and the thing that decides how
+# long an epoch takes. Facets let one rule be read by both without moving it, and
+# without a second rule saying the same thing in a different accent.
+FACETS = ("training",)
 
 # Below this share of rows covered, an index is doing less work than it appears to.
 COVERAGE_FLOOR = 0.98
@@ -46,6 +54,16 @@ BLOB_RATIO_NOTE = 10.0
 # median, the unevenness is ordinary and saying so would be noise.
 SKEW_FLOOR = 2.0
 
+# ...and it is also the ceiling on how many workers can do anything at all. Below
+# this many fragments the ceiling is the story and the skew is not, which is why
+# `_fragment_skew` declines to speak here and `_loader_parallelism` takes over. The
+# two rules tile: change one bound and change the other.
+LOADER_FRAGMENT_FLOOR = 4
+
+# A pass over a table this small is instant however it is split, and saying a
+# 300 KB table is single-threaded is technically true and useless.
+LOADER_BYTES_FLOOR = 8_000_000
+
 # Above this share of the ordinary-file bytes, a table is mostly its embeddings, and
 # what it costs to rebuild them is a more useful number than what it costs to scan.
 EMBEDDING_SHARE_NOTE = 0.5
@@ -57,16 +75,35 @@ class Finding:
 
     id: str
     severity: str                      # note | warn
-    panel: str
+    panel: str                         # where the evidence is shown
     title: str
     claim: str
     evidence: dict
     caveat: str = ""
     suggested_action: str = ""
     columns: list[str] = field(default_factory=list)
+    facets: tuple[str, ...] = ()       # whose question this answers, if anyone's
 
     def as_dict(self) -> dict:
         return asdict(self)
+
+
+def _bytes(n: float) -> str:
+    """The same thresholds and units `fmtBytes` uses in the interface.
+
+    A finding that says 20.0 MB and a panel that says 20.0 MB beside it should not
+    be two different roundings of the same number. Every rule that had its own
+    hardcoded unit now goes through here, which is how `segments` stopped reporting
+    its 69.8 KB of metadata as "0.1 MB" — true to one decimal place, and wrong about
+    the order of magnitude a reader takes away.
+    """
+    if n < 1000:
+        return f"{n:,.0f} B"
+    if n < 1_000_000:
+        return f"{n / 1e3:.1f} KB"
+    if n < 1_000_000_000:
+        return f"{n / 1e6:.1f} MB"
+    return f"{n / 1e9:.2f} GB"
 
 
 def _vector_dim(f) -> int | None:
@@ -74,6 +111,27 @@ def _vector_dim(f) -> int | None:
     if pa.types.is_fixed_size_list(t) and pa.types.is_floating(t.value_type):
         return t.list_size
     return None
+
+
+def _fragment_bytes(ds, uri: str) -> list[int]:
+    """Total bytes per fragment: the data file plus the side files hanging off it.
+
+    `DataFile.file_size_bytes` reports the `.lance` and nothing else, so on a Blob V2
+    table it understates a fragment by three orders of magnitude. The fragments panel
+    already assembles the real figure this way; this is the same walk, cached by the
+    same key, so asking for it here costs nothing the panel has not already paid.
+    """
+    from pathlib import Path
+
+    by_stem = fragment_blob_bytes(uri, generation=ds.version)
+    out = []
+    for frag in ds.get_fragments():
+        total = 0
+        for df in frag.data_files():
+            total += getattr(df, "file_size_bytes", 0) or 0
+            total += by_stem.get(Path(df.path).stem, (0, 0))[0]
+        out.append(total)
+    return out
 
 
 def _index_stats(ds, name: str) -> dict:
@@ -111,6 +169,7 @@ def _unindexed_vector(facts: dict) -> list[Finding]:
                 "Until then the scan is exact, which an approximate index is not."
             ),
             columns=[col],
+            facets=("training",),
         ))
     return out
 
@@ -134,6 +193,7 @@ def _partial_index(facts: dict) -> list[Finding]:
                       "unindexed_rows": unindexed},
             suggested_action="Re-build or incrementally update the index.",
             columns=list(idx.get("columns") or []),
+            facets=("training",),
         ))
     return out
 
@@ -159,8 +219,8 @@ def _small_files(facts: dict) -> list[Finding]:
             "This table keeps its bytes in Blob V2 side files, which the manifest "
             "cannot see. Its data files are small because that is where the data "
             "isn't — compacting them would rewrite "
-            f"{facts['on_disk'].blob_bytes / 1e9:.2f} GB of side files to tidy up "
-            f"{facts['on_disk'].meta_bytes / 1e6:.1f} MB of metadata."
+            f"{_bytes(facts['on_disk'].blob_bytes)} of side files to tidy up "
+            f"{_bytes(facts['on_disk'].meta_bytes)} of metadata."
             if blob else ""
         ),
         evidence={"num_small_files": small,
@@ -193,6 +253,7 @@ def _deleted_rows(facts: dict) -> list[Finding]:
                f"and still occupy their fragments."),
         evidence={"deleted_rows": deleted, "live_rows": rows, "share": round(share, 4)},
         suggested_action="Compact to reclaim the space and stop scanning past them.",
+        facets=("training",),
     )]
 
 
@@ -210,14 +271,17 @@ def _blob_split(facts: dict) -> list[Finding]:
         severity="note",
         panel="schema",
         title=f"{shown}:1 blob to metadata",
-        claim=(f"{usage.blob_bytes / 1e9:.2f} GB sits in Blob V2 side files against "
-               f"{usage.meta_bytes / 1e6:.1f} MB of ordinary Lance files here. "
+        claim=(f"{_bytes(usage.blob_bytes)} sits in Blob V2 side files against "
+               f"{_bytes(usage.meta_bytes)} of ordinary Lance files here. "
                f"Scanning or filtering this table reads only the small half — the "
                f"side files are reachable through a blob handle and nothing else."),
         evidence={"blob_bytes": usage.blob_bytes, "meta_bytes": usage.meta_bytes,
                   "ratio": usage.ratio, "files": usage.files,
                   "blob_columns": facts["blob_columns"]},
         columns=facts["blob_columns"],
+        # The split is a query fact and a training fact at once: what a scan skips is
+        # also what an epoch skips, right up until the epoch is the one that needs it.
+        facets=("training",),
     )]
 
 
@@ -234,8 +298,8 @@ def _manifest_blind(facts: dict) -> list[Finding]:
         severity="note",
         panel="schema",
         title="the manifest cannot see the side files",
-        claim=(f"Lance reports {manifest / 1e3:.1f} KB of tracked files for a table "
-               f"that occupies {true_total / 1e9:.2f} GB on disk. Both are correct; "
+        claim=(f"Lance reports {_bytes(manifest)} of tracked files for a table "
+               f"that occupies {_bytes(true_total)} on disk. Both are correct; "
                f"they answer different questions."),
         evidence={"manifest_bytes": manifest, "on_disk_bytes": true_total,
                   "understated_by": round(true_total / max(manifest, 1))},
@@ -261,45 +325,136 @@ def _version_churn(facts: dict) -> list[Finding]:
     )]
 
 
+def _loader_parallelism(facts: dict) -> list[Finding]:
+    """Too few fragments to feed a loader, which nothing else here reports.
+
+    `_fragment_skew` measures how uneven a split is and says nothing below four
+    fragments, on the reasonable ground that three fragments are a table rather than
+    a skew problem. But a table with one fragment is not un-skewed, it is
+    un-parallelisable: a reader that hands one fragment to each worker has exactly
+    one to hand out, and the other workers are handed nothing. The row count does not
+    show that either, and at this end of the range it is the more expensive fact.
+    """
+    fragments = len(facts["fragment_rows"])
+    if not fragments or fragments >= LOADER_FRAGMENT_FLOOR:
+        return []
+    usage = facts["on_disk"]
+    pass_bytes = usage.meta_bytes + usage.blob_bytes
+    # A table small enough to read in one breath is not waiting on its workers.
+    if pass_bytes < LOADER_BYTES_FLOOR:
+        return []
+    rows = facts["rows"]
+    blob = facts["has_blob_columns"]
+    alone = fragments == 1
+    return [Finding(
+        id="too-few-fragments-to-parallelise",
+        severity="warn" if alone else "note",
+        panel="fragments",
+        title=(f"one fragment, so one worker" if alone
+               else f"{fragments} fragments cap a loader at {fragments} workers"),
+        claim=(
+            (f"A reader hands one fragment to each worker, and this table has one. "
+             f"A loader given eight workers runs one of them and leaves seven with "
+             f"nothing, so a pass over {rows:,} rows and {_bytes(pass_bytes)} is "
+             f"single-threaded whatever it is asked for."
+             if alone else
+             f"A reader hands one fragment to each worker, so this table's "
+             f"{fragments} fragments are the ceiling: past {fragments} workers the "
+             f"extra ones are handed nothing. A pass reads {rows:,} rows and "
+             f"{_bytes(pass_bytes)}.")
+        ),
+        caveat=(
+            "These fragments carry Blob V2 side files, so re-splitting rewrites the "
+            "large half rather than the manifest. That is a real cost to weigh "
+            "against the idle workers, not a tidy-up."
+            if blob else ""
+        ),
+        evidence={"fragments": fragments, "rows": rows,
+                  "pass_bytes": pass_bytes,
+                  "meta_bytes": usage.meta_bytes, "blob_bytes": usage.blob_bytes,
+                  "has_blob_columns": blob},
+        suggested_action=(
+            "" if blob else
+            "Rewrite with a smaller target fragment size, or shuffle across rows at "
+            "read time so the workers are not waiting on one file."
+        ),
+        facets=("training",),
+    )]
+
+
 def _fragment_skew(facts: dict) -> list[Finding]:
     """Uneven fragments, which a training loader feels and a query does not.
 
     A query planner reads the fragments it needs and stops. A loader handing one
     fragment to each worker finishes when the largest one finishes, so the shape of
     the split decides how long an epoch takes, and the row count never shows it.
+
+    On a blob table the row count does not show it *even when it is right*: rows are
+    uniform and the side files are not, and it is the side files a loader moves. So
+    where per-fragment bytes are known, the bytes are what gets measured — same rule,
+    the unit a worker actually waits on.
     """
-    sizes = facts["fragment_rows"]
-    if len(sizes) < 4:
+    rows_per = facts["fragment_rows"]
+    if len(rows_per) < LOADER_FRAGMENT_FLOOR:
         return []
+
+    # Bytes where they are known and the table has a large half to be uneven about;
+    # rows otherwise, which is every ordinary table and is what it always measured.
+    by_bytes = bool(facts["has_blob_columns"]) and bool(facts.get("fragment_bytes"))
+    sizes = facts["fragment_bytes"] if by_bytes else rows_per
+    if len(sizes) != len(rows_per):
+        sizes, by_bytes = rows_per, False
+
     ordered = sorted(sizes)
     median = ordered[len(ordered) // 2]
     largest, smallest = ordered[-1], ordered[0]
     if not median or largest / median < SKEW_FLOOR:
         return []
+
+    # The ratio that fires the rule is against the median; the one that costs you
+    # time is against the mean, because the mean is the work each worker would have
+    # done had the split been even. They are different numbers and both are stated.
+    mean = sum(sizes) / len(sizes)
+    tax = largest / mean if mean else 0.0
+    idle = 1 - (mean / largest) if largest else 0.0
+    unit = "bytes" if by_bytes else "rows"
+    show = _bytes if by_bytes else (lambda n: f"{n:,.0f}")
     blob = facts["has_blob_columns"]
+
     return [Finding(
         id="fragments-unevenly-sized",
         severity="note",
         panel="fragments",
-        title=f"fragments run {smallest:,} to {largest:,} rows",
-        claim=(f"This table's {len(sizes)} fragments hold between {smallest:,} and "
-               f"{largest:,} rows against a median of {median:,}. A reader that takes "
-               f"one fragment per worker waits on the largest, so an epoch costs what "
-               f"the biggest fragment costs rather than what the average one does."),
+        title=f"fragments run {show(smallest)} to {show(largest)}"
+              + (" of side files" if by_bytes else " rows"),
+        claim=(f"This table's {len(sizes)} fragments hold between {show(smallest)} and "
+               f"{show(largest)} against a median of {show(median)}. A reader that "
+               f"takes one fragment per worker waits on the largest, so an epoch "
+               f"costs {show(largest)} of wall clock against {show(mean)} of average "
+               f"work — {idle:.0%} of the longest worker's time is the others "
+               f"standing still."),
         caveat=(
             "These fragments were written per source file, so their sizes are a "
             "property of the corpus rather than of the write pattern. Evening them "
             "out means rewriting the side files, which is the expensive half."
             if blob else ""
         ),
-        evidence={"fragments": len(sizes), "smallest_rows": smallest,
-                  "median_rows": median, "largest_rows": largest,
+        evidence={"fragments": len(sizes), "measured": unit,
+                  "smallest": smallest, "median": median, "largest": largest,
+                  "mean": round(mean, 2),
+                  # Kept under their original names: the ratio that fires the rule
+                  # is still against the median, and callers read it by name.
+                  "smallest_rows": min(rows_per), "largest_rows": max(rows_per),
+                  "median_rows": sorted(rows_per)[len(rows_per) // 2],
                   "ratio": round(largest / median, 2),
+                  "straggler_tax": round(tax, 2),
+                  "idle_share": round(idle, 4),
                   "has_blob_columns": blob},
         suggested_action=(
             "" if blob else
             "Compact to even the split, or shuffle across fragments at read time."
         ),
+        facets=("training",),
     )]
 
 
@@ -325,8 +480,8 @@ def _embedding_footprint(facts: dict) -> list[Finding]:
         panel="schema",
         title=f"{share:.0%} of the ordinary bytes are vectors",
         claim=(f"{', '.join(names)} accounts for about "
-               f"{vector_bytes / 1e6:.1f} MB across {rows:,} rows, against "
-               f"{usage.meta_bytes / 1e6:.1f} MB in this table's ordinary Lance "
+               f"{_bytes(vector_bytes)} across {rows:,} rows, against "
+               f"{_bytes(usage.meta_bytes)} in this table's ordinary Lance "
                f"files. Re-embedding rewrites that share of the table; the source "
                f"data is the smaller part of what is stored here."),
         caveat=(
@@ -341,6 +496,7 @@ def _embedding_footprint(facts: dict) -> list[Finding]:
                   "meta_bytes": usage.meta_bytes,
                   "share": round(share, 4)},
         columns=names,
+        facets=("training",),
     )]
 
 
@@ -352,6 +508,7 @@ RULES = (
     _blob_split,
     _manifest_blind,
     _version_churn,
+    _loader_parallelism,
     _fragment_skew,
     _embedding_footprint,
 )
@@ -405,6 +562,12 @@ def gather(handle: Handle) -> dict:
         # Fragment row counts come off the manifest already in memory — measured at
         # 0 bytes and 0 IOs — so the split can be described without opening a file.
         "fragment_rows": [f.metadata.physical_rows for f in ds.get_fragments()],
+        # What each fragment actually weighs, which on a blob table is the number a
+        # reader waits on and is not in the manifest at all. Only assembled when
+        # there are side files to assemble it from: on an ordinary table the row
+        # count and the byte count tell the same story and this is a directory walk
+        # for nothing.
+        "fragment_bytes": _fragment_bytes(ds, handle.uri) if blob_columns else None,
         "blob_columns": blob_columns,
         "has_blob_columns": bool(blob_columns),
         "on_disk": disk_usage(handle.uri, generation=ds.version),
@@ -456,11 +619,16 @@ class Analysis:
         }
 
 
-def analyse(handle: Handle) -> Analysis:
+def analyse(handle: Handle, *, facet: str | None = None) -> Analysis:
     """Run every rule over one table, worst finding first, keeping what broke.
 
     `gather()` failing is different from a rule failing: there are no facts, so
     there is nothing to be partial about, and the caller gets the exception.
+
+    A facet narrows the findings to the ones that answer that reader's question. It
+    does not narrow the *rules* — every one still runs, and a rule that fails is
+    still reported, because "this sweep was incomplete" stays true regardless of who
+    was asking.
     """
     facts = gather(handle)
     out: list[Finding] = []
@@ -473,14 +641,16 @@ def analyse(handle: Handle) -> Analysis:
             log.exception("findings rule %s failed on %s", name, handle.name)
             failures.append(RuleFailure(rule=name, error=type(e).__name__,
                                         message=str(e)[:200]))
+    if facet:
+        out = [f for f in out if facet in f.facets]
     order = {"warn": 0, "note": 1}
     findings = sorted(out, key=lambda f: (order.get(f.severity, 9), f.id))
     return Analysis(findings=findings, failures=failures)
 
 
-def findings_for(handle: Handle) -> list[Finding]:
+def findings_for(handle: Handle, *, facet: str | None = None) -> list[Finding]:
     """Just the findings, for callers that have no way to show a partial state."""
-    return analyse(handle).findings
+    return analyse(handle, facet=facet).findings
 
 
 def summarise(findings: list[Finding]) -> dict:

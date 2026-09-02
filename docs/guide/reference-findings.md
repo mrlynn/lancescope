@@ -44,6 +44,17 @@ Two true numbers that answer different questions, and one is a thousandth of the
 
 Many versions against few rows: a write pattern, not a fault.
 
+## loader parallelism
+
+Too few fragments to feed a loader, which nothing else here reports.
+
+`_fragment_skew` measures how uneven a split is and says nothing below four
+fragments, on the reasonable ground that three fragments are a table rather than
+a skew problem. But a table with one fragment is not un-skewed, it is
+un-parallelisable: a reader that hands one fragment to each worker has exactly
+one to hand out, and the other workers are handed nothing. The row count does not
+show that either, and at this end of the range it is the more expensive fact.
+
 ## fragment skew
 
 Uneven fragments, which a training loader feels and a query does not.
@@ -51,6 +62,11 @@ Uneven fragments, which a training loader feels and a query does not.
 A query planner reads the fragments it needs and stops. A loader handing one
 fragment to each worker finishes when the largest one finishes, so the shape of
 the split decides how long an epoch takes, and the row count never shows it.
+
+On a blob table the row count does not show it *even when it is right*: rows are
+uniform and the side files are not, and it is the side files a loader moves. So
+where per-fragment bytes are known, the bytes are what gets measured — same rule,
+the unit a worker actually waits on.
 
 ## embedding footprint
 
@@ -69,3 +85,13 @@ rewrite, and what dropping the vectors would give back.
 ## Where they appear
 
 Each finding names the panel holding the evidence it was derived from, so it renders beside those numbers as well as in Insights: `schema`, `versions`, `indices`, `fragments`, `rows`.
+
+## Who is asking
+
+A panel says where a finding's evidence lives. A *facet* says whose question it answers, which is a different axis: an unindexed vector column is evidence on the Indices panel and a per-query cost to anyone running a retrieval eval. `GET /catalog/tables/{name}/findings?facet=training` narrows the response to one reader's question, and the MCP `table_findings` tool takes the same argument. Every rule still runs either way — a facet filters the findings, not the sweep, so a rule that fails is still reported to whoever asked.
+
+| facet | what it collects |
+| --- | --- |
+| `training` | what a training run pays for: a split too coarse to feed a loader's workers, a straggler fragment that decides the epoch, tombstones read on every pass, an unindexed vector column costing a scan per eval query, and what re-embedding would rewrite |
+
+It reports the layout and nothing about the data. Whether the labels are right, whether a split leaks, whether the corpus is any good — none of that is visible from a manifest, and the panel says so rather than implying a clean bill of health it cannot give.

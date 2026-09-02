@@ -604,21 +604,33 @@ async def rows(
 # ---------------------------------------------------------------------- findings
 
 @router.get("/tables/{name:path}/findings")
-async def findings(name: str) -> JSONResponse:
+async def findings(name: str, facet: str | None = None) -> JSONResponse:
     """What is worth saying about this table, derived rather than generated.
 
     No model, no key, no network: every claim here is computed from the same
     manifests the other panels read, which is why it costs a few kilobytes and works
     on a machine with nothing configured.
+
+    `?facet=training` narrows the answer to the reader asking it. The rules all still
+    run and the cost is identical — what changes is which of them are handed back,
+    because "will a loader stall on this" and "what is wrong with this table" are
+    different questions with an overlapping answer.
     """
+    if facet is not None and facet not in intel_findings.FACETS:
+        raise HTTPException(
+            400,
+            f"unknown facet {facet!r} — known facets: "
+            f"{', '.join(intel_findings.FACETS)}",
+        )
     h = open_table(name)
     h.drain()                                       # zero, so the cost below is ours
-    analysis = intel_findings.analyse(h)
+    analysis = intel_findings.analyse(h, facet=facet)
     d = h.drain()
 
     return JSONResponse({
         "name": name,
         "uri": h.uri,
+        "facet": facet,
         **analysis.as_dict(),
         "read_bytes": d.read_bytes,
         "read_iops": d.read_iops,

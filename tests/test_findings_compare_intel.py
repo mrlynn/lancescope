@@ -59,10 +59,18 @@ def _facts(**over) -> dict:
         "manifest_bytes": 1_000_000,
         "versions": 1,
         "fragment_rows": [],
+        "fragment_bytes": None,
         "name": "t",
         "uri": "/tmp/t.lance",
     }
     return {**base, **over}
+
+
+def _big(blob: int = 0, meta: int = 40_000_000) -> "DiskUsage":
+    """A table past the floor below which how it is split cannot matter."""
+    from server.catalog import DiskUsage
+
+    return DiskUsage(blob_bytes=blob, meta_bytes=meta, files=1)
 
 
 def test_an_even_split_is_not_skew():
@@ -92,6 +100,95 @@ def test_a_blob_table_is_told_why_evening_it_out_is_the_expensive_half():
     # No action, because the honest one is "do nothing" and a suggestion here would
     # be talking someone into rewriting side files to tidy a row count.
     assert f.suggested_action == ""
+
+
+# `_loader_parallelism` takes the range `_fragment_skew` declines to speak in. Below
+# four fragments a split is not uneven, it is absent, and the two rules have to tile
+# exactly: a gap between them is a table nobody says anything about.
+
+
+def test_one_fragment_is_one_worker():
+    facts = _facts(fragment_rows=[50_000], on_disk=_big(), rows=50_000)
+    (f,) = intel_findings._loader_parallelism(facts)
+    assert f.id == "too-few-fragments-to-parallelise"
+    assert f.severity == "warn"                    # unambiguous, unlike a split of 3
+    assert f.evidence["fragments"] == 1
+    assert f.evidence["pass_bytes"] == 40_000_000
+    assert "training" in f.facets
+    assert f.suggested_action                      # cheap to fix with no side files
+
+
+def test_a_table_small_enough_to_read_in_one_breath_is_not_waiting_on_workers():
+    # True that it is single-threaded; useless to say. A 300 KB pass is a pass.
+    from server.catalog import DiskUsage
+    facts = _facts(fragment_rows=[10],
+                   on_disk=DiskUsage(blob_bytes=0, meta_bytes=300_000, files=1))
+    assert intel_findings._loader_parallelism(facts) == []
+
+
+def test_a_split_of_three_is_a_ceiling_worth_naming_not_an_alarm():
+    facts = _facts(fragment_rows=[10, 10, 10], on_disk=_big())
+    (f,) = intel_findings._loader_parallelism(facts)
+    assert f.severity == "note"
+    assert "3 workers" in f.title
+
+
+def test_where_parallelism_stops_speaking_skew_starts():
+    # The two bounds are the same number. Four fragments is skew's range, and the
+    # parallelism rule must be silent there or a table gets told twice.
+    four = _facts(fragment_rows=[10, 10, 10, 400], on_disk=_big())
+    assert intel_findings._loader_parallelism(four) == []
+    assert intel_findings._fragment_skew(four)
+
+
+def test_a_blob_table_is_not_told_to_re_split_its_side_files():
+    facts = _facts(fragment_rows=[50_000], rows=50_000,
+                   on_disk=_big(blob=4_000_000_000), has_blob_columns=True)
+    (f,) = intel_findings._loader_parallelism(facts)
+    assert "rewrites the large half" in f.caveat
+    assert f.suggested_action == ""
+    assert f.evidence["pass_bytes"] == 4_040_000_000
+
+
+# A blob table's rows are uniform and its side files are not. Measuring the rows
+# there answers a question nobody asked — the loader is moving the side files.
+
+
+def test_a_blob_table_is_measured_in_the_bytes_a_worker_waits_on():
+    # Even rows, wildly uneven video: the exact shape the row count cannot see.
+    facts = _facts(fragment_rows=[10, 10, 10, 10, 10],
+                   fragment_bytes=[10_000, 10_000, 12_000, 10_000, 400_000],
+                   has_blob_columns=True)
+    (f,) = intel_findings._fragment_skew(facts)
+    assert f.evidence["measured"] == "bytes"
+    assert f.evidence["largest"] == 400_000
+    # The row counts are perfectly even and are reported as such, unfired.
+    assert f.evidence["largest_rows"] == f.evidence["smallest_rows"] == 10
+
+
+def test_an_ordinary_table_is_still_measured_in_rows():
+    facts = _facts(fragment_rows=[10, 10, 12, 10, 400])
+    (f,) = intel_findings._fragment_skew(facts)
+    assert f.evidence["measured"] == "rows"
+
+
+def test_a_blob_table_with_no_byte_figures_falls_back_to_rows():
+    # `fragment_bytes` is None whenever the walk was skipped. Measuring nothing is
+    # not an option; measuring rows and saying so is.
+    facts = _facts(fragment_rows=[10, 10, 12, 10, 400], has_blob_columns=True)
+    (f,) = intel_findings._fragment_skew(facts)
+    assert f.evidence["measured"] == "rows"
+
+
+def test_the_tax_is_against_the_mean_and_the_trigger_is_against_the_median():
+    # Two true ratios that answer different questions. The median fires the rule;
+    # the mean is the work each worker would have had on an even split, so it is the
+    # one that converts to wall clock.
+    facts = _facts(fragment_rows=[10, 10, 12, 10, 400])
+    (f,) = intel_findings._fragment_skew(facts)
+    assert f.evidence["ratio"] == pytest.approx(40.0, rel=1e-3)      # 400 / 10
+    assert f.evidence["straggler_tax"] == pytest.approx(4.52, rel=1e-2)  # 400 / 88.4
+    assert f.evidence["idle_share"] == pytest.approx(0.779, rel=1e-2)
 
 
 def test_a_table_that_is_mostly_source_data_says_nothing():
@@ -128,6 +225,31 @@ def test_every_finding_carries_evidence_and_a_panel(api):
         for f in api.get(f"/catalog/tables/{table}/findings").json()["findings"]:
             assert f["evidence"], f"{f['id']} has no evidence"
             assert f["panel"] in intel_findings.PANELS
+            for facet in f["facets"]:
+                assert facet in intel_findings.FACETS, f"{f['id']} invents a facet"
+
+
+def test_a_facet_narrows_the_findings_without_narrowing_the_sweep(api):
+    everything = api.get("/catalog/tables/vectors/findings").json()
+    training = api.get("/catalog/tables/vectors/findings?facet=training").json()
+
+    ids = {f["id"] for f in everything["findings"]}
+    training_ids = {f["id"] for f in training["findings"]}
+    assert training_ids <= ids
+    assert all("training" in f["facets"] for f in training["findings"])
+    # An unindexed vector column costs a scan per eval query, so it is in both.
+    assert "vector-column-unindexed" in training_ids
+    assert training["facet"] == "training"
+    # Every rule still ran, so a broken one is still reported to whoever asked.
+    assert training["partial_analysis"] == everything["partial_analysis"]
+
+
+def test_a_facet_nobody_defined_is_a_400_rather_than_an_empty_list(api):
+    # Silently returning nothing would make a typo indistinguishable from a clean
+    # table, which is the one failure mode this panel cannot have.
+    r = api.get("/catalog/tables/vectors/findings?facet=trainng")
+    assert r.status_code == 400
+    assert "training" in r.json()["detail"]
 
 
 def test_a_rule_that_raises_is_reported_not_swallowed(api, monkeypatch):

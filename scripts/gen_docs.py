@@ -166,7 +166,26 @@ def findings_reference() -> str:
             "## Where they appear", "",
             "Each finding names the panel holding the evidence it was derived from, "
             "so it renders beside those numbers as well as in Insights: "
-            + ", ".join(f"`{p}`" for p in f.PANELS) + ".", ""]
+            + ", ".join(f"`{p}`" for p in f.PANELS) + ".", "",
+            "## Who is asking", "",
+            "A panel says where a finding's evidence lives. A *facet* says whose "
+            "question it answers, which is a different axis: an unindexed vector "
+            "column is evidence on the Indices panel and a per-query cost to anyone "
+            "running a retrieval eval. `GET "
+            "/catalog/tables/{name}/findings?facet=training` narrows the response to "
+            "one reader's question, and the MCP `table_findings` tool takes the same "
+            "argument. Every rule still runs either way — a facet filters the "
+            "findings, not the sweep, so a rule that fails is still reported to "
+            "whoever asked.", "",
+            "| facet | what it collects |", "| --- | --- |",
+            "| `training` | what a training run pays for: a split too coarse to feed "
+            "a loader's workers, a straggler fragment that decides the epoch, "
+            "tombstones read on every pass, an unindexed vector column costing a "
+            "scan per eval query, and what re-embedding would rewrite |", "",
+            "It reports the layout and nothing about the data. Whether the labels "
+            "are right, whether a split leaks, whether the corpus is any good — "
+            "none of that is visible from a manifest, and the panel says so rather "
+            "than implying a clean bill of health it cannot give.", ""]
     return "\n".join(out)
 
 
