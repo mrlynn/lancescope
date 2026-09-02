@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import pytest
 
+from server.catalog import DiskUsage
 from server.intel import findings as intel_findings
 
 # ------------------------------------------------------------------------ findings
@@ -45,8 +46,6 @@ def test_an_ordinary_table_has_nothing_alarming_to_say(api):
 
 
 def _facts(**over) -> dict:
-    from server.catalog import DiskUsage
-
     base = {
         "rows": 1000,
         "stats": {},
@@ -66,10 +65,8 @@ def _facts(**over) -> dict:
     return {**base, **over}
 
 
-def _big(blob: int = 0, meta: int = 40_000_000) -> "DiskUsage":
+def _big(blob: int = 0, meta: int = 40_000_000) -> DiskUsage:
     """A table past the floor below which how it is split cannot matter."""
-    from server.catalog import DiskUsage
-
     return DiskUsage(blob_bytes=blob, meta_bytes=meta, files=1)
 
 

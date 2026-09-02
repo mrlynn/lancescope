@@ -350,18 +350,18 @@ def _loader_parallelism(facts: dict) -> list[Finding]:
         id="too-few-fragments-to-parallelise",
         severity="warn" if alone else "note",
         panel="fragments",
-        title=(f"one fragment, so one worker" if alone
+        title=("one fragment, so one worker" if alone
                else f"{fragments} fragments cap a loader at {fragments} workers"),
         claim=(
-            (f"A reader hands one fragment to each worker, and this table has one. "
-             f"A loader given eight workers runs one of them and leaves seven with "
-             f"nothing, so a pass over {rows:,} rows and {_bytes(pass_bytes)} is "
-             f"single-threaded whatever it is asked for."
-             if alone else
-             f"A reader hands one fragment to each worker, so this table's "
-             f"{fragments} fragments are the ceiling: past {fragments} workers the "
-             f"extra ones are handed nothing. A pass reads {rows:,} rows and "
-             f"{_bytes(pass_bytes)}.")
+            f"A reader hands one fragment to each worker, and this table has one. "
+            f"A loader given eight workers runs one of them and leaves seven with "
+            f"nothing, so a pass over {rows:,} rows and {_bytes(pass_bytes)} is "
+            f"single-threaded whatever it is asked for."
+            if alone else
+            f"A reader hands one fragment to each worker, so this table's "
+            f"{fragments} fragments are the ceiling: past {fragments} workers the "
+            f"extra ones are handed nothing. A pass reads {rows:,} rows and "
+            f"{_bytes(pass_bytes)}."
         ),
         caveat=(
             "These fragments carry Blob V2 side files, so re-splitting rewrites the "
