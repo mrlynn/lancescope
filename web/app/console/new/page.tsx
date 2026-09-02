@@ -184,7 +184,11 @@ export default function NewDatabase() {
               // Adoption can decline (an env-locked root, say). The table is written
               // either way, and the console is still worth opening.
             }
-            router.push(`/console?table=${encodeURIComponent(job.request.name)}`);
+            // Straight to the question, not to the schema. Someone who has just
+            // waited for a table to be built did not wait in order to read its
+            // column list.
+            router.push(
+              `/console?table=${encodeURIComponent(job.request.name)}&tab=query`);
           }}
           onDiscard={async () => {
             try {

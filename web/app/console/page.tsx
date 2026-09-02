@@ -106,6 +106,15 @@ export default function Console() {
     return new URLSearchParams(window.location.search).get("table");
   };
 
+  /** `?tab=` picks which one opens. A table you have just built should land on the
+   *  question you built it to ask, not on its schema — "here are your 23 columns" is
+   *  a strange first answer to "find my photos". */
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const asked = new URLSearchParams(window.location.search).get("tab");
+    if (asked && TABS.some((t) => t.id === asked)) setTab(asked as Tab);
+  }, []);
+
   useEffect(() => {
     loadTables(wanted());
     getSettings().then(setSettings).catch(() => setSettings(null));

@@ -11,7 +11,7 @@
  *  cost in bytes and IOs, and the script that reproduces it elsewhere. No model is
  *  involved in any of it. */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Icon from "@/app/components/Icon";
 import { Cost, Empty, Eyebrow, Td, Th } from "@/app/components/console/atoms";
 import { CellView } from "@/app/components/console/tabs";
@@ -64,6 +64,7 @@ export function QueryTab({ table, root }: { table: string; root: string | null }
   const { history, record, clear } = useQueryHistory(root);
   const { saved, save, remove } = useSavedQueries(root);
   const [describe, setDescribe] = useState("");
+  const describeRef = useRef<HTMLInputElement>(null);
   const [textSearch, setTextSearch] = useState<TextSearchCapability | null>(null);
   const [showPlan, setShowPlan] = useState(false);
   const [showRepro, setShowRepro] = useState(false);
@@ -82,7 +83,19 @@ export function QueryTab({ table, root }: { table: string; root: string | null }
     // Asked before the box is drawn, so a table whose vectors came from a model this
     // console cannot reproduce says so rather than offering an input that will
     // refuse whatever is typed into it.
-    getTextSearchCapability(table).then(setTextSearch).catch(() => setTextSearch(null));
+    getTextSearchCapability(table)
+      .then((cap) => {
+        setTextSearch(cap);
+        // Arriving from a finished build, with a table that can answer a typed
+        // question: start in the mode that answers it and put the cursor in the box.
+        // The alternative is a search screen whose search field is three clicks away.
+        if (cap.available && typeof window !== "undefined"
+            && new URLSearchParams(window.location.search).get("tab") === "query") {
+          setMode("vector");
+          requestAnimationFrame(() => describeRef.current?.focus());
+        }
+      })
+      .catch(() => setTextSearch(null));
   }, [table]);
 
   const capFor = (m: string): QueryCapability | undefined =>
@@ -222,7 +235,7 @@ export function QueryTab({ table, root }: { table: string; root: string | null }
                 wrong about which model that was. */}
             {textSearch?.available && (
               <Field label="describe what you want" grow>
-                <input className="qin" value={describe}
+                <input className="qin" ref={describeRef} value={describe}
                        placeholder={`in the words of ${textSearch.space?.model ?? "this table's model"}`}
                        onChange={(e) => setDescribe(e.target.value)} />
               </Field>
