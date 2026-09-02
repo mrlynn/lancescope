@@ -19,7 +19,7 @@ import Icon, { type IconName } from "@/app/components/Icon";
 import Mark from "@/app/components/Mark";
 import AppBar from "@/app/components/nav/AppBar";
 import { fmtBytes } from "@/app/lib/api";
-import { type TableList, listTables } from "@/app/lib/catalog";
+import { ApiError, type TableList, listTables } from "@/app/lib/catalog";
 import { ROOT_SOURCE, dbName } from "@/app/lib/dbname";
 import { useRecents } from "@/app/lib/recents";
 import { type SettingsState, getSettings } from "@/app/lib/settings";
@@ -31,10 +31,19 @@ export default function Home() {
   const [settings, setSettings] = useState<SettingsState | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
   const [reachable, setReachable] = useState<boolean | null>(null);
+  const [listError, setListError] = useState<string | null>(null);
 
   useEffect(() => {
-    listTables().then((d) => { setList(d); setReachable(true); })
-      .catch(() => setReachable(false));
+    listTables().then((d) => { setList(d); setReachable(true); setListError(null); })
+      .catch((e) => {
+        // An API that answered with an error is not an API that is down, and
+        // reporting the second used to send someone to `make api` for a server
+        // already running in front of them — in the desktop app, the very server
+        // that served this page.
+        const answered = e instanceof ApiError;
+        setReachable(answered);
+        setListError(answered ? String(e.message) : null);
+      });
     getSettings().then(setSettings).catch(() => setSettings(null));
     fetch("/api/health", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
@@ -70,8 +79,8 @@ export default function Home() {
 
       {/* --------------------------------------------------------- what is bound */}
       <section className="panel p-5 mb-6 flex items-center gap-4 flex-wrap">
-        <span style={{ color: reachable === false ? "var(--video)" : "var(--index)" }}>
-          <Icon name={reachable === false ? "warning" : "database"} size={20} />
+        <span style={{ color: reachable === false || listError ? "var(--video)" : "var(--index)" }}>
+          <Icon name={reachable === false || listError ? "warning" : "database"} size={20} />
         </span>
         <div className="min-w-0 flex-1">
           {reachable === false ? (
@@ -81,6 +90,13 @@ export default function Home() {
                 Start it with <span className="text-[var(--bright)]">make api</span>, or run
                 both halves with <span className="text-[var(--bright)]">make dev</span>.
               </div>
+            </>
+          ) : listError ? (
+            <>
+              <div className="text-[14px] text-[var(--bright)]">
+                The API could not list this database
+              </div>
+              <div className="mono text-[11px] text-[var(--haze)] mt-1">{listError}</div>
             </>
           ) : root ? (
             <>

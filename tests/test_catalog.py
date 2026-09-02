@@ -7,6 +7,8 @@ with one very detailed test.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from server.catalog import Catalog
@@ -29,6 +31,34 @@ def test_an_empty_root_lists_nothing_rather_than_erroring(empty_root):
 
 def test_a_missing_root_is_empty_not_an_exception(tmp_path):
     assert Catalog(tmp_path / "does-not-exist").discover() == []
+
+
+def test_no_root_at_all_is_a_first_run_not_a_walk_of_the_filesystem():
+    # An unconfigured console used to root itself at the working directory, which
+    # for a double-clicked .app is `/`. It then walked the whole disk and died on
+    # the first directory macOS would not let it stat.
+    cat = Catalog("")
+    assert not cat.capabilities.discover.ok
+    found = cat.discover_detail()
+    assert found.tables == []
+    assert "No database is connected" in (found.error or "")
+
+
+def test_a_directory_that_cannot_be_stat_ed_does_not_end_the_walk(tmp_path, monkeypatch):
+    # macOS permits listing `~/Library/Caches` and refuses to stat several entries
+    # inside it. One of those used to take every other table down with it.
+    (tmp_path / "ordinary.lance").mkdir()
+    (tmp_path / "protected").mkdir()
+
+    real_is_dir = Path.is_dir
+
+    def is_dir(self):
+        if self.name == "protected":
+            raise PermissionError(1, "Operation not permitted")
+        return real_is_dir(self)
+
+    monkeypatch.setattr(Path, "is_dir", is_dir)
+    assert Catalog(tmp_path).discover() == ["ordinary"]
 
 
 def test_listing_tables_answers_even_with_a_broken_one(api):

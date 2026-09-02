@@ -164,7 +164,15 @@ class Catalog:
         except (PermissionError, FileNotFoundError):
             return
         for entry in entries:
-            if not entry.is_dir():
+            try:
+                if not entry.is_dir():
+                    continue
+            except OSError:
+                # Listing a directory and stat'ing what is in it are separately
+                # permitted on macOS: `~/Library/Caches` reads fine and several
+                # entries inside it raise EPERM under TCC. One of those used to end
+                # the whole walk, so a root that happened to contain one listed no
+                # tables at all.
                 continue
             if entry.suffix == ".lance":
                 yield entry
@@ -328,6 +336,12 @@ REMOTE_REASON = (
 )
 
 
+NO_ROOT_REASON = (
+    "No database is connected. Add a connection on the settings page and the console "
+    "will list what is under it."
+)
+
+
 HF_DISK_SPLIT_REASON = (
     "The blob and metadata split comes from walking the directory the table sits in. "
     "A Hub repository is not a directory this process can stat, so the ratio that the "
@@ -338,6 +352,19 @@ HF_DISK_SPLIT_REASON = (
 
 def capabilities_for(root: Path | str) -> RootCapabilities:
     """What this root supports, decided from what it is rather than by trying."""
+    if not str(root).strip():
+        # An empty root is "nothing is connected yet", which is a first run rather
+        # than an error. It used to be spelled `Path()`, and a relative root means
+        # the process's working directory — which for a double-clicked .app is `/`.
+        # The console then walked the whole filesystem looking for tables and died
+        # on the first directory macOS would not let it stat.
+        return RootCapabilities(
+            remote=False,
+            discover=Capability(UNSUPPORTED, NO_ROOT_REASON),
+            inspect=Capability(UNSUPPORTED, NO_ROOT_REASON),
+            disk_split=Capability(UNSUPPORTED, NO_ROOT_REASON),
+            io_meter=Capability(UNSUPPORTED, NO_ROOT_REASON),
+        )
     if hf.is_hf_uri(root):
         # The one remote form that has actually been exercised. Measured against
         # `hf://datasets/lance-format/openvid-lance/data` on pylance 11.0.0: the

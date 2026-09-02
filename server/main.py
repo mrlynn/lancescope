@@ -38,7 +38,9 @@ from server.routes import settings as settings_routes
 _ARMED = credentials.arm()
 
 ROOT = cfg.resolve_root(cfg.load())
-CATALOG = Catalog(ROOT.uri or ROOT.root or Path())
+# Empty when nothing is configured — deliberately not `Path()`, which is the
+# working directory, and for an app the user double-clicked that is `/`.
+CATALOG = Catalog(ROOT.uri or ROOT.root or "")
 
 
 @asynccontextmanager
