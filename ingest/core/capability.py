@@ -119,14 +119,21 @@ def ingest_capabilities(destination: str | Path | None = None) -> IngestCapabili
 
     embedder = resolve(cfg.load().embeddings)
 
-    if not writes.ok:
-        note = writes.reason
-    elif undecodable:
-        note = (f"This build cannot decode {', '.join(undecodable)}. Those files are "
-                f"reported and skipped at plan time rather than failing partway "
-                f"through a run.")
-    else:
-        note = "Every supported medium can be decoded here."
+    # Two different reasons a medium shows as unavailable, and merging them into one
+    # sentence is how someone ends up installing ffmpeg to fix a handler that does
+    # not exist yet.
+    unimplemented = [k for k in media if k not in IMPLEMENTED]
+    parts = []
+    if undecodable:
+        parts.append(f"This build cannot decode {', '.join(undecodable)}.")
+    if unimplemented:
+        parts.append(f"{', '.join(unimplemented)} can be found in a directory but "
+                     f"cannot be turned into rows yet — that is a handler this "
+                     f"version does not have, not something you can install.")
+    if not parts:
+        parts.append("Every medium here can be decoded and ingested.")
+
+    note = writes.reason if not writes.ok else " ".join(parts)
 
     return IngestCapabilities(
         writes=writes,

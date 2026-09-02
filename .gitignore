@@ -9,6 +9,11 @@ __pycache__/
 # web
 web/node_modules/
 web/.next/
+# A dev server started with the project directory applied twice writes its build
+# cache to web/web/.next. Nothing but cache lands there, `web/.gitignore` only
+# ignores `.next` at its own level, and left untracked it both trips `npm run lint`
+# and gets swept into a routine `git add -A web`.
+web/web/
 web/out/
 
 # Desktop build outputs. The sidecar is 428 MB and the static export is derived
