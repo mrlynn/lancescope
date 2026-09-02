@@ -21,7 +21,7 @@
  *  when the workspace opens; everything below is local.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { CompletionColumn } from "@/app/lib/catalog";
 
 /** Where the caret is, in terms of what would help. */
@@ -154,9 +154,15 @@ export function FilterInput({
     [slot, word, column, columns],
   );
 
-  // The highlighted row is an index into a list that changes on every keystroke;
-  // leaving it where it was points it at something else.
-  useEffect(() => { setActive(0); }, [value, caret]);
+  // The highlighted row is an index into a list that changes on every keystroke, so
+  // leaving it where it was points it at something else. Reset in the events that
+  // move the caret or the text rather than in an effect watching them: the reset
+  // belongs to the keystroke, and an effect would be React re-deriving something it
+  // was told directly.
+  const sync = () => {
+    setCaret(ref.current?.selectionStart ?? 0);
+    setActive(0);
+  };
 
   const accept = (s: Suggestion) => {
     const before = value.slice(0, caret);
@@ -173,8 +179,6 @@ export function FilterInput({
       setCaret(at);
     });
   };
-
-  const sync = () => setCaret(ref.current?.selectionStart ?? 0);
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     const showing = open && items.length > 0;

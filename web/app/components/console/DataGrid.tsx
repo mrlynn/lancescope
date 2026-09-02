@@ -509,6 +509,9 @@ function RowPanel({
                 <div key={o.name} className="mt-4">
                   <div className="eyebrow mb-1.5">{o.name}</div>
                   <CellMedia
+                    // The row is part of its identity: stepping to the next row must
+                    // drop the picture rather than carry it over under a new name.
+                    key={`${row._rowid}:${o.name}`}
                     table={table as string}
                     column={o.name}
                     row={{ rowid: row._rowid as number }}
