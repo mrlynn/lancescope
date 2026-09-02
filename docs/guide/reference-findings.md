@@ -44,6 +44,21 @@ Two true numbers that answer different questions, and one is a thousandth of the
 
 Many versions against few rows: a write pattern, not a fault.
 
+## fragment skew
+
+Uneven fragments, which a training loader feels and a query does not.
+
+A query planner reads the fragments it needs and stops. A loader handing one
+fragment to each worker finishes when the largest one finishes, so the shape of
+the split decides how long an epoch takes, and the row count never shows it.
+
+## embedding footprint
+
+How much of this table is the embeddings rather than the data.
+
+A curation question rather than a query one: it says what re-embedding would
+rewrite, and what dropping the vectors would give back.
+
 ## Severities
 
 | severity | meaning |

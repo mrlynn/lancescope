@@ -42,6 +42,14 @@ COVERAGE_FLOOR = 0.98
 # ratio is the demo's headline claim, computed per table rather than asserted.
 BLOB_RATIO_NOTE = 10.0
 
+# A fragment is the unit a reader parallelises over. Below this ratio of largest to
+# median, the unevenness is ordinary and saying so would be noise.
+SKEW_FLOOR = 2.0
+
+# Above this share of the ordinary-file bytes, a table is mostly its embeddings, and
+# what it costs to rebuild them is a more useful number than what it costs to scan.
+EMBEDDING_SHARE_NOTE = 0.5
+
 
 @dataclass(frozen=True)
 class Finding:
@@ -253,6 +261,89 @@ def _version_churn(facts: dict) -> list[Finding]:
     )]
 
 
+def _fragment_skew(facts: dict) -> list[Finding]:
+    """Uneven fragments, which a training loader feels and a query does not.
+
+    A query planner reads the fragments it needs and stops. A loader handing one
+    fragment to each worker finishes when the largest one finishes, so the shape of
+    the split decides how long an epoch takes, and the row count never shows it.
+    """
+    sizes = facts["fragment_rows"]
+    if len(sizes) < 4:
+        return []
+    ordered = sorted(sizes)
+    median = ordered[len(ordered) // 2]
+    largest, smallest = ordered[-1], ordered[0]
+    if not median or largest / median < SKEW_FLOOR:
+        return []
+    blob = facts["has_blob_columns"]
+    return [Finding(
+        id="fragments-unevenly-sized",
+        severity="note",
+        panel="fragments",
+        title=f"fragments run {smallest:,} to {largest:,} rows",
+        claim=(f"This table's {len(sizes)} fragments hold between {smallest:,} and "
+               f"{largest:,} rows against a median of {median:,}. A reader that takes "
+               f"one fragment per worker waits on the largest, so an epoch costs what "
+               f"the biggest fragment costs rather than what the average one does."),
+        caveat=(
+            "These fragments were written per source file, so their sizes are a "
+            "property of the corpus rather than of the write pattern. Evening them "
+            "out means rewriting the side files, which is the expensive half."
+            if blob else ""
+        ),
+        evidence={"fragments": len(sizes), "smallest_rows": smallest,
+                  "median_rows": median, "largest_rows": largest,
+                  "ratio": round(largest / median, 2),
+                  "has_blob_columns": blob},
+        suggested_action=(
+            "" if blob else
+            "Compact to even the split, or shuffle across fragments at read time."
+        ),
+    )]
+
+
+def _embedding_footprint(facts: dict) -> list[Finding]:
+    """How much of this table is the embeddings rather than the data.
+
+    A curation question rather than a query one: it says what re-embedding would
+    rewrite, and what dropping the vectors would give back.
+    """
+    usage = facts["on_disk"]
+    cols = facts["vector_columns"]
+    if not cols or usage.meta_bytes <= 0:
+        return []
+    rows = facts["rows"]
+    vector_bytes = rows * sum(dim for _, dim in cols) * 4
+    share = vector_bytes / usage.meta_bytes
+    if share < EMBEDDING_SHARE_NOTE:
+        return []
+    names = [c for c, _ in cols]
+    return [Finding(
+        id="mostly-embeddings",
+        severity="note",
+        panel="schema",
+        title=f"{share:.0%} of the ordinary bytes are vectors",
+        claim=(f"{', '.join(names)} accounts for about "
+               f"{vector_bytes / 1e6:.1f} MB across {rows:,} rows, against "
+               f"{usage.meta_bytes / 1e6:.1f} MB in this table's ordinary Lance "
+               f"files. Re-embedding rewrites that share of the table; the source "
+               f"data is the smaller part of what is stored here."),
+        caveat=(
+            "The vector figure is the uncompressed size the schema implies, and it "
+            "exceeds what is on disk — Lance is storing this column smaller than "
+            "float32 would suggest, so treat the share as an upper bound."
+            if share > 1 else ""
+        ),
+        evidence={"columns": names, "rows": rows,
+                  "dimensions": [dim for _, dim in cols],
+                  "vector_bytes": vector_bytes,
+                  "meta_bytes": usage.meta_bytes,
+                  "share": round(share, 4)},
+        columns=names,
+    )]
+
+
 RULES = (
     _unindexed_vector,
     _partial_index,
@@ -261,6 +352,8 @@ RULES = (
     _blob_split,
     _manifest_blind,
     _version_churn,
+    _fragment_skew,
+    _embedding_footprint,
 )
 
 
@@ -289,10 +382,11 @@ def gather(handle: Handle) -> dict:
                         "columns": columns, "indexed_rows": ix,
                         "unindexed_rows": ux, "coverage": coverage})
 
-    unindexed_vectors = [
+    vector_columns = [
         (f.name, dim) for f in ds.schema
-        if (dim := _vector_dim(f)) and f.name not in indexed and not is_blob_field(f)
+        if (dim := _vector_dim(f)) and not is_blob_field(f)
     ]
+    unindexed_vectors = [(c, dim) for c, dim in vector_columns if c not in indexed]
     blob_columns = [f.name for f in ds.schema if is_blob_field(f)]
 
     versions = ds.versions()
@@ -307,6 +401,10 @@ def gather(handle: Handle) -> dict:
         "stats": stats,
         "indices": indices,
         "unindexed_vectors": unindexed_vectors,
+        "vector_columns": vector_columns,
+        # Fragment row counts come off the manifest already in memory — measured at
+        # 0 bytes and 0 IOs — so the split can be described without opening a file.
+        "fragment_rows": [f.metadata.physical_rows for f in ds.get_fragments()],
         "blob_columns": blob_columns,
         "has_blob_columns": bool(blob_columns),
         "on_disk": disk_usage(handle.uri, generation=ds.version),

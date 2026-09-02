@@ -36,6 +36,93 @@ def test_an_ordinary_table_has_nothing_alarming_to_say(api):
     assert body["partial_analysis"] is False
 
 
+# ------------------------------------------------- training-set health, rule by rule
+#
+# These two rules describe a table's shape rather than its physical debt, and neither
+# fires on the demo corpus — one fragment cannot be skewed, and `moments` is 17%
+# vectors. Testing them through the API would therefore only prove they stay silent,
+# so they are exercised as what they are: pure functions of the gathered facts.
+
+
+def _facts(**over) -> dict:
+    from server.catalog import DiskUsage
+
+    base = {
+        "rows": 1000,
+        "stats": {},
+        "indices": [],
+        "unindexed_vectors": [],
+        "vector_columns": [],
+        "blob_columns": [],
+        "has_blob_columns": False,
+        "on_disk": DiskUsage(blob_bytes=0, meta_bytes=1_000_000, files=1),
+        "manifest_bytes": 1_000_000,
+        "versions": 1,
+        "fragment_rows": [],
+        "name": "t",
+        "uri": "/tmp/t.lance",
+    }
+    return {**base, **over}
+
+
+def test_an_even_split_is_not_skew():
+    facts = _facts(fragment_rows=[100, 104, 98, 102, 100])
+    assert intel_findings._fragment_skew(facts) == []
+
+
+def test_too_few_fragments_to_call_it_a_split():
+    # Three fragments where one is twice the median is a table, not a skew problem.
+    assert intel_findings._fragment_skew(_facts(fragment_rows=[10, 20, 10])) == []
+
+
+def test_a_fragment_that_decides_the_epoch_is_a_finding():
+    facts = _facts(fragment_rows=[10, 10, 12, 10, 400])
+    (f,) = intel_findings._fragment_skew(facts)
+    assert f.id == "fragments-unevenly-sized"
+    assert f.evidence["largest_rows"] == 400
+    assert f.evidence["median_rows"] == 10
+    assert f.evidence["ratio"] == pytest.approx(40.0, rel=1e-3)
+    assert f.suggested_action                      # actionable for an ordinary table
+
+
+def test_a_blob_table_is_told_why_evening_it_out_is_the_expensive_half():
+    facts = _facts(fragment_rows=[10, 10, 12, 10, 400], has_blob_columns=True)
+    (f,) = intel_findings._fragment_skew(facts)
+    assert "property of the corpus" in f.caveat
+    # No action, because the honest one is "do nothing" and a suggestion here would
+    # be talking someone into rewriting side files to tidy a row count.
+    assert f.suggested_action == ""
+
+
+def test_a_table_that_is_mostly_source_data_says_nothing():
+    # 1000 rows x 64 dims x 4 bytes = 256 KB of a 1 MB table.
+    facts = _facts(vector_columns=[("vector", 64)])
+    assert intel_findings._embedding_footprint(facts) == []
+
+
+def test_a_table_that_is_mostly_embeddings_says_so():
+    # 1000 rows x 256 dims x 4 bytes = 1.024 MB against 1 MB of ordinary files.
+    facts = _facts(vector_columns=[("vector", 256)])
+    (f,) = intel_findings._embedding_footprint(facts)
+    assert f.id == "mostly-embeddings"
+    assert f.columns == ["vector"]
+    assert f.evidence["vector_bytes"] == 1000 * 256 * 4
+
+
+def test_a_share_over_one_is_reported_as_an_upper_bound_not_a_lie():
+    # The schema implies more bytes than are on disk, which means the column is
+    # stored compressed. Claiming "102% of the bytes" without saying so would be the
+    # one thing this panel cannot do.
+    facts = _facts(vector_columns=[("vector", 256)])
+    (f,) = intel_findings._embedding_footprint(facts)
+    assert f.evidence["share"] > 1
+    assert "upper bound" in f.caveat
+
+
+def test_a_table_with_no_vectors_has_no_footprint_to_report():
+    assert intel_findings._embedding_footprint(_facts()) == []
+
+
 def test_every_finding_carries_evidence_and_a_panel(api):
     for table in ("ordinary", "vectors", "blobs", "versioned"):
         for f in api.get(f"/catalog/tables/{table}/findings").json()["findings"]:
