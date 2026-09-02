@@ -354,6 +354,50 @@ export type QueryResult = {
 export const getQueryCapabilities = (n: string) =>
   get<QueryCapabilities>(`/tables/${n}/query/capabilities`);
 
+/** One column, as something to finish typing rather than as something to display.
+ *  Shapes mirror `Column` in server/query.py. */
+export type CompletionColumn = {
+  name: string;
+  type: string;
+  /** string | number | boolean | temporal | vector | blob | other. Decides which
+   *  operators are offered and whether a value needs quoting. */
+  kind: string;
+  filterable: boolean;
+  operators: string[];
+  /** Already rendered as SQL literals, quotes and all, ready to insert. Empty for
+   *  a column that is not a facet — which is not the same as one with no values. */
+  values: string[];
+  /** Whether `values` is the whole column or what a sample found. The dropdown says
+   *  which, because "these are the values" is a bigger promise than we can keep on
+   *  a table too large to read. */
+  values_complete: boolean;
+  values_scanned: number;
+};
+
+export type QueryCompletions = {
+  name: string;
+  columns: CompletionColumn[];
+  rows: number;
+  values_included: boolean;
+  read_bytes: number;
+  read_iops: number;
+};
+
+export type FilterValidation = {
+  valid: boolean;
+  error: string | null;
+  filter: string;
+  matched_rows: number | null;
+  total_rows: number | null;
+  read_bytes: number;
+  read_iops: number;
+};
+
+/** Read once when the workspace opens, so finishing a predicate is local rather
+ *  than a request per keystroke. */
+export const getQueryCompletions = (n: string, values = true) =>
+  get<QueryCompletions>(`/tables/${n}/query/completions?values=${values}`);
+
 async function post<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
   const res = await fetch(`/api/catalog${path}`, {
     method: "POST",
@@ -373,6 +417,11 @@ async function post<T>(path: string, body: unknown, signal?: AbortSignal): Promi
   }
   return res.json();
 }
+
+/** Does this predicate parse, and how many rows does it match. Asked while someone
+ *  is still typing, so an invalid filter is an ordinary answer rather than a throw. */
+export const validateFilter = (n: string, filter: string, signal?: AbortSignal) =>
+  post<FilterValidation>(`/tables/${n}/query/validate`, { filter }, signal);
 
 export const runQuery = (n: string, spec: QuerySpec, signal?: AbortSignal) =>
   post<QueryResult>(`/tables/${n}/query`, spec, signal);

@@ -750,3 +750,266 @@ def run(handle: Handle, spec: QuerySpec, *, cell) -> QueryOutcome:
         latest_version=_latest_version(ds),
         warnings=[w for w in (unused_index_warning(handle, spec, plan),) if w],
     )
+
+
+# ------------------------------------------------------------------- completions
+
+# Two stages, because the cheap one answers for most columns. The probe reads a
+# small window and asks "does this look like it has few distinct values"; only a
+# column that passes is read properly. A column with a million distinct values is
+# rejected by the probe having read ten thousand rows, not by reading all of it.
+FACET_PROBE_ROWS = 2_000
+FACET_SAMPLE_ROWS = 10_000
+
+# Few enough to read as a hint rather than a data dump. Past this it is not a facet,
+# it is a column, and a dropdown of it helps nobody.
+MAX_FACET_VALUES = 40
+MAX_FACET_CHARS = 400
+
+# What can be said about a column of each kind. Type-aware because the failure this
+# prevents is concrete: `LIKE` offered on an integer produces a predicate Lance
+# rejects, and the person typing it has no way to know that from the column name.
+OPERATORS: dict[str, tuple[str, ...]] = {
+    "string": ("=", "!=", "IN", "LIKE", "IS NULL", "IS NOT NULL"),
+    "number": ("=", "!=", "<", "<=", ">", ">=", "BETWEEN", "IN", "IS NULL", "IS NOT NULL"),
+    "temporal": ("=", "!=", "<", "<=", ">", ">=", "BETWEEN", "IS NULL", "IS NOT NULL"),
+    "boolean": ("=", "!=", "IS NULL", "IS NOT NULL"),
+    # A vector or a blob can be asked whether it is there. Nothing else about it is
+    # expressible in a predicate, and offering `=` on one is offering a mistake.
+    "vector": ("IS NULL", "IS NOT NULL"),
+    "blob": ("IS NULL", "IS NOT NULL"),
+    "other": ("=", "!=", "IS NULL", "IS NOT NULL"),
+}
+
+
+@dataclass(frozen=True)
+class Column:
+    """One column, as something to complete rather than as something to display."""
+
+    name: str
+    type: str
+    kind: str
+    filterable: bool
+    operators: list[str]
+    # Rendered as SQL literals, ready to be inserted after an operator. Empty for a
+    # column that is not a facet — which is not the same as a column with no values.
+    values: list[str]
+    # Whether `values` is every value in the column or what a sample found. A
+    # dropdown that says "these are the values" and one that says "these are the
+    # values we saw in 9,000 of 40,670 rows" are different promises.
+    values_complete: bool
+    values_scanned: int
+
+    def as_dict(self) -> dict:
+        return {
+            "name": self.name,
+            "type": self.type,
+            "kind": self.kind,
+            "filterable": self.filterable,
+            "operators": self.operators,
+            "values": self.values,
+            "values_complete": self.values_complete,
+            "values_scanned": self.values_scanned,
+        }
+
+
+@dataclass(frozen=True)
+class Completions:
+    columns: list[Column]
+    rows: int
+    values_included: bool
+    read_bytes: int
+    read_iops: int
+
+    def as_dict(self) -> dict:
+        return {
+            "columns": [c.as_dict() for c in self.columns],
+            "rows": self.rows,
+            "values_included": self.values_included,
+            "read_bytes": self.read_bytes,
+            "read_iops": self.read_iops,
+        }
+
+
+def field_kind(f) -> str:
+    """A pyarrow type, reduced to the only distinction a filter box cares about.
+
+    The console shows the real type elsewhere; this decides which operators are
+    offered and whether a value needs quoting, and for that there are six kinds.
+    """
+    if is_blob_field(f):
+        return "blob"
+    if _vector_dim(f):
+        return "vector"
+    t = f.type
+    if pa.types.is_string(t) or pa.types.is_large_string(t):
+        return "string"
+    if pa.types.is_boolean(t):
+        return "boolean"
+    if pa.types.is_integer(t) or pa.types.is_floating(t) or pa.types.is_decimal(t):
+        return "number"
+    if pa.types.is_temporal(t):
+        return "temporal"
+    if pa.types.is_binary(t) or pa.types.is_large_binary(t):
+        return "blob"
+    return "other"
+
+
+def sql_literal(value) -> str:
+    """A Python value as a literal that can be pasted into a predicate.
+
+    Single quotes, doubled inside — SQL's own escape, not Python's. `repr()` is
+    close enough to look right and wrong often enough to matter: it renders a string
+    holding an apostrophe with double quotes, and `True` with a capital.
+    """
+    if value is None:
+        return "NULL"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    return "'" + str(value).replace("'", "''") + "'"
+
+
+def _distinct(ds, column: str, limit: int, offset: int = 0) -> set | None:
+    """Distinct non-null values in one window of rows, or None if unreadable."""
+    try:
+        table = ds.scanner(columns=[column], limit=limit, offset=offset).to_table()
+    except (ValueError, OSError):
+        return None
+    return {v for v in table.column(column).to_pylist() if v is not None}
+
+
+def _is_short_list(values: set) -> bool:
+    """Few enough, and brief enough, to read as a hint rather than a data dump."""
+    if not 0 < len(values) <= MAX_FACET_VALUES:
+        return False
+    return len(", ".join(repr(v) for v in values)) <= MAX_FACET_CHARS
+
+
+def facet_values(ds, column: str, *, rows: int) -> tuple[set, bool, int] | None:
+    """The distinct values of a low-cardinality column, or None if it is not one.
+
+    Returns the values, whether that is all of them, and how many rows were read to
+    find out — because a dropdown built from a sample and a dropdown built from the
+    whole column are different claims, and the person choosing from it should be
+    told which one they are looking at.
+
+    Sampled from windows spread across the table rather than from its first rows.
+    A prefix is not a sample: a column sorted by date, or by country, shows a
+    handful of distinct values in its first ten thousand rows and looks exactly like
+    a facet. Offering those few as if they were the column's vocabulary is worse
+    than offering nothing, because the list looks authoritative.
+
+    Cheap first, thorough second. The probe reads one small window and rejects
+    anything that is obviously not a facet, which is most columns; only a column
+    that survives it costs the wider read.
+    """
+    probe = _distinct(ds, column, FACET_PROBE_ROWS)
+    if probe is None or not _is_short_list(probe):
+        return None
+
+    if rows <= FACET_SAMPLE_ROWS:
+        # Small enough to read outright, so the answer is not a sample at all.
+        values = _distinct(ds, column, FACET_SAMPLE_ROWS)
+        if values is None or not _is_short_list(values):
+            return None
+        return values, True, rows
+
+    # Three windows: the head, the middle and the tail. A sorted column disagrees
+    # with itself across them and its union stops being short, which is exactly the
+    # rejection a prefix sample never makes.
+    window = FACET_SAMPLE_ROWS // 3
+    values: set = set()
+    scanned = 0
+    for offset in (0, max(0, rows // 2 - window // 2), max(0, rows - window)):
+        found = _distinct(ds, column, window, offset)
+        if found is None:
+            return None
+        values |= found
+        scanned += window
+        # Stop as soon as it is not a facet rather than reading the rest to confirm.
+        if not _is_short_list(values):
+            return None
+    return values, False, min(scanned, rows)
+
+
+def completions(handle: Handle, *, include_values: bool = True) -> Completions:
+    """Everything a filter box needs to finish what someone is typing.
+
+    Schema is free. Values are not, and they are only worth reading for the columns
+    where they are short enough to be a hint — so `include_values` buys the facet
+    read, and the cost of having done it is reported like every other read here.
+    """
+    ds = handle.ds
+    handle.drain()
+    rows = ds.count_rows()
+
+    columns: list[Column] = []
+    values_found = False
+    for f in ds.schema:
+        kind = field_kind(f)
+        filterable = kind not in ("vector", "blob")
+        values: list[str] = []
+        complete, scanned = False, 0
+        if include_values and kind == "string":
+            # Strings only. Nothing about `year = 2024` needs a list of the years
+            # present, and scanning integer columns to produce one spends a read on
+            # a dropdown nobody opens.
+            found = facet_values(ds, f.name, rows=rows)
+            if found is not None:
+                raw, complete, scanned = found
+                values = [sql_literal(v) for v in sorted(raw, key=str)]
+                values_found = True
+        columns.append(Column(
+            name=f.name,
+            type=str(f.type),
+            kind=kind,
+            filterable=filterable,
+            operators=list(OPERATORS[kind]),
+            values=values,
+            values_complete=complete,
+            values_scanned=scanned,
+        ))
+
+    d = handle.drain()
+    return Completions(columns=columns, rows=rows,
+                       values_included=values_found,
+                       read_bytes=d.read_bytes, read_iops=d.read_iops)
+
+
+# -------------------------------------------------------------------- validation
+
+def validate_filter(handle: Handle, filter_text: str) -> dict:
+    """Whether a predicate parses, and how many rows it matches.
+
+    The matched count is the part that matters. "Valid" only says Lance understood
+    the syntax; `track = 'Go devroom'` on a table whose value is `Go` is valid and
+    matches nothing, and the difference between those two outcomes is the whole
+    question someone is asking when they type a filter.
+
+    Never raises. An invalid predicate is the ordinary case while somebody is still
+    typing one.
+    """
+    text = (filter_text or "").strip()
+    if not text:
+        handle.drain()
+        total = handle.ds.count_rows()
+        d = handle.drain()
+        return {"valid": True, "error": None, "filter": "",
+                "matched_rows": total, "total_rows": total,
+                "read_bytes": d.read_bytes, "read_iops": d.read_iops}
+    try:
+        handle.drain()
+        matched = handle.ds.count_rows(filter=text)
+        total = handle.ds.count_rows()
+        d = handle.drain()
+        return {"valid": True, "error": None, "filter": text,
+                "matched_rows": matched, "total_rows": total,
+                "read_bytes": d.read_bytes, "read_iops": d.read_iops}
+    except (ValueError, OSError) as e:
+        d = handle.drain()
+        return {"valid": False,
+                "error": f"Lance rejected this filter: {str(e).splitlines()[0][:160]}",
+                "filter": text, "matched_rows": None, "total_rows": None,
+                "read_bytes": d.read_bytes, "read_iops": d.read_iops}

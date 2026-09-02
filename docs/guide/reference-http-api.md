@@ -30,7 +30,9 @@ Read-only. Nothing here writes to a dataset, and nothing materialises a blob col
 | `GET` | `/catalog/tables/{name:path}/indices` | What is indexed on this table — and, more usefully, what isn't. |
 | `POST` | `/catalog/tables/{name:path}/query` | Run it, and report what it cost and which path it took. |
 | `GET` | `/catalog/tables/{name:path}/query/capabilities` | What this table can be asked, and why not where it cannot. |
+| `GET` | `/catalog/tables/{name:path}/query/completions` | The columns, the operators each one accepts, and what is in the short ones. |
 | `POST` | `/catalog/tables/{name:path}/query/explain` | The plan, without running the query. |
+| `POST` | `/catalog/tables/{name:path}/query/validate` | Does this predicate parse, and how many rows does it match. |
 | `GET` | `/catalog/tables/{name:path}/rows` | Browse rows, without ever materialising a blob. |
 | `GET` | `/catalog/tables/{name:path}/versions` | The table's history, newest first, with what each version changed. |
 

@@ -635,6 +635,40 @@ async def query_capabilities(name: str) -> JSONResponse:
     })
 
 
+@router.get("/tables/{name:path}/query/completions")
+async def query_completions(name: str, values: bool = True) -> JSONResponse:
+    """The columns, the operators each one accepts, and what is in the short ones.
+
+    Read once when the workspace opens, so finishing a predicate is local and
+    instant rather than a request per keystroke. `values=false` skips the facet
+    read for anyone who wants the schema alone.
+
+    Run on a worker thread: the facet probe reads data, and on a wide table it is
+    the one part of opening the workspace that is not metadata.
+    """
+    h = open_table(name)
+    out = await asyncio.to_thread(query.completions, h, include_values=values)
+    return JSONResponse({"name": name, **out.as_dict()})
+
+
+class FilterBody(BaseModel):
+    filter: str = ""
+
+
+@router.post("/tables/{name:path}/query/validate")
+async def query_validate(name: str, body: FilterBody) -> JSONResponse:
+    """Does this predicate parse, and how many rows does it match.
+
+    Called while someone is still typing, so an invalid filter is an ordinary
+    answer with a reason rather than a 400. The count is the useful half: a filter
+    that parses and matches nothing is the failure people actually hit, and finding
+    that out here costs one metadata read instead of a scan and a page of results.
+    """
+    h = open_table(name)
+    out = await asyncio.to_thread(query.validate_filter, h, body.filter)
+    return JSONResponse({"name": name, **out})
+
+
 @router.get("/tables/{name:path}/compare")
 async def compare_versions(name: str, a: int, b: int) -> JSONResponse:
     """Two versions of one table, side by side and pinned.
