@@ -726,27 +726,37 @@ MAX_BLOB_CHUNK = 8 * 1024 * 1024
 @router.get("/tables/{name:path}/blob")
 async def blob(name: str, request: Request, key: str,
                column: str | None = None, key_column: str = "blob_key") -> Response:
-    """Stream bytes out of a Blob V2 column, honouring HTTP Range.
+    """Stream the bytes of one heavy cell, honouring HTTP Range.
 
     The demo has had this since the beginning, at `/video/{talk_id}/{segment_idx}`,
     shaped entirely around one FOSDEM corpus. A table someone made from their own
     video needs the same thing without those two column names baked in, so this asks
-    for the row by whatever key the table uses and finds the blob column from the
-    schema.
+    for the row by whatever key the table uses and finds the column from the schema.
 
-    Reading it is a read: the bytes move because somebody pressed play, and the cost
-    is reported the way every other read here is.
+    Two kinds of heavy column, and the difference between them is a cost rather than
+    a detail. A Blob V2 column is a side file: `take_blobs` seeks into it and only
+    the bytes asked for move, which is what makes scrubbing a 17 MB video segment
+    cheap. An ordinary `binary` column — what a thumbnail usually is — has no side
+    file to seek into, so reading any of it materialises the whole cell. Both report
+    what they cost in `X-Read-Bytes`, and the second is honest about being the more
+    expensive shape rather than being presented as the same thing.
+
+    Reading it is a read: the bytes move because somebody asked to see them, and the
+    cost is reported the way every other read here is.
     """
     h = open_table(name)
     ds = h.ds
 
     blob_columns = [f.name for f in ds.schema if is_blob_field(f)]
-    if not blob_columns:
-        raise HTTPException(404, f"{name} has no blob column to stream")
-    if column is not None and column not in blob_columns:
+    binary_columns = query.heavy_binary_columns(ds)
+    readable = blob_columns + binary_columns
+    if not readable:
+        raise HTTPException(404, f"{name} has no column of bytes to stream")
+    if column is not None and column not in readable:
         raise HTTPException(
-            404, f"{column!r} is not a blob column here — try {', '.join(blob_columns)}")
-    picked = column or blob_columns[0]
+            404, f"{column!r} holds no bytes here — try {', '.join(readable)}")
+    picked = column or readable[0]
+    side_file = picked in blob_columns
 
     if key_column not in ds.schema.names:
         raise HTTPException(400, f"{name} has no column {key_column!r} to look up by")
@@ -764,14 +774,9 @@ async def blob(name: str, request: Request, key: str,
         raise HTTPException(404, f"no row in {name} where {key_column} = {key!r}")
     row_id = found.column("_rowid")[0].as_py()
 
-    try:
-        handle = ds.take_blobs(picked, ids=[row_id])[0]
-    except Exception as e:                                        # noqa: BLE001
-        raise HTTPException(500, f"could not open that blob: {e}") from e
+    rng = request.headers.get("range")
 
-    try:
-        size = handle.size()
-        rng = request.headers.get("range")
+    def _range(size: int) -> tuple[int, int]:
         start, end = 0, size - 1
         if rng and rng.startswith("bytes="):
             lo, _, hi = rng[6:].split(",")[0].strip().partition("-")
@@ -779,20 +784,43 @@ async def blob(name: str, request: Request, key: str,
             end = int(hi) if hi else size - 1
         end = min(end, size - 1, start + MAX_BLOB_CHUNK - 1)
         if start >= size:
-            raise HTTPException(416, f"range starts past the end of a {size}-byte blob")
-        handle.seek(start)
-        data = handle.read(end - start + 1)
-    finally:
+            raise HTTPException(416, f"range starts past the end of a {size}-byte value")
+        return start, end
+
+    if side_file:
         try:
-            handle.close()
-        except Exception:                                          # noqa: BLE001
-            pass
+            handle = ds.take_blobs(picked, ids=[row_id])[0]
+        except Exception as e:                                    # noqa: BLE001
+            raise HTTPException(500, f"could not open that blob: {e}") from e
+        try:
+            size = handle.size()
+            start, end = _range(size)
+            handle.seek(start)
+            data = handle.read(end - start + 1)
+        finally:
+            try:
+                handle.close()
+            except Exception:                                      # noqa: BLE001
+                pass
+    else:
+        # No side file to seek into: the cell arrives whole and the range is applied
+        # to it afterwards. Slicing here saves the browser bytes, not the reader.
+        try:
+            got = ds._take_rows([row_id], columns=[picked])
+        except Exception:                                         # noqa: BLE001
+            got = ds.to_table(columns=[picked], filter=predicate, limit=1)
+        cell = got.column(picked)[0].as_py()
+        if cell is None:
+            raise HTTPException(404, f"{picked} is empty in that row")
+        size = len(cell)
+        start, end = _range(size)
+        data = cell[start:end + 1]
 
     d = h.drain()
     return Response(
         content=data,
         status_code=206 if rng else 200,
-        media_type=_mime_for(ds, key_column, key),
+        media_type=_mime_for(ds, key_column, key, data),
         headers={
             "Accept-Ranges": "bytes",
             "Content-Range": f"bytes {start}-{start + len(data) - 1}/{size}",
@@ -819,16 +847,25 @@ def _key_predicate(ds, key_column: str, key: str) -> str:
     return f"{key_column} = {key}"
 
 
-def _mime_for(ds, key_column: str, key: str) -> str:
-    """The row's own `mime` when it has one. Ingest writes it; other tables may not."""
-    if "mime" not in ds.schema.names:
-        return "application/octet-stream"
-    try:
-        got = ds.to_table(columns=["mime"],
-                          filter=_key_predicate(ds, key_column, key), limit=1)
-        return str(got.column("mime")[0].as_py() or "application/octet-stream")
-    except (ValueError, OSError, IndexError):
-        return "application/octet-stream"
+def _mime_for(ds, key_column: str, key: str, data: bytes = b"") -> str:
+    """The row's own `mime` when it has one, else what the bytes look like.
+
+    Ingest writes a `mime` column; a table somebody built themselves usually has a
+    thumbnail column and nothing saying what is in it. Served as octet-stream the
+    browser will not draw it, so the console would be holding a picture it could not
+    show — and reading the encoding out of the column's *name* is a guess that works
+    on `thumb_jpeg` and on nothing else.
+    """
+    if "mime" in ds.schema.names:
+        try:
+            got = ds.to_table(columns=["mime"],
+                              filter=_key_predicate(ds, key_column, key), limit=1)
+            declared = got.column("mime")[0].as_py()
+            if declared:
+                return str(declared)
+        except (ValueError, OSError, IndexError):
+            pass
+    return query.sniff_media_type(data) or "application/octet-stream"
 
 
 @router.get("/tables/{name:path}")

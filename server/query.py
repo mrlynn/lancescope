@@ -978,6 +978,56 @@ def completions(handle: Handle, *, include_values: bool = True) -> Completions:
                        read_bytes=d.read_bytes, read_iops=d.read_iops)
 
 
+# ------------------------------------------------------------------ media sniffing
+
+# Enough of each format to recognise it, and no more. A table that carries a `mime`
+# column is believed over this; a table that does not is most tables.
+_MAGIC: tuple[tuple[bytes, str], ...] = (
+    (b"\xff\xd8\xff", "image/jpeg"),
+    (b"\x89PNG\r\n\x1a\n", "image/png"),
+    (b"GIF87a", "image/gif"),
+    (b"GIF89a", "image/gif"),
+    (b"%PDF-", "application/pdf"),
+    (b"OggS", "audio/ogg"),
+    (b"\x1a\x45\xdf\xa3", "video/webm"),
+)
+
+
+def sniff_media_type(data: bytes) -> str | None:
+    """What these bytes are, from their first few, or None if unrecognised.
+
+    A thumbnail column is usually just `binary`, with nothing anywhere saying what
+    encoding is in it. Served as `application/octet-stream` a browser will not draw
+    it, so the console would be holding a picture it could not show — and guessing
+    from the column's *name* is the kind of guess that works on `thumb_jpeg` and
+    fails on everything else.
+    """
+    if len(data) < 4:
+        return None
+    for magic, mime in _MAGIC:
+        if data.startswith(magic):
+            return mime
+    # Both of these carry their marker after a four-byte length or tag.
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    if data[4:8] == b"ftyp":
+        return "video/mp4"
+    return None
+
+
+def heavy_binary_columns(ds) -> list[str]:
+    """Columns holding bytes that are not a Blob V2 side file.
+
+    Blob V2 columns are read through `take_blobs`, which fetches only the range
+    asked for. These are ordinary columns whose values happen to be large, and
+    reading one materialises the whole cell — a difference in cost worth keeping
+    visible rather than hiding behind one word for both.
+    """
+    return [f.name for f in ds.schema
+            if not is_blob_field(f)
+            and (pa.types.is_binary(f.type) or pa.types.is_large_binary(f.type))]
+
+
 # -------------------------------------------------------------------- validation
 
 def validate_filter(handle: Handle, filter_text: str) -> dict:

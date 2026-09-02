@@ -208,7 +208,7 @@ def test_one_response_cannot_be_asked_to_hold_the_whole_file_in_memory(api):
 def test_asking_a_table_with_no_blob_column_says_so(api):
     r = api.get("/catalog/tables/ordinary/blob", params={"key": "0", "key_column": "id"})
     assert r.status_code == 404
-    assert "no blob column" in r.json()["detail"]
+    assert "no column of bytes" in r.json()["detail"]
 
 
 def test_an_unknown_key_is_a_404_naming_the_column_it_looked_in(api):
