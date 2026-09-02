@@ -123,7 +123,12 @@ def test_the_mcp_surface_reaches_only_the_read_routes():
 
 # Every route that is not a plain GET, and why it does not write a dataset. A new
 # entry here is a deliberate act; a new mutating route without one fails this test.
+#
+# Routes under /ingest are the exception the whole quarantine exists to contain: they
+# are allowed to say they write. Everywhere else the justification has to explain why
+# the route does not, and `test_only_ingest_routes_admit_to_writing` holds that line.
 MUTATING_ROUTES = {
+    ("POST", "/ingest/scan"): "surveys a directory; opens no file and writes nothing",
     ("POST", "/catalog/tables/{name:path}/query"): "a read with a body too big for a query string",
     ("POST", "/catalog/tables/{name:path}/query/explain"): "plans a read without running it",
     ("POST", "/catalog/tables/{name:path}/compare/query"): "a read across two versions",
@@ -164,6 +169,17 @@ def test_every_mutating_route_is_declared_and_justified():
     assert not undeclared, (
         f"new mutating route(s) with no entry in MUTATING_ROUTES: {sorted(undeclared)}. "
         f"Add one saying why it does not write a dataset — or put it under /ingest.")
+
+
+def test_only_ingest_routes_admit_to_writing():
+    """A justification is prose, and prose drifts. This is the one word in it that
+    carries a guarantee, so it is checked rather than trusted."""
+    confessing = {(m, p) for (m, p), why in MUTATING_ROUTES.items()
+                  if "writes" in why and "never a dataset" not in why
+                  and "settings file" not in why and "writes nothing" not in why}
+    outside = {(m, p) for m, p in confessing if not p.startswith("/ingest")}
+    assert not outside, (
+        f"these describe themselves as writing but are not under /ingest: {sorted(outside)}")
 
 
 def test_the_declared_route_list_has_not_gone_stale():
@@ -253,3 +269,66 @@ async def test_no_mcp_tool_changes_one_byte_on_disk(frozen_corpus, monkeypatch, 
 
     assert manifest_hashes(frozen_corpus) == before_manifests, f"{tool} wrote a manifest"
     assert snapshot(frozen_corpus) == before, f"{tool} changed a file on disk"
+
+
+# ------------------------------------------------------- the ingest import graph
+
+CORE = REPO / "ingest" / "core"
+
+# What `ingest.core` may not import at module scope. Each of these is either absent
+# from the packaged app (`packaging/lancescope.spec` excludes them) or absent from a
+# lean install, and an import that fires at module load turns "this build cannot
+# decode video" into "this build will not start".
+HEAVY = {"torch", "open_clip", "av", "transformers", "lancedb",
+         "PIL", "pypdfium2", "pypdf", "pillow_heif"}
+
+
+def core_modules() -> list[Path]:
+    return sorted(p for p in CORE.rglob("*.py") if "__pycache__" not in p.parts)
+
+
+def module_scope_imports(tree: ast.AST) -> set[str]:
+    """Imports at the top level of the file — the ones that fire on import.
+
+    An import inside a function is the whole point of the rule, not a violation of
+    it, so nesting is what distinguishes the two.
+    """
+    out: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, ast.Import):
+            out.update(a.name.split(".")[0] for a in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            out.add(node.module.split(".")[0])
+    return out
+
+
+def test_no_module_under_ingest_core_imports_a_heavy_dependency_at_module_scope():
+    assert core_modules(), "no core modules found; this test would prove nothing"
+    offenders = {}
+    for path in core_modules():
+        hits = module_scope_imports(ast.parse(path.read_text())) & HEAVY
+        if hits:
+            offenders[str(path.relative_to(CORE))] = sorted(hits)
+    assert not offenders, (
+        f"these fire a heavy import on load: {offenders}. Move it inside the "
+        f"function that needs it, so a build without it reports a capability "
+        f"instead of failing to start.")
+
+
+@pytest.mark.parametrize("blocked", sorted(HEAVY))
+def test_the_ingest_core_imports_with_a_heavy_dependency_missing(blocked, monkeypatch):
+    """Proved by making the import fail rather than by trusting the AST."""
+    import builtins
+    import importlib
+
+    real_import = builtins.__import__
+
+    def refuse(name, *args, **kwargs):
+        if name == blocked or name.startswith(f"{blocked}."):
+            raise ImportError(f"{blocked} is not installed in this build")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", refuse)
+    for name in ("ingest.core.media", "ingest.core.binaries",
+                 "ingest.core.plan", "ingest.core.capability"):
+        importlib.reload(importlib.import_module(name))

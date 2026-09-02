@@ -61,6 +61,15 @@ The only routes that write anything, and what they write is the settings file.
 | `PUT` | `/settings/intelligence` | — |
 | `GET` | `/settings/intelligence/probe` | What is actually available on this machine right now. |
 
+## Creating a database
+
+The only routes permitted to write a dataset, and the only ones that may create a table. They may never modify one that already exists.
+
+| method | path | what it does |
+| --- | --- | --- |
+| `GET` | `/ingest/capabilities` | What this build could create, before anyone asks it to create anything. |
+| `POST` | `/ingest/scan` | Survey a source directory. |
+
 ## Ctrl-F for Video
 
 The demo's own routes. They return 503 when the corpus is absent.

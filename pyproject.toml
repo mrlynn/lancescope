@@ -34,6 +34,20 @@ dependencies = [
     "sentencepiece>=0.2",
 ]
 
+[project.scripts]
+lancescope = "ingest.cli:main"
+
+# Present so that `[project.scripts]` is real rather than decorative — without a
+# build backend uv treats this as a virtual project and never installs the entry
+# point, which would leave `lancescope` documented and missing. Only the two import
+# roots are packaged; `web/`, `desktop/` and `data/` are not Python.
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["server", "ingest"]
+
 [dependency-groups]
 dev = ["ruff>=0.9"]
 
@@ -59,6 +73,20 @@ console = [
 ]
 
 build = ["pyinstaller>=6.11"]
+
+# Decoders the general media pipeline needs and the FOSDEM demo never did. Kept out
+# of the main dependencies because each one is a modality: someone ingesting a photo
+# library should not be made to install a PDF renderer, and `ingest/core/binaries.py`
+# reports a missing one as a capability rather than failing at the file that needs it.
+#
+# pypdfium2 + pypdf rather than PyMuPDF: no external binary, so PDF is the one
+# non-image modality that could work in the packaged app — and PyMuPDF is AGPL, which
+# this ships as a signed desktop app.
+ingest = [
+    "pypdfium2>=4.30",
+    "pypdf>=5",
+    "pillow-heif>=0.21",
+]
 
 # What the contract tests need, and nothing else. Deliberately excludes torch and
 # open-clip: the console does not import them, and a test job that pulls a gigabyte
@@ -87,10 +115,11 @@ line-length = 100
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
 
-# ingest/ is put on sys.path at runtime rather than being a package, so `embed` and
-# `config` are ours even though they resolve like third-party modules.
+# `ingest` is a package now, but its demo-era modules are still put on sys.path at
+# runtime, so `embed` and `config` are ours too even though they resolve like
+# third-party modules.
 [tool.ruff.lint.isort]
-known-first-party = ["server", "embed", "config"]
+known-first-party = ["server", "ingest", "embed", "config"]
 
 [tool.ruff.lint.per-file-ignores]
 # The server and scripts put ingest/ on sys.path before importing from it, so those

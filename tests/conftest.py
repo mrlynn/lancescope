@@ -235,3 +235,54 @@ def snapshot(root: Path) -> dict[str, tuple[int, int]]:
             st = p.stat()
             out[str(p.relative_to(root))] = (st.st_size, st.st_mtime_ns)
     return out
+
+
+# A one-pixel PNG, a 44-byte WAV header, an ftyp box and a minimal PDF. Real files of
+# each kind, small enough to inline, so a scan fixture is not a pile of empty files
+# named to look like media.
+PNG_1X1 = bytes.fromhex(
+    "89504e470d0a1a0a0000000d49484452000000010000000108020000009077"
+    "53de0000000c4944415478da63a8d038010002840169d72be35b0000000049"
+    "454e44ae426082")
+WAV_HEADER = (b"RIFF$\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00"
+              b"\x44\xac\x00\x00\x88X\x01\x00\x02\x00\x10\x00data\x00\x00\x00\x00")
+MP4_FTYP = (b"\x00\x00\x00\x20ftypisom\x00\x00\x02\x00isomiso2avc1mp41"
+            b"\x00\x00\x00\x08free")
+MINIMAL_PDF = (b"%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
+               b"2 0 obj<</Type/Pages/Kids[]/Count 0>>endobj\n"
+               b"trailer<</Root 1 0 R>>\n%%EOF\n")
+
+
+@pytest.fixture
+def media_source(tmp_path) -> Path:
+    """A directory shaped like something a person would point this at.
+
+    Deliberately mixed: several of one kind so counts mean something, one of three
+    others, files this tool has no handler for, a hidden file, and a nested
+    directory — because "does it recurse" is not a question worth discovering later.
+    """
+    src = tmp_path / "media"
+    (src / "nested").mkdir(parents=True)
+    for i in range(3):
+        (src / f"photo-{i}.png").write_bytes(PNG_1X1)
+    (src / "nested" / "buried.jpg").write_bytes(PNG_1X1)
+    (src / "clip.mp4").write_bytes(MP4_FTYP)
+    (src / "tone.wav").write_bytes(WAV_HEADER)
+    (src / "paper.pdf").write_bytes(MINIMAL_PDF)
+    (src / "notes.txt").write_text("not media")
+    (src / "data.json").write_text("{}")
+    (src / ".DS_Store").write_bytes(b"\x00" * 8)
+    return src
+
+
+@pytest.fixture
+def api_ingest(settings_file):
+    """The ingest routes. No catalog: nothing here reads a dataset yet."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from server.routes import ingest as ingest_routes
+
+    app = FastAPI()
+    app.include_router(ingest_routes.router)
+    return TestClient(app)

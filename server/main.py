@@ -27,6 +27,7 @@ from server import settings as cfg
 from server.catalog import Catalog
 from server.routes import catalog as catalog_routes
 from server.routes import demo
+from server.routes import ingest as ingest_routes
 from server.routes import intel as intel_routes
 from server.routes import settings as settings_routes
 
@@ -80,3 +81,7 @@ app.include_router(settings_routes.router)
 # The language layer, under /intel/*. Optional: with nothing configured every route
 # here still answers, and says what is missing.
 app.include_router(intel_routes.router)
+
+# Creating a database, under /ingest/*. The only router that may write a dataset —
+# and today the only one that says it cannot yet. See server/routes/ingest.py.
+app.include_router(ingest_routes.router)
