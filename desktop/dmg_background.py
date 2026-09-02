@@ -60,7 +60,7 @@ def draw() -> Image.Image:
         fade = max(0.0, 1.0 - (y / H) * 1.15)
         if fade <= 0.02:
             continue
-        colour = tuple(round(i + (c - i) * fade) for i, c in zip(INK, DOTS))
+        colour = tuple(round(i + (c - i) * fade) for i, c in zip(INK, DOTS, strict=True))
         for x in range(step, W, step):
             cx, cy = x * SS, y * SS
             d.ellipse([cx - r * SS, cy - r * SS, cx + r * SS, cy + r * SS], fill=colour)
