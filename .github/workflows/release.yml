@@ -1,0 +1,147 @@
+# The signed, notarised DMG, built from a tag.
+#
+# Everything here already worked on a laptop: desktop/sign.sh does the build, the
+# deep signing of all ~81 nested Mach-O files, the notarisation and the staple.
+# What CI adds is a keychain that does not exist yet, a bound on how long Apple
+# gets, and a release to upload to. The order of the steps is load-bearing —
+# see the comments, each of which is a way this fails silently.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      notarise:
+        description: "Notarise and staple (off = build and sign only, a dry run)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  macos-arm64:
+    # Pinned, not macos-latest: the runner image decides the Xcode and therefore
+    # the notarisation toolchain, and a release should not change because GitHub
+    # moved the label.
+    runs-on: macos-15
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # FIRST, because it costs twenty seconds and the alternative is finding out
+      # after forty minutes and a notarisation that the tag disagrees with the
+      # files — by which point the tag is spent.
+      - name: The tag must match the version in all three files
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          set -euo pipefail
+          python3 scripts/bump_version.py --check "${GITHUB_REF_NAME#v}"
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # Easy to leave out and fatal well into the run: sign.sh calls `make sidecar`,
+      # which depends on `ui`, which runs `npm run export` in web/.
+      - name: Install the console's dependencies
+        run: npm ci
+        working-directory: web
+
+      # Must precede sign.sh, whose preflight refuses to start without cargo.
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+
+      - name: Import the signing certificate into a throwaway keychain
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN="$RUNNER_TEMP/build.keychain"
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" -A -T /usr/bin/codesign -T /usr/bin/security
+
+          # Without this, codesign raises a UI prompt for keychain access. On a
+          # headless runner that is not an error — the job simply hangs until the
+          # timeout kills it, with nothing in the log saying why.
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s \
+            -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+
+          # sign.sh verifies the identity with `security find-identity`, which walks
+          # the SEARCH LIST. Import alone leaves the keychain off that list, and the
+          # failure reads as "the identity is not in the keychain" from a keychain
+          # that demonstrably holds it.
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
+
+          rm -f "$RUNNER_TEMP/cert.p12"
+
+      - name: Build, sign, notarise and staple
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          # An hour is generous for a repeat submission and far short of the job
+          # timeout, so a slow queue ends with a message and an id rather than a
+          # runner killed mid-staple. sign.sh treats unset as "wait forever", which
+          # is what a laptop should do and a runner must not.
+          NOTARY_TIMEOUT: "3600"
+        run: |
+          set -euo pipefail
+          # No .cred file is written: sign.sh guards that read with `[ -f ]` and
+          # falls through to the environment, and an app-specific password on the
+          # runner's disk for the length of a job is worth avoiding for free.
+          if [ "${{ inputs.notarise }}" = "false" ] && [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "dry run: building and signing, not notarising"
+            unset APPLE_ID APPLE_PASSWORD
+          fi
+          ./desktop/sign.sh
+
+      - name: Checksum
+        id: artefact
+        run: |
+          set -euo pipefail
+          # The same glob sign.sh uses, rather than rebuilding the filename here —
+          # if Tauri changes how it names the DMG, this should follow rather than
+          # silently upload nothing.
+          DMG=$(ls desktop/src-tauri/target/release/bundle/dmg/*.dmg | head -1)
+          shasum -a 256 "$DMG" | tee "$RUNNER_TEMP/SHA256SUMS.txt"
+          echo "dmg=$DMG" >> "$GITHUB_OUTPUT"
+
+      - name: Draft the release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          # A DRAFT, deliberately. lancescope.mlynn.dev follows /releases/latest
+          # automatically, and a draft is never "latest" — so a bad build cannot
+          # become the download button before a human has opened the DMG once.
+          draft: true
+          generate_release_notes: true
+          files: |
+            ${{ steps.artefact.outputs.dmg }}
+            ${{ runner.temp }}/SHA256SUMS.txt
+
+      - name: Remove the keychain
+        if: always()
+        run: security delete-keychain "$RUNNER_TEMP/build.keychain" || true
