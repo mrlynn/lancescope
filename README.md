@@ -67,6 +67,34 @@ It carries the console and leaves out torch, so the demo's semantic search is
 unavailable in a packaged build and says so. `./desktop/sign.sh` signs and notarises
 it with a Developer ID — see [the guide](docs/guide/howto-desktop.md).
 
+## In a container
+
+The macOS app only runs on macOS. This is the other way in — Linux, a server, or
+beside a pipeline that is already writing Lance tables:
+
+```bash
+docker run --rm -p 8088:8080 \
+  -v /path/to/your/lance:/data:ro \
+  ghcr.io/mrlynn/lancescope:pylance-11.0.0
+```
+
+There is one image per Lance reader, because **a Lance reader is not universal**: a
+dataset written by one version may need that version to read it. The tag names the
+reader, and `docker/compose.yaml` is the version worth having when something else in
+the stack owns the volume.
+
+Which versions exist is measured rather than assumed. `scripts/compat/probe.py`
+installs each candidate into its own environment and reads a real blob table with
+it, and the floor it establishes is **pylance 3.0.0**: below that, 2.0.1 sees a Blob
+V2 column and cannot open it, 1.0.4 does not see it at all, and 0.38 has no
+`io_stats_incremental`, so every byte figure in the console is missing. That last one
+was this project's declared floor until the probe was written — a number nobody had
+checked.
+
+CI runs the contract tests against eight readers on every push, and the settings page
+has a **The reader** section naming the versions underneath and anything they cannot
+do. [Lance versions](docs/guide/reference-versions.md) is the matrix.
+
 ## The guide
 
 Everything below in more depth, and served by the app itself at **`/docs`** — a
@@ -81,7 +109,9 @@ that look odd:
 | [Diagnose a slow query](docs/guide/howto-diagnose.md) | access paths, costs, before and after |
 | [Enable the language layer](docs/guide/howto-intelligence.md) | local and free, or a key |
 | [Point an agent at it](docs/guide/howto-agents.md) | MCP, and which database it reads |
+| [Run it in a container](docs/guide/howto-container.md) | Docker and Compose, pinned to the reader your data needs |
 | [Reference](docs/guide/reference-configuration.md) | config, query modes, findings, models, tools, routes |
+| [Lance versions](docs/guide/reference-versions.md) | which readers are supported, and how that was measured |
 | [Why it works this way](docs/guide/explain-cost.md) | cost as the unit, Blob V2, evidence before advice |
 
 The six reference pages are generated from the code by `make docs`, and `make test`

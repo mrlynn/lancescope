@@ -61,3 +61,108 @@ jobs:
       - run: npx tsc --noEmit
       - run: npm run lint
       - run: npm run build
+
+  # The version matrix. A Lance reader is not universal, and `pylance>=3` in
+  # pyproject.toml is a claim about eight major versions that nothing was checking.
+  # This runs the same contract tests against each one, so the floor stays true as
+  # the code moves rather than as of the day someone measured it.
+  #
+  # pylance and not lancedb: the server never imports lancedb — `tests/
+  # test_write_quarantine.py` enforces that — and every read goes through `lance`.
+  #
+  # `scripts/compat/probe.py` is the wider instrument, and it needs a real blob
+  # table, which is gitignored. It runs locally; this runs on every push.
+  reader-matrix:
+    name: pylance ${{ matrix.pylance }}
+    runs-on: ubuntu-latest
+    strategy:
+      # One red version should not hide the others: the useful output of this job
+      # is which rows failed, not that some row did.
+      fail-fast: false
+      matrix:
+        pylance:
+          # The floor, the majors between, and the version the repository develops
+          # against. Sampled rather than exhaustive — see docs/guide/reference-versions.md
+          # for why these and not the forty in between.
+          - "3.0.0"
+          - "4.0.2"
+          - "6.0.1"
+          - "7.1.0"
+          - "8.0.1"
+          - "9.0.1"
+          - "10.0.0"
+          - "11.0.0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --only-group test
+      # Installed over the synced environment, so this is the one thing that
+      # differs between rows. `--no-sync` below keeps uv from putting it back.
+      - run: uv pip install "pylance==${{ matrix.pylance }}"
+      - name: what actually got installed
+        run: |
+          uv run --no-sync python -c "import lance, pyarrow; \
+            print(f'pylance {lance.__version__} / pyarrow {pyarrow.__version__}')"
+      # The features this version claims to support, in the same words the console
+      # uses. A row that goes green with cost accounting missing would be a matrix
+      # that proves nothing.
+      - name: reader capabilities
+        run: |
+          uv run --no-sync python -c "
+          import json, sys
+          from server.runtime import runtime
+          r = runtime()
+          print(json.dumps(r.as_dict(), indent=2))
+          missing = [f.name for f in r.degraded]
+          if missing:
+              print(f'::error::pylance ${{ matrix.pylance }} is missing: {missing}')
+              sys.exit(1)
+          "
+      - run: uv run --no-sync python -m pytest
+
+  # Proof the container builds, on every push. Not pushed anywhere — publishing is
+  # release.yml's job, and a build that only happens at release time is a build that
+  # breaks at release time.
+  image:
+    name: docker build (pylance ${{ matrix.pylance }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        pylance: ["3.0.0", "11.0.0"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          build-args: PYLANCE_VERSION=${{ matrix.pylance }}
+          push: false
+          load: true
+          tags: lancescope:ci-${{ matrix.pylance }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      # A container that starts is not a container that serves. This asks it the
+      # one question that needs every layer to be right: which reader is inside.
+      - name: it serves
+        run: |
+          docker run -d --name probe -p 8080:8080 lancescope:ci-${{ matrix.pylance }}
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:8080/health >/dev/null 2>&1 && break
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:8080/api/catalog/runtime | tee /tmp/runtime.json
+          python3 -c "
+          import json, sys
+          r = json.load(open('/tmp/runtime.json'))
+          got = r['versions']['lance']
+          want = '${{ matrix.pylance }}'
+          assert got == want, f'image says pylance {got}, expected {want}'
+          bad = [f['name'] for f in r['features'] if not f['supported']]
+          assert not bad, f'image is missing: {bad}'
+          print('ok:', r['versions'])
+          "
+          docker rm -f probe

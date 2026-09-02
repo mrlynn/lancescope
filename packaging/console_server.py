@@ -147,7 +147,14 @@ def main() -> int:
     if os.environ.get("LANCESCOPE_WATCH_PARENT", "1") == "1":
         threading.Thread(target=watch_parent, daemon=True).start()
 
-    uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
+    # Loopback unless something explicitly asks otherwise. The desktop app wants
+    # exactly this — a server nothing off the machine can reach — and a container
+    # wants 0.0.0.0, because inside its own network namespace loopback is a server
+    # no port mapping can reach either. The default is the safe one, so opening it
+    # up stays a decision someone made rather than one they inherited.
+    host = os.environ.get("LANCESCOPE_HOST", "127.0.0.1")
+
+    uvicorn.run(app, host=host, port=port, log_level="warning")
     return 0
 
 

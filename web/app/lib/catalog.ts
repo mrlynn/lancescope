@@ -263,6 +263,26 @@ async function get<T>(path: string): Promise<T> {
   return res.json();
 }
 
+/** Which Lance is underneath, and what that build of it can do.
+ *
+ *  Answered without opening a dataset, so it renders on a console with nothing
+ *  configured — which is exactly when a reader needs to know whether a panel is
+ *  empty because the database is or because the reader cannot see into it. */
+export type RuntimeFeature = {
+  name: string;
+  supported: boolean;
+  probe: string;
+  lost: string | null;
+};
+
+export type RuntimeReport = {
+  versions: { lance: string; pyarrow: string; python: string };
+  features: RuntimeFeature[];
+  summary: string | null;
+};
+
+export const getRuntime = () => get<RuntimeReport>("/runtime");
+
 export const listTables = () => get<TableList>("/tables");
 export const getTable = (n: string) => get<TableDetail>(`/tables/${n}`);
 export const getVersions = (n: string) => get<Versions>(`/tables/${n}/versions`);
