@@ -230,6 +230,27 @@ def api(catalog):
 
 
 @pytest.fixture
+def api_empty_root(empty_root):
+    """The console API over a directory that holds no tables.
+
+    A root that lists perfectly well and finds nothing, which is a different fact
+    from a root that could not be listed — and the pair is what keeps `listing_error`
+    from degenerating into "the table count was zero"."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from server.catalog import Catalog
+    from server.routes import catalog as catalog_routes
+
+    cat = Catalog(empty_root)
+    app = FastAPI()
+    catalog_routes.bind(cat)
+    app.include_router(catalog_routes.router)
+    yield TestClient(app)
+    cat.close_all()
+
+
+@pytest.fixture
 def settings_file(tmp_path, monkeypatch):
     """An isolated settings file. A test that edits the operator's own config is not
     a test."""
