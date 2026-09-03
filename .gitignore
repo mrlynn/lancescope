@@ -33,3 +33,6 @@ desktop/src-tauri/gen/
 .env.*
 *.p8
 *.p12
+
+# Trained artefacts from examples/ — reproducible in seconds, not worth versioning.
+checkpoint.pt
