@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import Icon from "@/app/components/Icon";
+import Diagrams from "@/app/components/docs/Diagrams";
 import { OnThisPage } from "@/app/components/docs/OnThisPage";
 import { allDocs, getDoc, neighbours } from "@/app/lib/docs";
 
@@ -46,6 +47,10 @@ export default async function DocPage({ params }: { params: Promise<{ slug: stri
         </div>
 
         <div className="prose" dangerouslySetInnerHTML={{ __html: doc.html }} />
+
+        {/* Only where there is something to draw. Mermaid is the heaviest thing the
+            interface can load, and most of the guide is prose. */}
+        {doc.diagrams && <Diagrams />}
 
         <nav className="flex flex-wrap gap-3 justify-between mt-14 pt-6"
              style={{ borderTop: "1px solid var(--hairline)" }}>
