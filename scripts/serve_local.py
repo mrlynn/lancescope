@@ -7,7 +7,7 @@ the exported interface and the API on one origin, which is exactly the arrangeme
 inside LanceScope.app. A static export has no rewrites and no dev server, and that
 difference has hidden real bugs from `make dev`.
 
-What this adds over running `packaging/console_server.py` directly is the browser:
+What this adds over running `server/standalone.py` directly is the browser:
 the port is the kernel's choice, so the URL is not knowable in advance by whoever
 typed the command. The server prints it; this reads it and opens it.
 
@@ -40,7 +40,7 @@ def main() -> int:
     open_browser = env.pop("OPEN", "1") != "0"
 
     proc = subprocess.Popen(
-        [sys.executable, str(ROOT / "packaging" / "console_server.py")],
+        [sys.executable, str(ROOT / "server" / "standalone.py")],
         stdout=subprocess.PIPE, stderr=None, text=True, bufsize=1, env=env,
         cwd=str(ROOT),
     )

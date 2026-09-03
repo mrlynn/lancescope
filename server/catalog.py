@@ -318,6 +318,7 @@ class RootCapabilities:
     inspect: Capability
     disk_split: Capability
     io_meter: Capability
+    column_bytes: Capability = Capability(UNVERIFIED)
 
     def as_dict(self) -> dict:
         return {
@@ -326,6 +327,7 @@ class RootCapabilities:
             "inspect": self.inspect.as_dict(),
             "disk_split": self.disk_split.as_dict(),
             "io_meter": self.io_meter.as_dict(),
+            "column_bytes": self.column_bytes.as_dict(),
         }
 
 
@@ -339,6 +341,17 @@ REMOTE_REASON = (
 NO_ROOT_REASON = (
     "No database is connected. Add a connection on the settings page and the console "
     "will list what is under it."
+)
+
+
+COLUMN_BYTES_REMOTE_REASON = (
+    "Per-column bytes come from the data-file footers, which Lance reads over object "
+    "storage as readily as off a disk — so this is the one figure here that a remote "
+    "root can have and a directory walk cannot. Measured against "
+    "`hf://datasets/lance-format/openvid-lance/data/train.lance` on pylance 11.0.0: "
+    "937,957 rows across 224 fragments, one footer read in 814 ms against 0.15 ms "
+    "locally. Footers are sampled above a budget for that reason, and the answer says "
+    "how many it read."
 )
 
 
@@ -364,6 +377,7 @@ def capabilities_for(root: Path | str) -> RootCapabilities:
             inspect=Capability(UNSUPPORTED, NO_ROOT_REASON),
             disk_split=Capability(UNSUPPORTED, NO_ROOT_REASON),
             io_meter=Capability(UNSUPPORTED, NO_ROOT_REASON),
+            column_bytes=Capability(UNSUPPORTED, NO_ROOT_REASON),
         )
     if hf.is_hf_uri(root):
         # The one remote form that has actually been exercised. Measured against
@@ -383,6 +397,7 @@ def capabilities_for(root: Path | str) -> RootCapabilities:
             io_meter=Capability(AVAILABLE,
                                 "Lance's counters report bytes fetched from the Hub, "
                                 "so a warm read costs less than the first one."),
+            column_bytes=Capability(AVAILABLE, COLUMN_BYTES_REMOTE_REASON),
         )
     if _looks_like_uri(root):
         return RootCapabilities(
@@ -401,6 +416,10 @@ def capabilities_for(root: Path | str) -> RootCapabilities:
                                 "Lance's IO counters are per handle and should still "
                                 "report, but the numbers have not been checked "
                                 "against a remote store."),
+            column_bytes=Capability(UNVERIFIED,
+                                    "Footers are read the same way here as on the "
+                                    "Hub, where this was measured, but no generic "
+                                    "remote store has been exercised."),
         )
     return RootCapabilities(
         remote=False,
@@ -408,6 +427,7 @@ def capabilities_for(root: Path | str) -> RootCapabilities:
         inspect=Capability(AVAILABLE),
         disk_split=Capability(AVAILABLE),
         io_meter=Capability(AVAILABLE),
+        column_bytes=Capability(AVAILABLE),
     )
 
 

@@ -7,7 +7,7 @@ import Mark from "@/app/components/Mark";
 import AppBar from "@/app/components/nav/AppBar";
 import DbSwitcher from "@/app/components/nav/DbSwitcher";
 import SampleDatasets from "@/app/components/samples/SampleDatasets";
-import { Cost, Empty } from "@/app/components/console/atoms";
+import { Copy, Cost, Empty } from "@/app/components/console/atoms";
 import TableRail from "@/app/components/console/TableRail";
 import {
   FragmentsTab, IndicesTab, RowsTab, SchemaTab, VersionsTab,
@@ -240,7 +240,7 @@ export default function Console() {
           <>
             <span className="text-[var(--dim)]" aria-hidden><Icon name="chevronRight" size={13} /></span>
             <span className="mono text-[13px] text-[var(--bright)]">{current.name}</span>
-            <CopyPath uri={current.uri} />
+            <Copy size={13} className="!w-7 !h-7" what="table path" title={current.uri} value={current.uri} />
           </>
         )}
       </div>
@@ -458,27 +458,3 @@ function TabBadge({ findings, panel, facet }: {
   );
 }
 
-/** The table's URI, on demand rather than on screen. You need it to paste into a
- *  script perhaps once a session; you were being shown it continuously. */
-function CopyPath({ uri }: { uri: string }) {
-  const [done, setDone] = useState(false);
-  return (
-    <button
-      onClick={async () => {
-        try {
-          await navigator.clipboard.writeText(uri);
-          setDone(true);
-          setTimeout(() => setDone(false), 1400);
-        } catch {
-          // No clipboard permission. The title attribute still carries the path.
-        }
-      }}
-      className="iconbtn !w-7 !h-7"
-      title={uri}
-      data-tip={done ? "Copied" : "Copy table path"}
-      aria-label="Copy table path"
-    >
-      <Icon name={done ? "check" : "external"} size={13} />
-    </button>
-  );
-}

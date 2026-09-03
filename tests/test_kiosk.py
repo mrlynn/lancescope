@@ -244,7 +244,7 @@ def test_the_api_mount_respects_kiosk(catalog, settings_file, monkeypatch):
     """
     monkeypatch.setenv("LANCESCOPE_KIOSK", "1")
     source = (pathlib.Path(__file__).resolve().parent.parent
-              / "packaging" / "console_server.py").read_text()
+              / "server" / "standalone.py").read_text()
     # Asserted on the source because building it needs an exported `web/out`, which
     # CI does not have. The claim is that the list is conditional at all.
     assert "if not kiosk.enabled():" in source

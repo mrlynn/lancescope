@@ -151,19 +151,30 @@ def _index_stats(ds, name: str) -> dict:
 def _unindexed_vector(facts: dict) -> list[Finding]:
     """The expensive absence. This is where the demo's 3.45 MB per query comes from."""
     out = []
+    costs = facts.get("costs")
     for col, dim in facts["unindexed_vectors"]:
         rows = facts["rows"]
+        # `rows * dim * 4` is the logical size and happens to be right whenever the
+        # column is stored uncompressed. It stops being right the moment anybody
+        # quantises, so prefer what the footers say the column occupies and keep the
+        # arithmetic as the fallback.
+        logical = rows * dim * 4
+        measured = costs.columns[col].bytes if costs and col in costs.columns else None
+        scan_bytes = measured if measured is not None else logical
         out.append(Finding(
             id="vector-column-unindexed",
             severity="warn",
             panel="indices",
             title=f"{col} has no vector index",
             claim=(f"Every similarity search over {col} scans all "
-                   f"{rows:,} rows and reads each {dim}-dimension vector to do it. "
+                   f"{rows:,} rows and reads each {dim}-dimension vector to do it — "
+                   f"{_bytes(scan_bytes)} a query. "
                    f"That is fine at this size and stops being fine as the table grows."),
             evidence={"column": col, "dimensions": dim, "rows": rows,
                       "bytes_per_vector": dim * 4,
-                      "scan_bytes": rows * dim * 4},
+                      "measured": measured is not None,
+                      "logical_bytes": logical,
+                      "scan_bytes": scan_bytes},
             suggested_action=(
                 "Build an ANN index on this column when scan cost starts to matter. "
                 "Until then the scan is exact, which an approximate index is not."
@@ -469,11 +480,24 @@ def _embedding_footprint(facts: dict) -> list[Finding]:
     if not cols or usage.meta_bytes <= 0:
         return []
     rows = facts["rows"]
-    vector_bytes = rows * sum(dim for _, dim in cols) * 4
-    share = vector_bytes / usage.meta_bytes
+    names = [c for c, _ in cols]
+
+    # Measured where we have it. This used to be `rows * dim * 4` against the whole
+    # directory walk — two approximations pointing the same way, which is how the
+    # share came out above 100% often enough to need a caveat apologising for it. The
+    # footers know what the column actually occupies, and `file_bytes` is the data
+    # files rather than every index and manifest beside them.
+    costs = facts.get("costs")
+    measured = costs is not None and all(n in costs.columns for n in names)
+    if measured:
+        vector_bytes = sum(costs.columns[n].bytes for n in names)
+        against = costs.file_bytes or usage.meta_bytes
+    else:
+        vector_bytes = rows * sum(dim for _, dim in cols) * 4
+        against = usage.meta_bytes
+    share = vector_bytes / max(against, 1)
     if share < EMBEDDING_SHARE_NOTE:
         return []
-    names = [c for c, _ in cols]
     return [Finding(
         id="mostly-embeddings",
         severity="note",
@@ -481,10 +505,12 @@ def _embedding_footprint(facts: dict) -> list[Finding]:
         title=f"{share:.0%} of the ordinary bytes are vectors",
         claim=(f"{', '.join(names)} accounts for about "
                f"{_bytes(vector_bytes)} across {rows:,} rows, against "
-               f"{_bytes(usage.meta_bytes)} in this table's ordinary Lance "
+               f"{_bytes(against)} in this table's ordinary Lance "
                f"files. Re-embedding rewrites that share of the table; the source "
                f"data is the smaller part of what is stored here."),
         caveat=(
+            ""
+            if measured else
             "The vector figure is the uncompressed size the schema implies, and it "
             "exceeds what is on disk — Lance is storing this column smaller than "
             "float32 would suggest, so treat the share as an upper bound."
@@ -493,7 +519,9 @@ def _embedding_footprint(facts: dict) -> list[Finding]:
         evidence={"columns": names, "rows": rows,
                   "dimensions": [dim for _, dim in cols],
                   "vector_bytes": vector_bytes,
-                  "meta_bytes": usage.meta_bytes,
+                  "logical_bytes": rows * sum(dim for _, dim in cols) * 4,
+                  "measured": measured,
+                  "meta_bytes": against,
                   "share": round(share, 4)},
         columns=names,
         facets=("training",),
@@ -521,6 +549,12 @@ def gather(handle: Handle) -> dict:
 
     Manifests and directory entries only — the same reads the console's own panels
     make. Nothing here opens a data file, and nothing touches a blob column.
+
+    `costs` is the one exception, and it is not gathered here for exactly that reason.
+    Per-column bytes come from the data-file footers, which is a different class of
+    read from everything above, so the caller supplies them and this stays true. A
+    rule that finds `costs` is `None` falls back to what the schema implies and keeps
+    the caveat that says so.
     """
     ds = handle.ds
     stats = ds.stats.dataset_stats()
@@ -575,6 +609,7 @@ def gather(handle: Handle) -> dict:
         "versions": len(versions),
         "name": handle.name,
         "uri": handle.uri,
+        "costs": None,
     }
 
 
@@ -619,7 +654,8 @@ class Analysis:
         }
 
 
-def analyse(handle: Handle, *, facet: str | None = None) -> Analysis:
+def analyse(handle: Handle, *, facet: str | None = None,
+            costs: object | None = None) -> Analysis:
     """Run every rule over one table, worst finding first, keeping what broke.
 
     `gather()` failing is different from a rule failing: there are no facts, so
@@ -631,6 +667,7 @@ def analyse(handle: Handle, *, facet: str | None = None) -> Analysis:
     was asking.
     """
     facts = gather(handle)
+    facts["costs"] = costs
     out: list[Finding] = []
     failures: list[RuleFailure] = []
     for rule in RULES:

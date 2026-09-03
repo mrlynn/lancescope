@@ -226,6 +226,62 @@ export type RuleFailure = {
   message: string;
 };
 
+/** What a column occupies on disk, from the file footers. Not what a reader will
+ *  fetch: see `Estimate.floor_bytes` and `caveats`. */
+export type ColumnCost = {
+  name: string;
+  field_id: number;
+  bytes: number;
+  pages: number;
+  files: number;
+  is_blob: boolean;
+  blob_bytes: number | null;
+};
+
+/** What a full pass over a projection weighs.
+ *
+ *  Two numbers, deliberately. `bytes` is what the columns come to; `floor_bytes` is
+ *  what a pass costs once per-file overhead is counted, and on a table of small
+ *  files Lance reads each one whole so the second can be far larger than the first.
+ *  Show the floor when it exceeds the weight, and never the weight alone. */
+export type Estimate = {
+  name: string;
+  uri: string;
+  version: number;
+  columns_requested: string[] | null;
+  columns: ColumnCost[];
+  bytes: number;
+  floor_bytes: number;
+  blob_bytes: number | null;
+  inline_blob_bytes: number;
+  physical_rows: number;
+  live_rows: number;
+  deleted_rows: number;
+  fragments: number;
+  files_read: number;
+  files_total: number;
+  sampled: boolean;
+  caveats: string[];
+  read_bytes: number;
+  read_iops: number;
+  /** What the footers cost. `off_meter` because a separate reader did that work and
+   *  the handle this route drains never saw it — saying so beats folding a modelled
+   *  figure into one that means measured. */
+  footer_bytes: number;
+  footer_files: number;
+  footer_ms: number;
+  off_meter: boolean;
+};
+
+/** The block a training run pins. `run_config_yaml` is the same object rendered
+ *  server-side; the console never templates it, so the file a person copies from
+ *  here and the one the CLI writes cannot drift. */
+export type RunConfig = Findings & {
+  columns: string[] | null;
+  run_config: Record<string, unknown>;
+  run_config_yaml: string;
+};
+
 export type Findings = {
   name: string;
   uri: string;
@@ -302,6 +358,16 @@ export const getFragments = (n: string) => get<Fragments>(`/tables/${n}/fragment
  *  wants a subset filters what is already here — `?facet=` exists on the route for
  *  callers with no list in hand, which is agents over MCP rather than this page. */
 export const getFindings = (n: string) => get<Findings>(`/tables/${n}/findings`);
+
+/** What the table's columns weigh. Fetched on demand rather than with the tab: this
+ *  is the one panel read that opens a data file, and every other one is manifests. */
+export const getEstimate = (n: string, columns?: string[]) =>
+  get<Estimate>(`/tables/${n}/estimate`
+    + (columns?.length ? `?columns=${encodeURIComponent(columns.join(","))}` : ""));
+
+export const getRunConfig = (n: string, columns?: string[]) =>
+  get<RunConfig>(`/tables/${n}/run-config`
+    + (columns?.length ? `?columns=${encodeURIComponent(columns.join(","))}` : ""));
 
 export function getRows(
   n: string,
@@ -494,8 +560,12 @@ export const validateFilter = (n: string, filter: string, signal?: AbortSignal) 
 export const runQuery = (n: string, spec: QuerySpec, signal?: AbortSignal) =>
   post<QueryResult>(`/tables/${n}/query`, spec, signal);
 
+/** Now carries `estimate` for a scan — what running it would weigh, beside the plan
+ *  that says how. Null for vector, FTS and hybrid, where an index rather than the
+ *  projection decides what gets fetched. */
 export const explainQuery = (n: string, spec: QuerySpec) =>
-  post<{ plan: PlanReading; read_bytes: number }>(`/tables/${n}/query/explain`, spec);
+  post<{ plan: PlanReading; estimate: Estimate | null; read_bytes: number }>(
+    `/tables/${n}/query/explain`, spec);
 
 /* ----------------------------------------------------------------- compare */
 

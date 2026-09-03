@@ -354,6 +354,57 @@ def configuration_reference() -> str:
 
 # Front matter lives here rather than in the generated files, because the files are
 # rewritten wholesale and anything hand-added to them would be lost on the next run.
+def cli_reference() -> str:
+    """Every subcommand, read off the parser rather than described beside it.
+
+    A hand-written CLI page drifts the first time a flag is added, and the drift is
+    invisible: the page still reads correctly, it is just no longer true. This walks
+    `build_parser()` so it cannot.
+    """
+    import argparse as ap
+
+    from ingest.cli import build_parser
+
+    parser = build_parser()
+    subs = next(a for a in parser._actions if isinstance(a, ap._SubParsersAction))
+
+    out = [BANNER, "# Command line", "",
+           "`lancescope` is the same read and ingest surface the console uses, called "
+           "in process. Two of these commands are meant for a script rather than a "
+           "person: `findings --fail-on` is a build gate, and `run-config` writes an "
+           "artifact to stdout with everything else on stderr.", "",
+           "## Exit codes", "",
+           "| code | meaning |", "| --- | --- |",
+           "| 0 | it worked, or nothing was asked of it |",
+           "| 1 | the gate fired — a finding at or above the requested severity |",
+           "| 2 | a usage error: no such table, no such column, nothing configured |",
+           "| 3 | a rule crashed, so the sweep was incomplete and proves nothing |",
+           "| 130 | interrupted |", "",
+           "A missing table is 2 rather than 1 on purpose. A job whose table was "
+           "renamed and a job whose table has a warning on it need different people "
+           "to look at them.", ""]
+
+    for name, sub in subs.choices.items():
+        out += [f"## `lancescope {name}`", ""]
+        help_text = next((c.help for c in subs._choices_actions if c.dest == name), "")
+        if help_text:
+            out += [help_text[0].upper() + help_text[1:] + ".", ""]
+        rows = []
+        for action in sub._actions:
+            if action.dest in ("help",):
+                continue
+            flags = ", ".join(f"`{o}`" for o in action.option_strings) or f"`{action.dest}`"
+            # Every `--json` is declared without help text, deliberately and
+            # consistently, because it means the same thing on every subcommand.
+            # Saying so once here beats adding the same sentence six times.
+            text = action.help or ("the same answer as an object, for a script"
+                                   if action.dest == "json" else "")
+            rows.append(f"| {flags} | {text} |")
+        if rows:
+            out += ["| flag | what it does |", "| --- | --- |", *rows, ""]
+    return "\n".join(out)
+
+
 PAGES = {
     "reference-configuration.md": (configuration_reference, dict(
         title="Configuration", order=1,
@@ -373,6 +424,9 @@ PAGES = {
     "reference-http-api.md": (http_api, dict(
         title="HTTP API", order=6,
         summary="Every route, read from the server's own route table.")),
+    "reference-cli.md": (cli_reference, dict(
+        title="Command line", order=7,
+        summary="Every subcommand and flag, read from the parser, and the exit codes.")),
 }
 
 

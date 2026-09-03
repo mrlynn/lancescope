@@ -18,14 +18,10 @@ carry `readOnlyHint` so an agent knows before it calls rather than after.
 
 from __future__ import annotations
 
-import json
-from typing import Any
-
 from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
 
-from server import settings as cfg
-from server.catalog import Catalog
+from server import headless
 from server.routes import catalog as routes
 
 INSTRUCTIONS = """LanceScope exposes a LanceDB database read-only.
@@ -52,7 +48,17 @@ a fragment split too coarse to feed a loader's workers, a straggler fragment tha
 decides how long an epoch takes, an unindexed vector column costing a full scan per
 eval query. It reports the layout and nothing about the data: it cannot tell you
 whether the labels are right or whether a split leaks, and saying so is part of the
-answer."""
+answer.
+
+Asked what something will cost to read, call estimate_scan. It weighs columns rather
+than predicting a read: the answer is a property of the table and survives being
+handed to a reader this server does not own. It answers for a full scan and says so —
+do not reach for it on a vector or full-text query.
+
+Asked to *set up* a run rather than judge one, call table_run_config. It returns the
+block to keep beside the training code — uri, version, columns, what they weigh, the
+worker ceiling — so that none of it has to be retyped from a screen, and so the run
+can say afterwards which version it read."""
 
 # Snake case: the MCP 2.x models accept the wire names as aliases and expose these.
 # Using the field names means an attribute read here matches what was set.
@@ -65,58 +71,13 @@ server = MCPServer(
     instructions=INSTRUCTIONS,
 )
 
-_catalog: Catalog | None = None
-
-NOT_CONFIGURED = {
-    "error": "no database is configured",
-    "detail": (
-        "LanceScope reads whichever connection its console is pointed at, and "
-        "nothing is selected. Either add a connection at /console/settings, or "
-        "start this server with LANCE_ROOT set to a directory holding .lance "
-        "tables — that pins it to one database regardless of the console."
-    ),
-}
-
-
-def catalog() -> Catalog | None:
-    """Which database this is, resolved on every call.
-
-    The same ladder the console climbs: `LANCE_ROOT`, then the active saved
-    connection, then the ingest directory if it actually holds tables. Resolved per
-    call rather than once, because someone switching connections in the console
-    while an agent is mid-session should not have the agent quietly keep answering
-    about the database they just left.
-
-    There is no fallback to the working directory. It used to fall back to `cwd`,
-    which meant an unconfigured server pointed at this repository found
-    `data/lance/moments` and answered questions about a database nobody had chosen.
-    An agent cannot tell a wrong answer from a right one; the only safe unconfigured
-    state is one that says so.
-    """
-    global _catalog
-    resolved = cfg.resolve_root(cfg.load())
-    root = resolved.uri or resolved.root
-    if not root:
-        _catalog = None
-        return None
-    if _catalog is None or _catalog.root_uri != str(root):
-        _catalog = Catalog(root)
-    routes.bind(_catalog)
-    return _catalog
-
-
-async def _body(response) -> Any:
-    """The JSON a route produced.
-
-    Calling the route rather than reassembling its answer is deliberate: two
-    implementations of "describe this table" would drift, and the one an agent uses
-    is the one where drift is least likely to be noticed.
-    """
-    return json.loads(response.body)
-
-
-def _missing(name: str, error) -> dict:
-    return {"error": f"no table named {name!r}", "detail": str(getattr(error, "detail", ""))}
+# The root ladder and the route-calling helpers live in `server.headless`, because
+# the command line climbs the same ladder and two answers to "which database is this"
+# is the one divergence nobody would notice in the output.
+_body = headless.body
+_missing = headless.missing
+catalog = headless.catalog
+NOT_CONFIGURED = headless.NOT_CONFIGURED
 
 
 @server.tool(annotations=READ_ONLY,
@@ -138,6 +99,53 @@ async def describe_table(name: str) -> dict:
         return NOT_CONFIGURED
     try:
         return await _body(await routes.table(name))
+    except Exception as e:                                   # noqa: BLE001
+        return _missing(name, e)
+
+
+@server.tool(annotations=READ_ONLY,
+             description="What a full pass over a table's columns weighs, worked out "
+                         "from the file footers without reading a single row — so it "
+                         "holds for any reader, DuckDB, Spark or Ray included, none "
+                         "of which will say what they are about to move. Pass columns "
+                         "as a comma-separated list to weigh one projection. Two "
+                         "numbers come back and both matter: 'bytes' is what the "
+                         "columns occupy, 'floor_bytes' is what a pass costs once "
+                         "per-file overhead is counted, and on a table of small files "
+                         "Lance reads each one whole so the floor can be many times "
+                         "the weight. Quote the floor when it is larger. This covers "
+                         "a full scan only — it does not say what a vector or "
+                         "full-text query reads, and the caveats it returns say where "
+                         "else the figure stops being true.")
+async def estimate_scan(name: str, columns: str | None = None) -> dict:
+    if catalog() is None:
+        return NOT_CONFIGURED
+    try:
+        return await _body(await routes.estimate(name, columns=columns))
+    except Exception as e:                                   # noqa: BLE001
+        return _missing(name, e)
+
+
+@server.tool(annotations=READ_ONLY,
+             description="What a training run must pin about this table, as a block "
+                         "to keep beside the code that runs it: the dataset URI and "
+                         "the exact version, the columns the run reads, what those "
+                         "columns weigh on disk, how many loader workers the fragment "
+                         "split can actually feed, and the findings outstanding when "
+                         "it was generated. Derived from the table, never written by "
+                         "a model — a run config that drifts from the table it "
+                         "describes is worse than none, because it is believed. Pass "
+                         "columns as a comma-separated list to weigh a projection "
+                         "rather than the whole table. The answer carries both the "
+                         "object and the same thing rendered as YAML.")
+async def table_run_config(name: str, columns: str | None = None) -> dict:
+    # No `facet` parameter. This tool is about a run, so the facet is `training`, and
+    # offering the argument buys an agent nothing but a turn spent discovering that —
+    # the same reason `read_rows` does not offer `expand`.
+    if catalog() is None:
+        return NOT_CONFIGURED
+    try:
+        return await _body(await routes.run_config(name, columns=columns))
     except Exception as e:                                   # noqa: BLE001
         return _missing(name, e)
 
