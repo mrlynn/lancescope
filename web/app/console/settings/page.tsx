@@ -17,6 +17,7 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import Icon, { type IconName } from "@/app/components/Icon";
 import AppBar from "@/app/components/nav/AppBar";
 import SampleDatasets from "@/app/components/samples/SampleDatasets";
+import Spend from "@/app/components/settings/Spend";
 import { Caveat, Empty, Eyebrow, fmtWhen } from "@/app/components/console/atoms";
 import { dbParent } from "@/app/lib/dbname";
 import { type RuntimeReport, getRuntime } from "@/app/lib/catalog";
@@ -173,18 +174,25 @@ export default function SettingsPage() {
 
         <div hidden={tab !== "intelligence"} role="tabpanel"
              id="settings-panel-intelligence" aria-labelledby="settings-tab-intelligence">
-          <Intelligence
-            kiosk={kiosk}
-            intel={state?.intelligence ?? null}
-            probe={probe}
-            caps={caps}
-            onProbe={() => {
-              probeIntelligence().then(setProbe).catch(() => setProbe(null));
-              getCapabilities().then(setCaps).catch(() => setCaps(null));
-            }}
-            onSaved={(i) => setState((s) => (s ? { ...s, intelligence: i } : s))}
-            onError={setError}
-          />
+          <div className="space-y-6">
+            <Intelligence
+              kiosk={kiosk}
+              intel={state?.intelligence ?? null}
+              probe={probe}
+              caps={caps}
+              onProbe={() => {
+                probeIntelligence().then(setProbe).catch(() => setProbe(null));
+                getCapabilities().then(setCaps).catch(() => setCaps(null));
+              }}
+              onSaved={(i) => setState((s) => (s ? { ...s, intelligence: i } : s))}
+              onError={setError}
+            />
+
+            {/* Below the form that configures the key, because it is the answer to
+                the question the form raises. Not on a kiosk: the routes it reads are
+                not mounted there, and there is no key to have spent anything. */}
+            {!kiosk && <Spend ceiling={state?.intelligence.spend_ceiling_usd ?? null} />}
+          </div>
         </div>
 
         {/* Two panels that answer the same question from opposite ends — which

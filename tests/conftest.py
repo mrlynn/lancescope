@@ -480,3 +480,24 @@ def work_dir(tmp_path) -> Path:
     d = tmp_path / "work"
     d.mkdir()
     return d
+
+
+@pytest.fixture(autouse=True)
+def _spend_ledger_off(monkeypatch):
+    """No test writes to the operator's own spend history.
+
+    The ledger lives beside the settings file, and the meter appends to it on every
+    recorded call — so a test that exercises the meter would otherwise leave lines in
+    a real person's ledger and skew a chart they trust. Off everywhere by default;
+    `spend_ledger` turns it back on inside a temporary directory.
+    """
+    monkeypatch.setenv("LANCESCOPE_SPEND_LOG", "off")
+
+
+@pytest.fixture
+def spend_ledger(settings_file, monkeypatch):
+    """An isolated, writable spend ledger. Returns the path it will be written to."""
+    monkeypatch.setenv("LANCESCOPE_SPEND_LOG", "on")
+    from server.intel import ledger
+
+    return ledger.path()
