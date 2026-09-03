@@ -68,7 +68,14 @@ export default function AppBar({
         ))}
       </div>
 
-      <div className="flex items-center gap-2.5">
+      {/* Wraps, and wraps to the right. The header itself has always wrapped, but
+          this group did not, so on a phone the console's own actions — a cost
+          readout, two links, the guide, the theme control and settings — sat in one
+          unbreakable row 466px wide inside a 375px viewport and pushed the layout
+          viewport out with them, cutting every page off at the right edge.
+          `justify-end` so a wrapped second line stays under the first rather than
+          drifting left into the crumbs. */}
+      <div className="flex items-center justify-end flex-wrap gap-2.5 min-w-0">
         {children}
         {/* On every screen, because the question a guide answers arrives while you
             are looking at the thing you do not understand. */}
