@@ -1,9 +1,14 @@
 .PHONY: local
-.PHONY: help setup download prepare prepare-force embed build ingest scan doctor verify test docs ui sidecar app api mcp web demo dev tidy bench clean
+.PHONY: help setup download prepare prepare-force embed build ingest scan doctor verify test check docs ui sidecar app api mcp web demo dev tidy bench clean
 
 PY := .venv/bin/python
 UVICORN := .venv/bin/uvicorn
 LIMIT ?= 36
+
+# Pinned, and pinned to the same version `.github/workflows/ci.yml` pins, because a
+# local lint that is a different ruff is a local lint that clears a tree CI rejects.
+# `tests/test_check.py` fails if the two ever disagree.
+RUFF := ruff@0.16.5
 
 help:
 	@echo "make setup             install python deps + web deps"
@@ -11,6 +16,7 @@ help:
 	@echo "make scan SRC=~/Pics   survey your own media, reading no files"
 	@echo "make doctor            what this build can decode, and what it cannot"
 	@echo "make test              contract tests, synthetic fixtures (~3s)"
+	@echo "make check             everything CI runs, before you push (~90s)"
 	@echo "make docs              re-render the generated reference pages"
 	@echo "make app               build LanceScope.app (unsigned)"
 	@echo "make verify            green-room preflight, real corpus (~15s)"
@@ -59,6 +65,39 @@ doctor:
 # the one that has to pass before a demo.
 test:
 	uv run --only-group test python -m pytest
+
+# Everything CI runs, in one command, before pushing.
+#
+# `make test` is the fast inner loop and covers exactly one of CI's five jobs. That
+# gap is not theoretical: a branch has gone red on ruff findings that `make test`
+# passed straight over, and again on a container build nothing local touched. The
+# point of this target is that a green run here means a green run there.
+#
+# Ordered cheapest-first so the eight-second lint fails before the ninety-second
+# image build. `-` on nothing: the first failure stops the run, which is what you
+# want from a gate.
+#
+# Docker is optional rather than required. A machine without it still gets the four
+# checks it can run, and is told plainly which one it skipped rather than being left
+# to assume the image is fine.
+check:
+	@echo "==> ruff"
+	uvx $(RUFF) check .
+	@echo "==> pytest"
+	uv run --only-group test python -m pytest -q
+	@echo "==> web"
+	cd web && npx tsc --noEmit && npm run lint && npm run build
+	@if command -v docker >/dev/null 2>&1; then \
+		echo "==> docker image"; \
+		docker build -f docker/Dockerfile --build-arg PYLANCE_VERSION=11.0.0 \
+			-t lancescope:check . ; \
+	else \
+		echo "==> docker image  SKIPPED — docker not installed."; \
+		echo "    CI builds it against pylance 3.0.0 and 11.0.0 on every pull"; \
+		echo "    request, so this is the one check you are pushing blind."; \
+	fi
+	@echo
+	@echo "green. 'make verify' is the other gate: real corpus, before a demo."
 
 # Re-render the reference pages from the code. `make test` fails if the committed
 # ones have drifted, so this is what to run after changing a route, a rule, the
