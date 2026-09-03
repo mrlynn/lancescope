@@ -105,6 +105,8 @@ export default function Page() {
   // Presenter control. Everything reachable without looking at the keyboard.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // A synthetic event can arrive without one; reading it would throw.
+      if (!e.key) return;
       const typing = document.activeElement === inputRef.current;
       if (e.key === "/" && !typing) {
         e.preventDefault();

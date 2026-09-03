@@ -58,6 +58,11 @@ export default function ThemeToggle() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // `key` is required of a real keystroke and missing from plenty of synthetic
+      // ones — a password manager filling a field, an automation harness, an
+      // extension replaying input. Reading it unguarded throws on those and takes
+      // the whole page down over a shortcut nobody pressed.
+      if (!e.key) return;
       if (e.key.toLowerCase() !== "t" || e.metaKey || e.ctrlKey || e.altKey) return;
       const el = document.activeElement;
       if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return;
