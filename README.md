@@ -125,9 +125,13 @@ make check
 
 Everything CI runs, in the order that fails cheapest first: `ruff` on the same pin
 the workflow uses, the contract tests, then the interface's typecheck, lint and
-build. It ends with the container image where Docker is installed, and says which
-check it skipped where it is not — that one only runs remotely, and it is worth
-knowing you are pushing blind on it rather than assuming green.
+build. It ends by building the container and booting it to ask which reader is
+inside, because a container that starts is not a container that serves.
+
+Docker Desktop is found where it actually installs itself rather than only on
+`PATH` — its CLI lives in `~/.docker/bin`, which plenty of shells never see. Where
+there is genuinely no Docker, or its daemon is not answering, the target says which
+of the two and moves on, so a skipped check never reads as a passed one.
 
 `make test` stays the fast inner loop and covers one of CI's five jobs; `make check`
 covers four, and `tests/test_check.py` fails if a job is added to the workflow that

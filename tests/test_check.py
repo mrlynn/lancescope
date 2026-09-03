@@ -50,12 +50,15 @@ def test_every_ci_job_is_either_in_check_or_excused():
     workflow = (ROOT / ".github/workflows/ci.yml").read_text()
     check = makefile.split("\ncheck:", 1)[1].split("\n\n", 1)[0]
 
-    # The command that distinguishes each job, as it appears in the target.
+    # The command(s) that distinguish each job, as they appear in the target. The
+    # image job is two things and both matter: CI builds the container and then asks
+    # it which reader is inside, because a container that starts is not a container
+    # that serves, and a target that only built it would mirror half the job.
     IN_CHECK = {
-        "python": "uvx $(RUFF) check .",
-        "tests": "python -m pytest",
-        "web": "npx tsc --noEmit",
-        "image": "docker build -f docker/Dockerfile",
+        "python": ["uvx $(RUFF) check ."],
+        "tests": ["python -m pytest"],
+        "web": ["npx tsc --noEmit"],
+        "image": ["build -f docker/Dockerfile", "scripts/check_image.py"],
     }
     # ...and the ones that are not local, with the reason, because an omission
     # nobody wrote down is indistinguishable from an omission nobody noticed.
@@ -88,6 +91,7 @@ def test_every_ci_job_is_either_in_check_or_excused():
             f"ci.yml has a job {job!r} that `make check` neither runs nor excuses. "
             f"Add it to the target, or to NOT_LOCAL with the reason it stays remote."
         )
-        assert IN_CHECK[job] in check, (
-            f"`make check` no longer runs CI's {job!r} job ({IN_CHECK[job]})"
-        )
+        for command in IN_CHECK[job]:
+            assert command in check, (
+                f"`make check` no longer runs CI's {job!r} job ({command})"
+            )
