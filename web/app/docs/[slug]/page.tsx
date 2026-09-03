@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import Icon from "@/app/components/Icon";
 import Diagrams from "@/app/components/docs/Diagrams";
 import { OnThisPage } from "@/app/components/docs/OnThisPage";
+import { PathPicker } from "@/app/components/docs/PathPicker";
+import { DocFooter, PathMarker } from "@/app/components/docs/PathProgress";
 import { allDocs, getDoc, neighbours } from "@/app/lib/docs";
 
 export function generateStaticParams() {
@@ -26,6 +27,9 @@ export default async function DocPage({ params }: { params: Promise<{ slug: stri
 
   const { prev, next } = neighbours(slug);
   const minutes = Math.max(1, Math.round(doc.words / 220));
+  // Slug → title for every page, so the client components can name a step without
+  // being handed the whole guide. Twenty-one short strings.
+  const titles = Object.fromEntries(allDocs().map((d) => [d.slug, d.title]));
 
   return (
     <>
@@ -44,6 +48,7 @@ export default async function DocPage({ params }: { params: Promise<{ slug: stri
               generated from the code
             </span>
           )}
+          <PathMarker slug={slug} />
         </div>
 
         <div className="prose" dangerouslySetInnerHTML={{ __html: doc.html }} />
@@ -52,25 +57,17 @@ export default async function DocPage({ params }: { params: Promise<{ slug: stri
             interface can load, and most of the guide is prose. */}
         {doc.diagrams && <Diagrams />}
 
-        <nav className="flex flex-wrap gap-3 justify-between mt-14 pt-6 max-w-[72ch]"
-             style={{ borderTop: "1px solid var(--hairline)" }}>
-          {prev ? (
-            <Link href={`/docs/${prev.slug}`} className="group max-w-[46%]">
-              <div className="eyebrow mb-1">Previous</div>
-              <div className="text-[13px] text-[var(--body)] group-hover:text-[var(--bright)]">
-                {prev.title}
-              </div>
-            </Link>
-          ) : <span />}
-          {next && (
-            <Link href={`/docs/${next.slug}`} className="group max-w-[46%] text-right">
-              <div className="eyebrow mb-1">Next</div>
-              <div className="text-[13px] text-[var(--body)] group-hover:text-[var(--bright)]">
-                {next.title}
-              </div>
-            </Link>
-          )}
-        </nav>
+        {/* The guide opens on `index`, so the doors go there rather than on a
+            landing page of their own that everyone would have to pass through. */}
+        {slug === "index" && <PathPicker titles={titles} />}
+
+        <DocFooter
+          slug={slug}
+          titles={titles}
+          prev={prev ? { slug: prev.slug, title: prev.title } : null}
+          next={next ? { slug: next.slug, title: next.title } : null}
+        />
+
       </article>
 
       <OnThisPage headings={doc.headings} />
