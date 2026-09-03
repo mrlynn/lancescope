@@ -39,7 +39,14 @@ export type Doc = {
   headings: Heading[];
   /** Words of prose, for nothing more than telling a reader how long a page is. */
   words: number;
+  /** Whether this page has a diagram to draw. Mermaid is the largest thing the
+   *  interface can load and most pages have no use for it, so the page asks for it
+   *  rather than the layout importing it for everybody. */
+  diagrams: boolean;
 };
+
+const escape = (s: string) =>
+  s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]!));
 
 /** An id a heading can be linked to, stable enough to survive rewording elsewhere
  *  on the page. */
@@ -80,10 +87,17 @@ function renderer(headings: Heading[]) {
         return `<h${depth} id="${id}"><a class="anchor" href="#${id}">${text}</a></h${depth}>\n`;
       },
       code({ text, lang }) {
+        // Mermaid is a picture, not a listing, so it does not go through the
+        // highlighter. The source ships inside the figure rather than in a data
+        // attribute: a diagram that never renders — no JS, an old browser, a syntax
+        // error in the source — then shows exactly what it shows today, which is
+        // the source. That is a worse diagram and not a broken page.
+        if (lang === "mermaid") {
+          return `<figure class="mermaid" data-mermaid>`
+            + `<pre>${escape(text)}</pre></figure>\n`;
+        }
         const language = lang && hljs.getLanguage(lang) ? lang : null;
-        const body = language
-          ? hljs.highlight(text, { language }).value
-          : text.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]!));
+        const body = language ? hljs.highlight(text, { language }).value : escape(text);
         // The language is shown rather than inferred silently: a reader deciding
         // whether to paste something wants to know what it is.
         return `<figure class="code"><figcaption>${lang ?? ""}</figcaption>`
@@ -119,6 +133,7 @@ export function allDocs(): Doc[] {
       html,
       headings,
       words: body.split(/\s+/).filter(Boolean).length,
+      diagrams: html.includes("data-mermaid"),
     };
   });
 

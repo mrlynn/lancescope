@@ -48,7 +48,15 @@ def test_every_page_is_navigable(path):
     assert meta.get("title"), f"{path.name} has no title"
     assert meta.get("section") in SECTIONS, f"{path.name}: bad section {meta.get('section')!r}"
     assert meta.get("summary"), f"{path.name} has no summary"
-    assert meta.get("order", "").isdigit(), f"{path.name} has no order"
+    # A number rather than an integer. `allDocs()` sorts on `Number(meta.order)`, so
+    # a decimal has always worked in the code — it is how a page slots between two
+    # that already exist without renumbering the section. `isdigit` rejected that,
+    # which made a legal front matter fail a check named "is this page navigable".
+    order = meta.get("order", "")
+    try:
+        float(order)
+    except ValueError:
+        raise AssertionError(f"{path.name} has no numeric order (got {order!r})") from None
 
 
 @pytest.mark.parametrize("path", pages(), ids=lambda p: p.name)
