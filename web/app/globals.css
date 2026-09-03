@@ -225,13 +225,31 @@ body::before {
   height: 30px;
   border: 1px solid var(--rule);
   border-radius: 3px;
-  overflow: hidden;
+  /* Scrolls rather than clips. `overflow: hidden` rounded the corners correctly and
+     also swallowed whatever did not fit: the console's first tab group is five
+     buttons and 530px wide, so on a 375px phone `fragments` and `rows` were painted
+     outside the box and could not be reached at all. A group that is too wide is now
+     a strip you can push, which is what a row of tabs on a phone should be, and the
+     partial button at the edge is the affordance saying so.
+
+     `overflow-y: hidden` explicitly: left alone it computes to `auto` the moment the
+     other axis is not `visible`, and a vertical scrollbar inside a 30px control is
+     not a thing anyone wants. The bar on the other axis is hidden too — inside a
+     control this short there is no room to draw one, and the clipped button says
+     more than a 3px line would. */
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
 }
+.seg::-webkit-scrollbar { display: none; }
 .seg > button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
+  /* Never shrink to fit. Squeezing nine tabs into a phone's width would keep them
+     all on screen and make every label illegible, which is not the better trade. */
+  flex: none;
   height: 100%;
   padding: 0 9px;
   color: var(--haze);
@@ -525,6 +543,15 @@ body::before {
   background: transparent;
   color: var(--body);
   overflow: auto;
+}
+
+/* `display` belongs under `[open]` and nowhere else. A closed <dialog> is hidden by
+   one UA rule — `display: none` — and an unconditional `display: grid` here silently
+   overrides it, which is not a subtle failure: the dialog kept its 100vw/100vh box
+   and painted the whole introduction over the console after it had been dismissed.
+   Every check said `open === false`, because it was; the element was closed and
+   visible at the same time. */
+.kiosk-dialog[open] {
   /* The sheet is centred by the dialog rather than by margins, so a sheet taller
      than the viewport scrolls from its top instead of being clipped at both ends. */
   display: grid;
