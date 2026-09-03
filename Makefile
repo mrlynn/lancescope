@@ -10,6 +10,29 @@ LIMIT ?= 36
 # `tests/test_check.py` fails if the two ever disagree.
 RUFF := ruff@0.16.5
 
+# Docker Desktop on macOS installs its CLI to ~/.docker/bin and wires that onto the
+# PATH of a login shell, which is not the PATH every tool inherits — `command -v
+# docker` comes back empty in plenty of contexts on a machine that plainly has it.
+# Reporting "docker not installed" there is worse than not looking: it tells you the
+# one check you cannot run locally is one you have, and quietly stops running it.
+# So look where it actually lives, and only then believe it is missing.
+DOCKER := $(shell command -v docker 2>/dev/null || \
+  for d in "$$HOME/.docker/bin/docker" \
+           /usr/local/bin/docker \
+           /opt/homebrew/bin/docker \
+           "$$HOME/.rd/bin/docker" \
+           /Applications/Docker.app/Contents/Resources/bin/docker; do \
+    [ -x "$$d" ] && echo "$$d" && break; \
+  done)
+
+# ...and put its directory on the PATH rather than calling it by absolute path.
+# The binary is not self-contained: `docker-credential-desktop` sits beside it and
+# is what a `FROM python:3.12-slim` reaches for, so an absolute-path invocation gets
+# as far as resolving image metadata and then fails with a credential helper "not
+# found in $$PATH" — which is true, and nothing to do with the Dockerfile. The CLI
+# plugins that back `buildx` and `compose` are found the same way.
+DOCKER_BIN := $(patsubst %/,%,$(dir $(DOCKER)))
+
 help:
 	@echo "make setup             install python deps + web deps"
 	@echo "make ingest LIMIT=36   download -> prepare -> embed -> build -> verify"
@@ -87,12 +110,20 @@ check:
 	uv run --only-group test python -m pytest -q
 	@echo "==> web"
 	cd web && npx tsc --noEmit && npm run lint && npm run build
-	@if command -v docker >/dev/null 2>&1; then \
+	@if [ -n "$(DOCKER)" ] && $(DOCKER) info >/dev/null 2>&1; then \
 		echo "==> docker image"; \
+		PATH="$(DOCKER_BIN):$$PATH" \
 		docker build -f docker/Dockerfile --build-arg PYLANCE_VERSION=11.0.0 \
-			-t lancescope:check . ; \
+			-t lancescope:check . || exit 1; \
+		echo "==> docker serves"; \
+		PATH="$(DOCKER_BIN):$$PATH" $(PY) scripts/check_image.py lancescope:check 11.0.0 \
+			|| exit 1; \
+	elif [ -n "$(DOCKER)" ]; then \
+		echo "==> docker image  SKIPPED — $(DOCKER) is installed but its daemon"; \
+		echo "    is not answering. Start Docker and re-run; CI will build this"; \
+		echo "    against pylance 3.0.0 and 11.0.0 either way."; \
 	else \
-		echo "==> docker image  SKIPPED — docker not installed."; \
+		echo "==> docker image  SKIPPED — no docker on PATH or in the usual places."; \
 		echo "    CI builds it against pylance 3.0.0 and 11.0.0 on every pull"; \
 		echo "    request, so this is the one check you are pushing blind."; \
 	fi
