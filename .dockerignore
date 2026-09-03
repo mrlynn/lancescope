@@ -1,0 +1,57 @@
+# What the daemon does not need in order to build this image.
+#
+# There was no such file, and the build context was 1.39 GB: `web/node_modules`
+# (608 MB), `web/.next` (785 MB) and whatever `data/` happens to hold — on a machine
+# that has run `make ingest`, gigabytes of video. CI never noticed, because a fresh
+# checkout has none of those; it is only ever slow for the person who actually
+# develops here, which is the worst place for the cost to land.
+#
+# It also defeated the layering the Dockerfile is careful about. `COPY web/ ./`
+# copied a host node_modules into the builder immediately after `npm ci` had
+# installed the right one, so the "dependencies before source" split bought nothing.
+
+# --- the two that made the context a gigabyte ---
+**/node_modules
+**/.next
+**/out
+
+# --- datasets, working copies and downloads ---
+# The image reads a dataset from a mount or a URI. It never carries one.
+data/
+*.lance/
+
+# --- build outputs that are not this image ---
+dist/
+build/
+desktop/target/
+desktop/src-tauri/target/
+packaging/build/
+packaging/dist/
+*.dmg
+*.app
+
+# --- python ephemera ---
+.venv/
+**/__pycache__/
+**/*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# --- secrets and local configuration, none of which belong in a build context ---
+.cred
+.env
+.env.*
+!.env.example
+
+# --- vcs, editors, CI ---
+.git/
+.github/
+.gitignore
+.claude/
+.DS_Store
+**/.DS_Store
+
+# docs/ is deliberately NOT excluded: docker/Dockerfile copies docs/guide/ into the
+# web stage, because app/lib/docs.ts resolves the guide at `../docs/guide` and an
+# empty generateStaticParams is a build error under `output: export`.

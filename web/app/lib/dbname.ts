@@ -16,7 +16,20 @@ export function dbName(uri: string | null | undefined): string | null {
   // Strip a scheme, then take the last segment. A bucket with no prefix leaves
   // the bucket itself, which is the right name for it.
   const withoutScheme = trimmed.replace(/^[a-z0-9+.-]+:\/\//i, "");
-  const last = withoutScheme.split("/").filter(Boolean).pop();
+  const parts = withoutScheme.split("/").filter(Boolean);
+
+  // A Hub root is named by its repository, not by its last path segment. Every
+  // dataset LanceDB publishes stores its tables under `data/`, so the general rule
+  // named all of them "data" — the switcher said it, the home page said it, and
+  // the public demo's banner said "pinned to data", which tells a stranger nothing
+  // at all. `hf://datasets/<org>/<repo>/<path>` is the shape; the repo is the name
+  // a person would use for it. Same split server/hf.py parses.
+  if (/^hf:\/\/datasets\//i.test(trimmed) && parts.length >= 3) {
+    // parts: ["datasets", org, repo, ...path]
+    return parts[2];
+  }
+
+  const last = parts.pop();
   return last ?? withoutScheme ?? null;
 }
 
