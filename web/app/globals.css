@@ -510,6 +510,55 @@ body::before {
 
 /* ---------------------------------------------------------------- expanded view */
 
+/* The kiosk introduction.
+   Shaped like .mermaid-dialog — the dialog fills the viewport and is its own
+   backdrop, so a click that lands on it rather than on the sheet is a click
+   outside — but it holds a bounded sheet rather than a stage, because this is
+   prose to read at a comfortable measure and not a diagram to fill the screen. */
+.kiosk-dialog {
+  width: 100vw;
+  height: 100vh;
+  max-width: 100vw;
+  max-height: 100vh;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--body);
+  overflow: auto;
+  /* The sheet is centred by the dialog rather than by margins, so a sheet taller
+     than the viewport scrolls from its top instead of being clipped at both ends. */
+  display: grid;
+  place-items: start center;
+}
+.kiosk-dialog::backdrop { background: rgb(0 0 0 / 0.62); }
+
+.kiosk-sheet {
+  width: min(680px, calc(100vw - 32px));
+  margin: clamp(16px, 6vh, 72px) 0;
+  padding: 26px 26px 22px;
+  background: var(--ink-2);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  /* Enough separation from the scrim that the panel edge reads on a light theme,
+     where --ink-2 is white and the border alone is nearly the only cue. */
+  box-shadow: 0 24px 60px rgb(0 0 0 / 0.35);
+}
+
+@media (min-width: 768px) {
+  .kiosk-sheet { padding: 32px 34px 26px; }
+}
+
+/* Escape and the backdrop are both dismissals, so nothing here traps a reader:
+   every route out is one gesture. Motion is a fade only, and not at all for
+   anyone who has asked for less of it. */
+@media (prefers-reduced-motion: no-preference) {
+  .kiosk-dialog[open] .kiosk-sheet { animation: kiosk-in .16s ease-out; }
+  @keyframes kiosk-in {
+    from { opacity: 0; transform: translateY(-6px); }
+    to   { opacity: 1; transform: none; }
+  }
+}
+
 .mermaid-dialog {
   width: 100vw;
   height: 100vh;
