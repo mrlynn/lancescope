@@ -168,6 +168,22 @@ ui:
 # shell gets to interfere with. Unsigned — see desktop/sign.sh for the rest.
 app: sidecar
 	./desktop/build.sh
+	@# Tauri signs the app; it does not sign the 108 Mach-O files inside it, and
+	@# PyInstaller leaves its own ad-hoc. That bundle runs here and Apple refuses it,
+	@# which is a fine trade for a local build and a bad thing to discover by
+	@# submitting one: a notarisation came back with 215 validation errors and no
+	@# hint that the build command was the wrong one. So the state is named here,
+	@# where the command was typed, rather than left to be found out.
+	@if codesign -dv --verbose=4 \
+	    "desktop/src-tauri/target/release/bundle/macos/LanceScope.app/Contents/Resources/server/lancescope-server" \
+	    2>&1 | grep -q 'Signature=adhoc'; then \
+	  printf '\n'; \
+	  echo "NOTE: the binaries inside this bundle are ad-hoc signed."; \
+	  echo "      It runs on this machine and Apple will refuse to notarise it —"; \
+	  echo "      every Mach-O in the bundle needs a Developer ID, and Tauri signs"; \
+	  echo "      only the app around them."; \
+	  echo "      For something distributable: ./desktop/sign.sh"; \
+	fi
 
 sidecar: ui
 	uv run --only-group console --with pyinstaller pyinstaller \
