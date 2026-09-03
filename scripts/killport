@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+if [[ $# -ne 1 || ! $1 =~ ^[0-9]+$ ]]; then
+  echo "Usage: killport PORT" >&2
+  exit 2
+fi
+
+port=$1
+pids=$(lsof -ti ":$port")
+
+if [[ -z $pids ]]; then
+  echo "No processes are listening on port $port."
+  exit 0
+fi
+
+echo "Stopping process(es) on port $port: $pids"
+kill $pids

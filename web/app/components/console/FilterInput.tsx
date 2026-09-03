@@ -144,6 +144,11 @@ export function FilterInput({
   const [caret, setCaret] = useState(0);
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
+  // Set while an accepted completion is on its way into the box and cleared when
+  // the caret lands after it. A Tab that arrives inside that window is swallowed
+  // rather than acted on: the text has already changed and the caret has not, so
+  // anything derived from the pair would splice at the wrong offset.
+  const settling = useRef(false);
 
   const { slot, word, column } = useMemo(
     () => readSlot(value.slice(0, caret), columns),
@@ -164,34 +169,62 @@ export function FilterInput({
     setActive(0);
   };
 
-  const accept = (s: Suggestion) => {
-    const before = value.slice(0, caret);
-    const head = before.slice(0, before.length - word.length);
+  // The caret in state is a frame behind the one in the box: it is set in a rAF
+  // after the event that moved it. Rendering can wait a frame; a keystroke cannot,
+  // because a Tab arriving in the same frame as the character before it would
+  // splice the completion in at the old offset. So the key handler reads the caret
+  // off the DOM and derives its own list from it, and hands both to `accept`.
+  const liveAt = (c: number) => {
+    const s = readSlot(value.slice(0, c), columns);
+    return { ...s, items: suggestionsFor(s.slot, s.word, s.column, columns).slice(0, 12) };
+  };
+
+  const accept = (s: Suggestion, ctx = { caret, word, slot }) => {
+    const before = value.slice(0, ctx.caret);
+    const head = before.slice(0, before.length - ctx.word.length);
     // An operator wants a space in front of it when the column is flush against
     // the caret, and everything wants one after it.
-    const glue = slot === "operator" && head.length > 0 && !/\s$/.test(head) ? " " : "";
-    const next = `${head}${glue}${s.insert} ${value.slice(caret)}`;
+    const glue = ctx.slot === "operator" && head.length > 0 && !/\s$/.test(head) ? " " : "";
+    const next = `${head}${glue}${s.insert} ${value.slice(ctx.caret)}`;
     const at = head.length + glue.length + s.insert.length + 1;
     onChange(next);
-    setOpen(false);
+    // Left open after a column or an operator, because the caret lands in the next
+    // slot and a predicate is finished by pressing Tab three times without ever
+    // leaving the box; closing here made the second Tab a focus change instead.
+    // Closed after a value: the predicate is complete, and the next Enter belongs
+    // to running it rather than to a list of columns nobody asked to see again.
+    setOpen(ctx.slot !== "value");
+    settling.current = true;
     requestAnimationFrame(() => {
       ref.current?.setSelectionRange(at, at);
       setCaret(at);
+      setActive(0);
+      settling.current = false;
     });
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    const showing = open && items.length > 0;
+    if (settling.current && (e.key === "Tab" || e.key === "Enter")) {
+      e.preventDefault();
+      return;
+    }
+    const at = ref.current?.selectionStart ?? caret;
+    const live = at === caret
+      ? { slot, word, column, items }
+      : liveAt(at);
+    const showing = open && live.items.length > 0;
     if (showing && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
       e.preventDefault();
-      setActive((i) => (i + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length);
+      const n = live.items.length;
+      setActive((i) => (i + (e.key === "ArrowDown" ? 1 : n - 1)) % n);
       return;
     }
     if (showing && (e.key === "Tab" || e.key === "Enter")) {
       // Enter accepts the highlighted suggestion rather than running the query.
       // Running with a half-typed column name is never what was meant.
       e.preventDefault();
-      accept(items[active]);
+      const i = Math.min(active, live.items.length - 1);
+      accept(live.items[i], { caret: at, word: live.word, slot: live.slot });
       return;
     }
     if (e.key === "Escape") { setOpen(false); return; }
