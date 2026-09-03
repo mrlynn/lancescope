@@ -173,6 +173,21 @@ def _temporal(root: Path) -> None:
     }), str(root / "temporal.lance"))
 
 
+def _evolved(root: Path) -> None:
+    """A table whose second column was added after the first was written.
+
+    `add_columns` writes the new column to its own data file, so one fragment ends up
+    with two of them and each file's columns are ordered by that file's own field
+    list. Every other table here has one data file holding every field, where field id
+    and schema position happen to agree — so this is the only fixture that can tell a
+    correct mapping from a lucky one.
+    """
+    uri = str(root / "evolved.lance")
+    lance.write_dataset(pa.table({"id": pa.array(range(ROWS))}), uri)
+    ds = lance.dataset(uri)
+    ds.add_columns({"doubled": "id * 2"})
+
+
 def _decoy(root: Path) -> None:
     """A directory named like a table with nothing in it.
 
@@ -194,6 +209,7 @@ def corpus(tmp_path_factory) -> Path:
     _thumbnails(root)
     _versioned(root)
     _temporal(root)
+    _evolved(root)
     _decoy(root)
     yield root
     shutil.rmtree(root, ignore_errors=True)

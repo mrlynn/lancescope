@@ -286,7 +286,7 @@ async def test_no_mcp_tool_changes_one_byte_on_disk(frozen_corpus, monkeypatch, 
 
     monkeypatch.setenv("LANCESCOPE_CONFIG", str(tmp_path / "settings.json"))
     monkeypatch.setenv("LANCE_ROOT", str(frozen_corpus))
-    monkeypatch.setattr(mcp_server, "_catalog", None)
+    mcp_server.headless.reset()
 
     before, before_manifests = snapshot(frozen_corpus), manifest_hashes(frozen_corpus)
     fn = getattr(mcp_server, tool)

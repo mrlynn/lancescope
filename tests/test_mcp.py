@@ -24,7 +24,7 @@ def mcp(corpus, monkeypatch, tmp_path):
 
     monkeypatch.setenv("LANCESCOPE_CONFIG", str(tmp_path / "settings.json"))
     monkeypatch.setenv("LANCE_ROOT", str(corpus))
-    monkeypatch.setattr(mcp_server, "_catalog", None)
+    mcp_server.headless.reset()
     return mcp_server
 
 
@@ -47,8 +47,9 @@ async def test_every_tool_explains_itself(mcp):
 async def test_the_tool_set_is_narrow_and_read_shaped(mcp):
     names = {t.name for t in await mcp.server.list_tools()}
     assert names == {
-        "list_tables", "describe_table", "table_findings", "table_versions",
-        "table_indices", "table_fragments", "read_rows",
+        "list_tables", "describe_table", "table_findings", "table_run_config",
+        "estimate_scan", "table_versions", "table_indices", "table_fragments",
+        "read_rows",
     }
     # Deliberately absent: anything that spends money, and anything that writes.
     assert not any("summar" in n or "ask" in n or "query" in n for n in names)
@@ -120,8 +121,8 @@ async def test_with_nothing_configured_every_tool_says_so(monkeypatch, settings_
     """
     from server import mcp_server
 
-    monkeypatch.setattr(mcp_server, "_catalog", None)
-    monkeypatch.setattr(mcp_server.cfg, "demo_root", lambda: None)
+    mcp_server.headless.reset()
+    monkeypatch.setattr(mcp_server.headless.cfg, "demo_root", lambda: None)
 
     assert mcp_server.catalog() is None
     for body in (await mcp_server.list_tables(),
@@ -141,7 +142,7 @@ async def test_it_follows_the_console_switching_connections(monkeypatch, corpus,
     from server import mcp_server
     from server import settings as cfg
 
-    monkeypatch.setattr(mcp_server, "_catalog", None)
+    mcp_server.headless.reset()
 
     s = cfg.load()
     cfg.add_connection(s, "fixtures", str(corpus))
@@ -155,3 +156,30 @@ async def test_it_follows_the_console_switching_connections(monkeypatch, corpus,
     second = await mcp_server.list_tables()
     assert second["tables"] == []
     assert second["root"] == str(empty_root)
+
+
+async def test_the_run_config_tool_returns_what_the_route_returned(mcp, api):
+    """One implementation. An agent and the console must not describe a run
+    differently, because the agent's answer is the one nobody eyeballs."""
+    from_tool = await mcp.table_run_config("vectors")
+    from_http = api.get("/catalog/tables/vectors/run-config").json()
+
+    for body in (from_tool, from_http):
+        body["run_config"].pop("generated_at")
+        body.pop("run_config_yaml")
+    assert from_tool["run_config"] == from_http["run_config"]
+
+
+async def test_the_run_config_tool_weighs_the_columns_it_is_given(mcp):
+    body = await mcp.table_run_config("thumbnails", columns="item_id")
+
+    assert body["columns"] == ["item_id"]
+    assert body["run_config"]["read"]["basis"] == "file-statistics"
+
+
+async def test_the_estimate_tool_weighs_without_reading(mcp):
+    body = await mcp.estimate_scan("thumbnails")
+
+    assert body["bytes"] > 0
+    assert body["off_meter"] is True
+    assert body["caveats"], "a weight that ships without its caveats is a prediction"

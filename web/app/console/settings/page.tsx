@@ -18,7 +18,7 @@ import Icon, { type IconName } from "@/app/components/Icon";
 import AppBar from "@/app/components/nav/AppBar";
 import SampleDatasets from "@/app/components/samples/SampleDatasets";
 import Spend from "@/app/components/settings/Spend";
-import { Caveat, Empty, Eyebrow, fmtWhen } from "@/app/components/console/atoms";
+import { Caveat, Copy, Empty, Eyebrow, fmtWhen } from "@/app/components/console/atoms";
 import { dbParent } from "@/app/lib/dbname";
 import { type RuntimeReport, getRuntime } from "@/app/lib/catalog";
 import {
@@ -947,31 +947,6 @@ function Where({ state }: { state: SettingsState | null }) {
         <Copy value={state.settings_path} what="path" />
       </div>
     </section>
-  );
-}
-
-/** Copy-to-clipboard for the two paths on this page that people actually need to
- *  paste somewhere else. */
-function Copy({ value, what }: { value: string; what: string }) {
-  const [done, setDone] = useState(false);
-  return (
-    <button
-      className="iconbtn shrink-0"
-      data-tip={done ? "Copied" : `Copy ${what}`}
-      data-tip-side="left"
-      aria-label={`Copy ${what}`}
-      onClick={async () => {
-        try {
-          await navigator.clipboard.writeText(value);
-          setDone(true);
-          setTimeout(() => setDone(false), 1400);
-        } catch {
-          // No clipboard permission; the path is on screen and selectable anyway.
-        }
-      }}
-    >
-      <Icon name={done ? "check" : "external"} size={14} />
-    </button>
   );
 }
 

@@ -54,6 +54,14 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["server", "ingest"]
 
+# The console, so `lancescope open` has something to serve from a bare install. It is
+# a few megabytes of JavaScript in a wheel that is otherwise kilobytes of Python, and
+# that is the price of the command being real rather than checkout-only. `make ui`
+# writes it; a wheel built without it still installs, and `open` says which situation
+# the reader is in rather than serving an API and no interface.
+[tool.hatch.build.targets.wheel.force-include]
+"web/out" = "server/ui"
+
 [dependency-groups]
 dev = ["ruff>=0.9"]
 

@@ -22,6 +22,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from server import compare, kiosk, query
+from server import estimate as server_estimate
 from server.catalog import (
     Catalog,
     Handle,
@@ -30,6 +31,7 @@ from server.catalog import (
     is_blob_field,
 )
 from server.intel import findings as intel_findings
+from server.intel import runconfig as intel_runconfig
 from server.runtime import runtime as lance_runtime
 
 router = APIRouter(prefix="/catalog")
@@ -660,13 +662,122 @@ async def findings(name: str, facet: str | None = None) -> JSONResponse:
         )
     h = open_table(name)
     h.drain()                                       # zero, so the cost below is ours
-    analysis = intel_findings.analyse(h, facet=facet)
+    analysis = intel_findings.analyse(h, facet=facet, costs=_costs_or_none(h))
     d = h.drain()
 
     return JSONResponse({
         "name": name,
         "uri": h.uri,
         "facet": facet,
+        **analysis.as_dict(),
+        "read_bytes": d.read_bytes,
+        "read_iops": d.read_iops,
+    })
+
+
+def _costs_or_none(h):
+    """Per-column bytes for the findings that would otherwise guess at them.
+
+    Best effort on purpose. A table whose footers cannot be read still gets its
+    findings — the two rules that want this fall back to the size the schema implies
+    and say in their evidence that they did.
+    """
+    try:
+        return server_estimate.table_costs(h)
+    except Exception:                                        # noqa: BLE001
+        return None
+
+
+@router.get("/tables/{name:path}/estimate")
+async def estimate(name: str, columns: str | None = None) -> JSONResponse:
+    """What a full pass over these columns weighs, without reading any of them.
+
+    The distinction from every other byte figure here matters. `read_bytes` on the
+    other routes is drained from our own handle: exact, and only ever about a read we
+    performed. This is a property of the table — the bytes those columns occupy on
+    disk, from the file footers — so it holds for DuckDB, Spark, Ray or a training
+    loader, none of which will tell anyone what they are about to move.
+
+    It is a weight and not a prediction. A scan also pays footers and column metadata
+    per data file, and Lance reads a small file whole, so `floor_bytes` is what a pass
+    would actually cost and `bytes` is only what the columns themselves come to. On a
+    table of small files those are two very different numbers, and `caveats` says
+    which of the reasons apply here.
+
+    The footers are read through a separate reader, so this route's `read_bytes` does
+    not include them. `footer_ms` and `off_meter` inside the estimate say what that
+    cost instead of quietly folding a modelled figure into a measured one.
+    """
+    wanted = [c.strip() for c in columns.split(",") if c.strip()] if columns else None
+
+    h = open_table(name)
+    h.drain()                                       # zero, so the cost below is ours
+    try:
+        est = server_estimate.scan_estimate(h, columns=wanted)
+    except KeyError as e:
+        raise HTTPException(400, f"no column named {e.args[0]!r} in {name}") from None
+    d = h.drain()
+
+    return JSONResponse({
+        "name": name,
+        "uri": h.uri,
+        "version": h.ds.version,
+        "columns_requested": wanted,
+        **est.as_dict(),
+        "read_bytes": d.read_bytes,
+        "read_iops": d.read_iops,
+    })
+
+
+@router.get("/tables/{name:path}/run-config")
+async def run_config(name: str, columns: str | None = None,
+                     facet: str | None = "training") -> JSONResponse:
+    """What a training run must pin about this table, as a block it can commit.
+
+    Declared here rather than at the end of the file on purpose: `/tables/{name}` is
+    a greedy `:path` route, and FastAPI matches in declaration order, so a
+    run-config route declared after it would arrive as a table named
+    `moments/run-config`.
+
+    `?columns=` weighs the projection a run actually reads rather than the whole
+    table. A column this table does not have is a 400 naming it — quietly dropping
+    it would hand somebody an artifact whose byte figure describes a projection they
+    never asked for, and that number is one people budget GPU time against.
+
+    The findings are swept once and shared between the artifact and the panel beside
+    it. Two sweeps could answer differently if a write landed between them, and a
+    console showing an artifact that disagrees with the list above it is worse than
+    one showing neither.
+
+    One honest gap: `read_bytes` below is drained from the handle, and the column
+    weights are read through a separate `LanceFileReader`, which the handle cannot
+    see. What those footers cost travels inside `run_config` as `footer_ms`, marked
+    `off_meter`, rather than being folded into a figure that means "measured".
+    """
+    if facet is not None and facet not in intel_findings.FACETS:
+        raise HTTPException(
+            400,
+            f"unknown facet {facet!r} — known facets: "
+            f"{', '.join(intel_findings.FACETS)}",
+        )
+    wanted = [c.strip() for c in columns.split(",") if c.strip()] if columns else None
+
+    h = open_table(name)
+    h.drain()                                       # zero, so the cost below is ours
+    analysis = intel_findings.analyse(h, facet=facet, costs=_costs_or_none(h))
+    try:
+        cfg = intel_runconfig.build(h, columns=wanted, facet=facet, analysis=analysis)
+    except KeyError as e:
+        raise HTTPException(400, f"no column named {e.args[0]!r} in {name}") from None
+    d = h.drain()
+
+    return JSONResponse({
+        "name": name,
+        "uri": h.uri,
+        "facet": facet,
+        "columns": wanted,
+        "run_config": cfg.as_dict(),
+        "run_config_yaml": intel_runconfig.to_yaml(cfg),
         **analysis.as_dict(),
         "read_bytes": d.read_bytes,
         "read_iops": d.read_iops,
@@ -1036,7 +1147,20 @@ async def query_explain(name: str, body: QueryBody) -> JSONResponse:
     except query.QueryError as e:
         raise HTTPException(400, str(e)) from None
     d = h.drain()
-    return JSONResponse({"name": name, "plan": plan.as_dict(),
+
+    # What running it would weigh, for a scan. The route used to answer "here is the
+    # plan, and here is what planning cost", which is not the question anybody opens
+    # it with. Scan only: on a vector or full-text query the columns a projection
+    # names are not what an index makes the reader fetch, and a number that looked
+    # like an answer there would be worse than none.
+    weight = None
+    if body.spec().normalised().mode == "scan":
+        try:
+            weight = server_estimate.scan_estimate(h, columns=body.columns).as_dict()
+        except (KeyError, OSError, ValueError):
+            weight = None
+
+    return JSONResponse({"name": name, "plan": plan.as_dict(), "estimate": weight,
                          "read_bytes": d.read_bytes, "read_iops": d.read_iops})
 
 

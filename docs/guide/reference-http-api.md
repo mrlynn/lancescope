@@ -26,6 +26,7 @@ Read-only. Nothing here writes to a dataset, and nothing materialises a blob col
 | `GET` | `/catalog/tables/{name:path}/blob` | Stream the bytes of one heavy cell, honouring HTTP Range. |
 | `GET` | `/catalog/tables/{name:path}/compare` | Two versions of one table, side by side and pinned. |
 | `POST` | `/catalog/tables/{name:path}/compare/query` | The same query against both versions — the before and after of an operation. |
+| `GET` | `/catalog/tables/{name:path}/estimate` | What a full pass over these columns weighs, without reading any of them. |
 | `GET` | `/catalog/tables/{name:path}/findings` | What is worth saying about this table, derived rather than generated. |
 | `GET` | `/catalog/tables/{name:path}/fragments` | The physical layout: what each fragment holds and what it weighs. |
 | `GET` | `/catalog/tables/{name:path}/indices` | What is indexed on this table — and, more usefully, what isn't. |
@@ -35,6 +36,7 @@ Read-only. Nothing here writes to a dataset, and nothing materialises a blob col
 | `POST` | `/catalog/tables/{name:path}/query/explain` | The plan, without running the query. |
 | `POST` | `/catalog/tables/{name:path}/query/validate` | Does this predicate parse, and how many rows does it match. |
 | `GET` | `/catalog/tables/{name:path}/rows` | Browse rows, without ever materialising a blob. |
+| `GET` | `/catalog/tables/{name:path}/run-config` | What a training run must pin about this table, as a block it can commit. |
 | `GET` | `/catalog/tables/{name:path}/versions` | The table's history, newest first, with what each version changed. |
 
 ## The language layer

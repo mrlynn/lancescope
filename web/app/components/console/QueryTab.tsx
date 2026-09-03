@@ -18,9 +18,9 @@ import { DataGrid } from "@/app/components/console/DataGrid";
 import { FilterInput } from "@/app/components/console/FilterInput";
 import {
   ApiError,
-  type CompletionColumn, type FilterValidation,
+  type CompletionColumn, type Estimate, type FilterValidation,
   type QueryCapabilities, type QueryCapability, type QueryResult, type QuerySpec,
-  getQueryCapabilities, getQueryCompletions, runQuery, validateFilter,
+  explainQuery, getQueryCapabilities, getQueryCompletions, runQuery, validateFilter,
 } from "@/app/lib/catalog";
 import { fmtBytes } from "@/app/lib/api";
 import { download, toCsv, toJson } from "@/app/lib/export";
@@ -89,6 +89,10 @@ export function QueryTab({ table, root }: { table: string; root: string | null }
   // than a second piece of state to remember to clear — and a stale count under an
   // edited filter is the one failure that would make this worse than saying nothing.
   const [check, setCheck] = useState<{ for: string; v: FilterValidation } | null>(null);
+  // What a scan of this table would weigh, before it is run. Held with the mode it
+  // describes, the same way the filter verdict is held with its predicate: a weight
+  // shown under a vector query would be answering a question nobody asked.
+  const [weight, setWeight] = useState<{ mode: string; est: Estimate | null } | null>(null);
   const [showPlan, setShowPlan] = useState(false);
   const [showRepro, setShowRepro] = useState(false);
 
@@ -153,6 +157,19 @@ export function QueryTab({ table, root }: { table: string; root: string | null }
     }, 400);
     return () => { clearTimeout(t); controller.abort(); };
   }, [table, filter]);
+
+  useEffect(() => {
+    if (mode !== "scan") return;
+    const controller = new AbortController();
+    const t = setTimeout(() => {
+      explainQuery(table, { mode: "scan", limit: 1 })
+        .then((r) => { if (!controller.signal.aborted) setWeight({ mode, est: r.estimate }); })
+        .catch(() => {});
+    }, 400);
+    return () => { clearTimeout(t); controller.abort(); };
+  }, [table, mode]);
+
+  const weighed = weight?.mode === mode ? weight.est : null;
 
   // Both derived rather than stored. An answer is shown when it is an answer about
   // the predicate currently in the box; anything else is still being checked.
@@ -351,6 +368,21 @@ export function QueryTab({ table, root }: { table: string; root: string | null }
           </button>
         )}
       </div>
+
+      {mode === "scan" && weighed && (
+        <div className="mono text-[11px] mb-4 flex items-baseline gap-2 flex-wrap">
+          <span className="text-[var(--haze)]">
+            a full pass over this table weighs{" "}
+            <span style={{ color: "var(--index)" }}>
+              {fmtBytes(Math.max(weighed.bytes, weighed.floor_bytes)).value}{" "}
+              {fmtBytes(Math.max(weighed.bytes, weighed.floor_bytes)).unit}
+            </span>
+          </span>
+          <span className="text-[var(--dim)]">
+            · weighed from the footers, so it is true for any reader — not only this one
+          </span>
+        </div>
+      )}
 
       {filter.trim() && (
         <div className="mono text-[11px] mb-4 flex items-baseline gap-2 flex-wrap">

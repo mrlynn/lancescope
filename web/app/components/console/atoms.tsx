@@ -1,6 +1,42 @@
 "use client";
 
+import { useState } from "react";
+
+import Icon from "@/app/components/Icon";
 import { fmtBytes } from "@/app/lib/api";
+
+/** Copy-to-clipboard, for the handful of values on this console that exist to be
+ *  pasted somewhere else — a table path, a run config, a reproduction.
+ *
+ *  There were three of these, written separately and behaving almost the same. The
+ *  `title` prop is what let the third one fold in: where the clipboard is refused,
+ *  the value still has to be reachable, and on the table header that was a tooltip
+ *  carrying the path. Failing silently is deliberate — a permission dialog the user
+ *  already declined is not worth an error state, and the value is on screen. */
+export function Copy({ value, what, title, size = 14, className = "" }: {
+  value: string; what: string; title?: string; size?: number; className?: string;
+}) {
+  const [done, setDone] = useState(false);
+  return (
+    <button
+      className={`iconbtn shrink-0 ${className}`}
+      title={title}
+      data-tip={done ? "Copied" : `Copy ${what}`}
+      aria-label={`Copy ${what}`}
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(value);
+          setDone(true);
+          setTimeout(() => setDone(false), 1400);
+        } catch {
+          // No clipboard permission; the value is on screen and selectable anyway.
+        }
+      }}
+    >
+      <Icon name={done ? "check" : "external"} size={size} />
+    </button>
+  );
+}
 
 /** What the request you just made cost. The console is a tool for reading byte
  *  costs, so it states its own in the same coral/amber language as the demo. */

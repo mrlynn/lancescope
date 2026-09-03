@@ -17,11 +17,13 @@ The console's read surface, as tools an agent can call. Every one is the HTTP ro
 | tool | read-only | what it does |
 | --- | --- | --- |
 | `describe_table` | yes | One table in full: every column with its type, whether it is a blob column, dataset statistics, and the real on-disk byte split between blob side files and everything else. |
+| `estimate_scan` | yes | What a full pass over a table's columns weighs, worked out from the file footers without reading a single row — so it holds for any reader, DuckDB, Spark or Ray included, none of which will say what they are about to move. Pass columns as a comma-separated list to weigh one projection. Two numbers come back and both matter: 'bytes' is what the columns occupy, 'floor_bytes' is what a pass costs once per-file overhead is counted, and on a table of small files Lance reads each one whole so the floor can be many times the weight. Quote the floor when it is larger. This covers a full scan only — it does not say what a vector or full-text query reads, and the caveats it returns say where else the figure stops being true. |
 | `list_tables` | yes | Every table in the database: rows, version, fragments, indices and columns, plus what listing them cost. Reads manifests, never data. |
 | `read_rows` | yes | A page of rows, with an optional SQL filter. Heavy columns — vectors, images, blobs — are described rather than read, and cannot be expanded through this tool. The response says what the read cost. |
 | `table_findings` | yes | What this console has worked out about a table — an unindexed vector column, small-file counts that would be misleading to act on, tombstone debt — each with the numbers it was derived from. No model wrote these. Pass facet='training' for only the ones a training run pays for: how few workers the fragment split can feed, what an epoch reads, and what an unindexed vector costs per query. |
 | `table_fragments` | yes | Physical layout: what each fragment holds and what it weighs, in both the figure Lance reports and the bytes it actually occupies, which differ by orders of magnitude for a blob table. |
 | `table_indices` | yes | Indices on a table, their coverage, and — more usefully — which columns have none. An unindexed vector column is why a similarity search reads every row. |
+| `table_run_config` | yes | What a training run must pin about this table, as a block to keep beside the code that runs it: the dataset URI and the exact version, the columns the run reads, what those columns weigh on disk, how many loader workers the fragment split can actually feed, and the findings outstanding when it was generated. Derived from the table, never written by a model — a run config that drifts from the table it describes is worse than none, because it is believed. Pass columns as a comma-separated list to weigh a projection rather than the whole table. The answer carries both the object and the same thing rendered as YAML. |
 | `table_versions` | yes | Version history: what each version did, when, and how the row, fragment and byte counts moved between them. |
 
 ## What the server tells a caller
@@ -52,4 +54,14 @@ decides how long an epoch takes, an unindexed vector column costing a full scan 
 eval query. It reports the layout and nothing about the data: it cannot tell you
 whether the labels are right or whether a split leaks, and saying so is part of the
 answer.
+
+Asked what something will cost to read, call estimate_scan. It weighs columns rather
+than predicting a read: the answer is a property of the table and survives being
+handed to a reader this server does not own. It answers for a full scan and says so —
+do not reach for it on a vector or full-text query.
+
+Asked to *set up* a run rather than judge one, call table_run_config. It returns the
+block to keep beside the training code — uri, version, columns, what they weigh, the
+worker ceiling — so that none of it has to be retyped from a screen, and so the run
+can say afterwards which version it read.
 ```

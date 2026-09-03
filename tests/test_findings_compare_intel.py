@@ -390,3 +390,38 @@ def test_a_local_model_costs_zero_rather_than_unknown(settings_file):
 
     m = registry.lookup("qwen3:8b", "ollama")
     assert registry.cost_usd(m, 1_000_000, 1_000_000) == 0.0
+
+
+def test_the_unindexed_vector_finding_uses_measured_bytes_when_it_has_them(api):
+    """`rows * dim * 4` is the logical size, and only right while nothing is
+    compressed. The footers know what the column occupies."""
+    body = api.get("/catalog/tables/vectors/findings").json()
+    f = next(x for x in body["findings"] if x["id"] == "vector-column-unindexed")
+
+    assert f["evidence"]["measured"] is True
+    assert f["evidence"]["scan_bytes"] > 0
+    assert "logical_bytes" in f["evidence"], "keep the arithmetic beside the measurement"
+
+
+def test_a_vector_finding_falls_back_to_the_schema_and_says_so(catalog):
+    """A table whose footers cannot be read still gets its findings."""
+    from server.intel import findings as fi
+
+    h = catalog.open("vectors", scope="test")
+    analysis = fi.analyse(h, costs=None)
+    f = next(x for x in analysis.findings if x.id == "vector-column-unindexed")
+
+    assert f.evidence["measured"] is False
+    assert f.evidence["scan_bytes"] == f.evidence["logical_bytes"]
+
+
+def test_the_embedding_share_stops_apologising_once_it_is_measured(api):
+    """The old caveat existed because a schema-implied size against a directory walk
+    could exceed 100%. Two measured numbers do not need it."""
+    body = api.get("/catalog/tables/vectors/findings").json()
+    f = next((x for x in body["findings"] if x["id"] == "mostly-embeddings"), None)
+    if f is None:
+        return                      # the fixture is below the share threshold
+    assert f["evidence"]["measured"] is True
+    assert f["evidence"]["share"] <= 1.0
+    assert "upper bound" not in f["caveat"]

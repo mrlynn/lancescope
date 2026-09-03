@@ -1,5 +1,5 @@
 .PHONY: local
-.PHONY: help setup download prepare prepare-force embed build ingest scan doctor verify test check docs ui sidecar app api mcp web demo dev tidy bench clean
+.PHONY: help setup download prepare prepare-force embed build ingest scan doctor open cost findings run-config verify test check docs ui sidecar app api mcp web demo dev tidy bench clean
 
 PY := .venv/bin/python
 UVICORN := .venv/bin/uvicorn
@@ -38,6 +38,10 @@ help:
 	@echo "make ingest LIMIT=36   download -> prepare -> embed -> build -> verify"
 	@echo "make scan SRC=~/Pics   survey your own media, reading no files"
 	@echo "make doctor            what this build can decode, and what it cannot"
+	@echo "make open P=path/x.lance  open a table in the console, root worked out"
+	@echo "make cost T=moments      what a table's columns weigh, reading no rows"
+	@echo "make findings T=moments  what the console knows, and a CI gate over it"
+	@echo "make run-config T=moments  the block a training run should pin"
 	@echo "make test              contract tests, synthetic fixtures (~3s)"
 	@echo "make check             everything CI runs, before you push (~90s)"
 	@echo "make docs              re-render the generated reference pages"
@@ -82,6 +86,21 @@ scan:
 # What this build can decode, and what it cannot.
 doctor:
 	@$(PY) -m ingest.cli doctor $(ARGS)
+
+open:
+	@$(PY) -m ingest.cli open $(P) $(ARGS)
+
+cost:
+	@$(PY) -m ingest.cli cost $(T) $(ARGS)
+
+# The gate. `--fail-on warn` exits 1 on an outstanding warning and 3 when a rule
+# crashed, because a build that cannot tell those apart will eventually treat one
+# as the other.
+findings:
+	@$(PY) -m ingest.cli findings $(T) $(ARGS)
+
+run-config:
+	@$(PY) -m ingest.cli run-config $(T) $(ARGS)
 
 # Contract tests over synthetic Lance tables. Seconds, no corpus, no torch — this is
 # what CI runs. `make verify` is the integration gate on the real corpus and stays
