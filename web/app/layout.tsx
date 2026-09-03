@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import KioskBanner from "@/app/components/KioskBanner";
 import { Martian_Mono, Schibsted_Grotesk } from "next/font/google";
 import "./globals.css";
 
@@ -43,7 +44,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head>
         <script dangerouslySetInnerHTML={{ __html: NO_FLASH }} />
       </head>
-      <body>{children}</body>
+      <body>
+        {/* Above everything, on every screen, because the constraint applies to
+            every screen. Renders nothing unless the server says it is a kiosk. */}
+        <KioskBanner />
+        {children}
+      </body>
     </html>
   );
 }

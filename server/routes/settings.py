@@ -14,10 +14,11 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from server import kiosk
 from server import settings as cfg
 from server.catalog import Catalog, capabilities_for
 from server.intel import config as intel_config
@@ -213,7 +214,7 @@ class OpenSampleBody(BaseModel):
     uri: str = Field(min_length=1)
 
 
-@router.post("/samples/open")
+@router.post("/samples/open", dependencies=[Depends(kiosk.refuse_if_kiosk)])
 async def open_sample(body: OpenSampleBody) -> JSONResponse:
     """Save a sample as a connection and point the console at it."""
     from server import hf
@@ -231,9 +232,16 @@ class ProbeBody(BaseModel):
     uri: str = Field(min_length=1)
 
 
-@router.post("/connections/probe")
+@router.post("/connections/probe", dependencies=[Depends(kiosk.refuse_if_kiosk)])
 async def probe(body: ProbeBody) -> JSONResponse:
-    """Check a path before committing to it. Reads directory entries, nothing more."""
+    """Check a path before committing to it. Reads directory entries, nothing more.
+
+    Refused on a kiosk even though it writes nothing, because "reads directory
+    entries" is the whole problem when the caller is the internet: given a path it
+    reports whether that directory exists and what is in it, which is a filesystem
+    enumeration service by another name. It is guarded here for the same reason
+    `/ingest/scan` is not mounted at all.
+    """
     return JSONResponse({"uri": body.uri, **_inspect(body.uri)})
 
 
@@ -243,7 +251,7 @@ class AddBody(BaseModel):
     activate: bool = True
 
 
-@router.post("/connections")
+@router.post("/connections", dependencies=[Depends(kiosk.refuse_if_kiosk)])
 async def add(body: AddBody) -> JSONResponse:
     found = _inspect(body.uri)
     if found["reachable"] is False:
@@ -254,7 +262,7 @@ async def add(body: AddBody) -> JSONResponse:
     return JSONResponse({"connection": conn.as_dict(), **_state()})
 
 
-@router.post("/connections/{conn_id}/activate")
+@router.post("/connections/{conn_id}/activate", dependencies=[Depends(kiosk.refuse_if_kiosk)])
 async def activate(conn_id: str) -> JSONResponse:
     s = cfg.load()
     if cfg.activate(s, conn_id) is None:
@@ -263,7 +271,7 @@ async def activate(conn_id: str) -> JSONResponse:
     return JSONResponse(_state())
 
 
-@router.delete("/connections/{conn_id}")
+@router.delete("/connections/{conn_id}", dependencies=[Depends(kiosk.refuse_if_kiosk)])
 async def remove(conn_id: str) -> JSONResponse:
     s = cfg.load()
     if not cfg.remove_connection(s, conn_id):
@@ -286,7 +294,7 @@ class IntelBody(BaseModel):
     cache_dir: str | None = None
 
 
-@router.put("/intelligence")
+@router.put("/intelligence", dependencies=[Depends(kiosk.refuse_if_kiosk)])
 async def put_intelligence(body: IntelBody) -> JSONResponse:
     s = cfg.load()
     intel = s.intelligence

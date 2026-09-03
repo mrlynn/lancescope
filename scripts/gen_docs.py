@@ -72,9 +72,18 @@ def _summary(text: str | None) -> str:
 # --------------------------------------------------------------------- http api
 
 def http_api() -> str:
+    from fastapi import FastAPI
     from fastapi.routing import APIRoute
 
-    from server.main import app
+    from server.main import mount_routers
+
+    # A full app, built here rather than imported from `server.main`, because the
+    # module-level one mounts whatever the ambient environment asks for and a
+    # reference page must describe the software rather than one deployment.
+    # Generating this with `LANCESCOPE_KIOSK` set would otherwise silently delete
+    # two sections and `--check` would fail on the next machine.
+    app = FastAPI()
+    mount_routers(app, kiosk_mode=False)
 
     def walk(routes):
         """Every APIRoute, including those inside an included router.

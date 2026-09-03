@@ -103,6 +103,9 @@ export default function SettingsPage() {
   };
 
   const current = TABS.find((t) => t.id === tab) ?? TABS[0];
+  // Null until /runtime answers. Defaulting to false means a slow answer shows the
+  // controls for a moment rather than hiding them from the person who owns them.
+  const kiosk = runtime?.kiosk ?? false;
 
   return (
     <main className="relative z-10 min-h-screen px-[var(--stage-pad)] pt-7 pb-16">
@@ -145,7 +148,8 @@ export default function SettingsPage() {
         <div hidden={tab !== "connections"} role="tabpanel"
              id="settings-panel-connections" aria-labelledby="settings-tab-connections">
           <div className="space-y-6">
-            <Connections state={state} onChange={setState} onError={setError} />
+            <Connections state={state} onChange={setState} onError={setError}
+                         kiosk={kiosk} />
 
             {/* Below the connection form, not above it: someone on this page usually
                 came to point at their own database. The offer should be what they find
@@ -170,6 +174,7 @@ export default function SettingsPage() {
         <div hidden={tab !== "intelligence"} role="tabpanel"
              id="settings-panel-intelligence" aria-labelledby="settings-tab-intelligence">
           <Intelligence
+            kiosk={kiosk}
             intel={state?.intelligence ?? null}
             probe={probe}
             caps={caps}
@@ -210,10 +215,11 @@ function Banner({ tone, children }: { tone: "video" | "index"; children: React.R
 
 /* ------------------------------------------------------------------- connections */
 
-function Connections({ state, onChange, onError }: {
+function Connections({ state, onChange, onError, kiosk = false }: {
   state: SettingsState | null;
   onChange: (s: SettingsState) => void;
   onError: (e: string | null) => void;
+  kiosk?: boolean;
 }) {
   const router = useRouter();
   const [uri, setUri] = useState("");
@@ -380,7 +386,7 @@ function Connections({ state, onChange, onError }: {
               <input className="inp mono" placeholder="optional" value={label}
                      onChange={(e) => setLabel(e.target.value)} />
             </Field>
-            <button className="btn" disabled={!uri.trim() || busy}
+            <button className="btn" disabled={!uri.trim() || busy || locked || kiosk}
                     onClick={async () => {
                       try { setFound(await probeConnection(uri)); onError(null); }
                       catch (e) { onError(e instanceof Error ? e.message : "probe failed"); }
@@ -388,7 +394,12 @@ function Connections({ state, onChange, onError }: {
               <Icon name="search" size={14} />
               Check
             </button>
-            <button className="btn btn-accent" disabled={!uri.trim() || busy}
+            {/* Disabled where the server would refuse. `locked` is LANCE_ROOT,
+                which saves the connection but cannot switch to it; `kiosk` is the
+                public demo, which refuses outright. Both were previously live
+                buttons that appeared to work. */}
+            <button className="btn btn-accent"
+                    disabled={!uri.trim() || busy || locked || kiosk}
                     onClick={() => run(async () => {
                       const s = await addConnection(uri, label);
                       setUri(""); setLabel(""); setFound(null);
@@ -436,13 +447,14 @@ const ROLE_HINT: Record<string, string> = {
   none: "Off. The console keeps every deterministic surface it has.",
 };
 
-function Intelligence({ intel, probe, caps, onProbe, onSaved, onError }: {
+function Intelligence({ intel, probe, caps, onProbe, onSaved, onError, kiosk = false }: {
   intel: IntelligenceView | null;
   probe: IntelProbe | null;
   caps: Capabilities | null;
   onProbe: () => void;
   onSaved: (i: IntelligenceView) => void;
   onError: (e: string | null) => void;
+  kiosk?: boolean;
 }) {
   const [draft, setDraft] = useState<Record<string, unknown>>({});
   const [key, setKey] = useState("");
@@ -457,6 +469,31 @@ function Intelligence({ intel, probe, caps, onProbe, onSaved, onError }: {
     setDraft((d) => ({ ...d, [field]: value }));
     setSaved(false);
   };
+
+  // Before the reading-state check, because on a kiosk the panel is never going to
+  // arrive: the router that answers these routes is not mounted at all. A form that
+  // renders and then 404s on save would be worse than a sentence.
+  if (kiosk) {
+    return (
+      <section className="panel p-6">
+        <Eyebrow>Intelligence</Eyebrow>
+        <p className="text-[13px] text-[var(--body)] leading-relaxed max-w-[62ch]">
+          Off on the public demo, and not configurable here. The language layer bills a
+          provider per request, so a shared console does not carry one — which costs
+          this demo nothing it exists to show: every finding, every byte count and every
+          access path on the other tabs is derived from metadata, with no model involved.
+        </p>
+        <p className="text-[13px] text-[var(--body)] leading-relaxed max-w-[62ch] mt-4">
+          <a href="https://lancescope.mlynn.dev/download"
+             className="underline underline-offset-2"
+             style={{ color: "var(--video)" }}>
+            Run LanceScope on your own database
+          </a>{" "}
+          to point it at Claude, or at a model on your own machine.
+        </p>
+      </section>
+    );
+  }
 
   if (intel === null) {
     return <section className="panel p-6"><Eyebrow>Intelligence</Eyebrow><Empty>reading…</Empty></section>;

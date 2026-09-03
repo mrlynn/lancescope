@@ -43,6 +43,27 @@ class HfUnavailable(Exception):
     """The Hub could not answer. Distinct from "the repository holds no tables"."""
 
 
+def is_throttled(error: BaseException) -> bool:
+    """Whether this failure is the Hub refusing us rather than the data being wrong.
+
+    Reached in practice rather than in theory: seven filtered scans over
+    `openvid-lance` exhausted the anonymous quota of 5,000 resolver requests per five
+    minutes, because each IO is a range request and that table answers one such scan
+    in 832 of them. Everything on the root then failed, including the metadata reads
+    that cost almost nothing, until the window rolled over.
+
+    Lance raises the Hub's HTTP status as an `OSError` carrying the whole response
+    in its message, so there is nothing typed to catch and the string is the only
+    signal available. Worth doing anyway: without it a throttled console returns
+    500 with a Rust file path in it, which reads as a bug in LanceScope and sends
+    the reader looking in the wrong place entirely.
+    """
+    text = str(error).lower()
+    return all(marker in text for marker in ("rate limit", "429")) or (
+        "429" in text and "quota" in text
+    )
+
+
 @dataclass(frozen=True)
 class HfRoot:
     """A parsed `hf://datasets/<org>/<repo>/<path>` root."""
