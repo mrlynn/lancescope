@@ -113,11 +113,17 @@ export default function Spend({ ceiling }: { ceiling?: number | null }) {
   }, [days, nonce]);
 
   if (err) {
+    // A 404 here has one cause and it is not the ledger: the route is younger than
+    // the server process answering for it. Saying "could not be read — 404" is true
+    // and sends someone looking at a file that is fine.
+    const stale = err === "404";
     return (
       <section className="panel p-6">
         <Eyebrow>Spend</Eyebrow>
-        <p className="mono text-[12px] text-[var(--haze)]">
-          the ledger could not be read — {err}
+        <p className="mono text-[12px] text-[var(--haze)] leading-relaxed">
+          {stale
+            ? "this route is not mounted — the API server predates it. Restart it (make api) and this panel will fill in."
+            : `the ledger could not be read — ${err}`}
         </p>
       </section>
     );
