@@ -108,7 +108,8 @@ def main() -> int:
 
     from fastapi import FastAPI
 
-    from server.main import app
+    from server import kiosk
+    from server.main import app, upstream_throttled
     from server.routes import catalog as catalog_routes
     from server.routes import demo
     from server.routes import intel as intel_routes
@@ -125,10 +126,23 @@ def main() -> int:
     # router objects, so nothing is duplicated and the module-level bindings the
     # main app's lifespan sets up are shared, and `app.routes` stays exactly as the
     # documentation generator reads it.
+    #
+    # The kiosk decision has to be repeated here rather than inherited. The mount is
+    # a second app with its own router list, so a router the main app declined to
+    # mount would still be reachable through `/api/…` — which is the only path the
+    # exported interface ever uses, making this the copy that matters. It was found
+    # by checking, not by reasoning: `/intel/*` was correctly absent from the API and
+    # present under `/api/intel/*` in the same process.
     api = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
-    for router in (demo.router, catalog_routes.router, settings_routes.router,
-                   intel_routes.router):
+    routers = [demo.router, catalog_routes.router, settings_routes.router]
+    if not kiosk.enabled():
+        routers.append(intel_routes.router)
+    for router in routers:
         api.include_router(router)
+    # And the same handler, for the same reason: an exception raised inside a mounted
+    # sub-application is handled by that sub-application, not by its parent.
+    for failure in (OSError, ValueError):
+        api.add_exception_handler(failure, upstream_throttled)
     app.mount("/api", api)
 
     if ui is not None:

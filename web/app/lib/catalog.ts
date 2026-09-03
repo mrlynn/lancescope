@@ -279,6 +279,10 @@ export type RuntimeReport = {
   versions: { lance: string; pyarrow: string; python: string };
   features: RuntimeFeature[];
   summary: string | null;
+  /** Whether this process is the public demo rather than someone's own console.
+   *  Carried here because every screen already has a reason to ask what the
+   *  runtime is, and a second request to learn one boolean would be silly. */
+  kiosk: boolean;
 };
 
 export const getRuntime = () => get<RuntimeReport>("/runtime");

@@ -17,11 +17,11 @@ from decimal import Decimal
 from pathlib import Path
 
 import pyarrow as pa
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from server import compare, query
+from server import compare, kiosk, query
 from server.catalog import (
     Catalog,
     Handle,
@@ -91,7 +91,10 @@ async def runtime_report() -> JSONResponse:
     — which is when a reader most needs to know whether the console is empty
     because the database is empty or because the reader cannot see into it.
     """
-    return JSONResponse(lance_runtime().as_dict())
+    # `kiosk` rides along rather than joining the runtime report itself, which
+    # describes the Lance reader and not the deployment around it. The console
+    # already fetches this route, so telling it here costs no second request.
+    return JSONResponse({**lance_runtime().as_dict(), "kiosk": kiosk.enabled()})
 
 
 # ------------------------------------------------------------------------- listing
@@ -759,7 +762,7 @@ MAX_BLOB_CHUNK = 8 * 1024 * 1024
 #
 # And it is declared *above* the bare `/tables/{name:path}` route, because Starlette
 # matches in definition order and that one would otherwise absorb `.../blob` too.
-@router.get("/tables/{name:path}/blob")
+@router.get("/tables/{name:path}/blob", dependencies=[Depends(kiosk.limit_heavy)])
 async def blob(name: str, request: Request, key: str | None = None,
                column: str | None = None, key_column: str = "blob_key",
                rowid: int | None = None) -> Response:
@@ -1023,7 +1026,7 @@ class CompareQueryBody(QueryBody):
     b: int
 
 
-@router.post("/tables/{name:path}/compare/query")
+@router.post("/tables/{name:path}/compare/query", dependencies=[Depends(kiosk.limit_heavy)])
 async def compare_query(name: str, body: CompareQueryBody) -> JSONResponse:
     """The same query against both versions — the before and after of an operation.
 
@@ -1047,7 +1050,7 @@ async def compare_query(name: str, body: CompareQueryBody) -> JSONResponse:
                          **result.as_dict()})
 
 
-@router.post("/tables/{name:path}/query")
+@router.post("/tables/{name:path}/query", dependencies=[Depends(kiosk.limit_heavy)])
 async def run_query(name: str, body: QueryBody) -> JSONResponse:
     """Run it, and report what it cost and which path it took.
 

@@ -1,0 +1,67 @@
+# The public demo — demo.lancescope.mlynn.dev
+#
+#   fly launch --no-deploy --copy-config --config deploy/fly.toml
+#   fly deploy --config deploy/fly.toml
+#
+# Nothing is built here. The image is the one the release pipeline already publishes,
+# pinned to a Lance reader rather than to `latest`, so a redeploy cannot silently
+# change which pylance is underneath — see docs/guide/reference-versions.md.
+#
+# No volume, and none wanted. The settings file is the only thing this app writes and
+# `LANCE_ROOT` overrides everything in it, so persisting it would persist nothing
+# that is read. A machine that restarts comes back identical.
+
+app = "lancescope-demo"
+primary_region = "iad"
+
+[build]
+  image = "ghcr.io/mrlynn/lancescope:pylance-11.0.0"
+
+[env]
+  # Which database, and the fact that it is remote, is the whole point: pylance opens
+  # `hf://` lazily, so this deployment hosts no data at all. mnist-lance rather than
+  # the video corpus because the video corpus cannot be served on an anonymous
+  # HuggingFace quota — see "Running it in public" in docs/guide/howto-container.md.
+  LANCE_ROOT = "hf://datasets/lance-format/mnist-lance/data"
+
+  # Ingest and intelligence unmounted, settings read-only, queries limited.
+  LANCESCOPE_KIOSK = "1"
+
+  LANCESCOPE_PORT = "8080"
+  LANCESCOPE_HOST = "0.0.0.0"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+
+  # Deliberately not scale-to-zero. A cold start pays for importing pyarrow and
+  # pylance before it can answer anything, which is five to fifteen seconds, and this
+  # URL is linked from a marketing page — the first impression is the product. One
+  # machine kept warm is a few dollars a month and removes the whole problem.
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "requests"
+    # A query holds a worker thread for seconds against a remote root, and the point
+    # of the rate limit is that not many run at once anyway.
+    soft_limit = 20
+    hard_limit = 40
+
+[[vm]]
+  # Measured, not guessed: the server settles at ~390 MB resident after a session
+  # that includes a vector query. 512 MB would leave nothing over for a second one.
+  memory = "1gb"
+  cpu_kind = "shared"
+  cpus = 1
+
+[checks.up]
+  type = "http"
+  port = 8080
+  # Answers without opening a dataset, so a throttled Hub cannot mark the machine
+  # unhealthy and restart it into the same throttling.
+  path = "/api/catalog/runtime"
+  interval = "30s"
+  timeout = "5s"
+  grace_period = "30s"
