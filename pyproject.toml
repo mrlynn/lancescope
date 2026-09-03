@@ -139,6 +139,13 @@ test = [
     "pillow>=11",
     "pypdfium2>=4.30",
     "pypdf>=5",
+    # Only the tests get this. `server/intel/runconfig.py` renders its YAML by hand
+    # precisely because pyyaml is not a dependency of the server — it is in the lock
+    # only because something else pulled it in, and a route that relied on that
+    # accident would break the first time the accident stopped happening. A real
+    # parser reading the hand-rolled output back is what makes writing it by hand
+    # safe, so the parser belongs here and nowhere else.
+    "pyyaml>=6",
 ]
 
 [tool.ruff]
