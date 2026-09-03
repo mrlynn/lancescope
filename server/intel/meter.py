@@ -26,6 +26,8 @@ import threading
 import time
 from dataclasses import dataclass, field
 
+from server.intel import ledger
+
 
 class SpendCeiling(RuntimeError):
     """The configured limit would be exceeded by making this call."""
@@ -52,8 +54,22 @@ class Meter:
     since: float = field(default_factory=time.time)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
-    def record(self, usage, cost_usd: float | None) -> None:
-        """Add one real call. `cost_usd` is None for a model we cannot price."""
+    def record(
+        self,
+        usage,
+        cost_usd: float | None,
+        *,
+        task: str = "",
+        provider: str = "",
+        model: str = "",
+        ms: int = 0,
+    ) -> None:
+        """Add one real call. `cost_usd` is None for a model we cannot price.
+
+        The labels are optional so that no caller can spend money by forgetting one,
+        and they are here so the ledger can answer *what* the money went on. An
+        unlabelled call still counts; it just lands in the ledger as `other`.
+        """
         with self._lock:
             self.input_tokens += usage.input_tokens
             self.output_tokens += usage.output_tokens
@@ -63,10 +79,31 @@ class Meter:
                 self.unpriced_calls += 1
             else:
                 self.cost_usd += cost_usd
+        ledger.record(
+            task=task or "other", provider=provider, model=model,
+            input_tokens=usage.input_tokens, output_tokens=usage.output_tokens,
+            cache_read_tokens=usage.cache_read_tokens, cost_usd=cost_usd, ms=ms,
+        )
 
-    def record_cache_hit(self) -> None:
+    def record_cache_hit(
+        self,
+        *,
+        task: str = "",
+        provider: str = "",
+        model: str = "",
+        avoided_usd: float | None = None,
+    ) -> None:
+        """A call that did not happen. `avoided_usd` is what the original one cost.
+
+        Written to the ledger at `cost_usd: 0` with the avoided figure beside it, so
+        the saving can be shown without ever being added to spend.
+        """
         with self._lock:
             self.cache_hits += 1
+        ledger.record(
+            task=task or "other", provider=provider, model=model,
+            cost_usd=0.0, cached=True, avoided_usd=avoided_usd,
+        )
 
     def reset(self) -> None:
         with self._lock:

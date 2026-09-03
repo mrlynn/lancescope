@@ -58,6 +58,8 @@ export default function SchemaView({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     fetch("/api/schema").then((r) => r.json()).then(setData).catch(() => {});
     const onKey = (e: KeyboardEvent) => {
+      // A synthetic event can arrive without one; reading it would throw.
+      if (!e.key) return;
       if (e.key === "Escape" || e.key.toLowerCase() === "s") onClose();
     };
     window.addEventListener("keydown", onKey);

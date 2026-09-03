@@ -246,6 +246,68 @@ export const getTokenMeter = () => intel<TokenMeter>("/meter");
 export const resetTokenMeter = () =>
   intel<TokenMeter>("/meter/reset", { method: "POST" });
 
+/* ------------------------------------------------------------- the spend ledger */
+
+/** One rollup — of a day, a task, a model, or the whole window.
+ *
+ *  `cost_usd` and `avoided_usd` are kept apart on purpose. A cache hit saved money;
+ *  folding the saving into the spend would make the cache look expensive and the
+ *  bill look larger, in the same number. */
+export type SpendBucket = {
+  calls: number;
+  cache_hits: number;
+  cost_usd: number;
+  avoided_usd: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  unpriced_calls: number;
+  avg_ms: number;
+  /** Present on a day: the same rollup again, split by which task spent it. */
+  tasks?: Record<string, SpendBucket>;
+  day?: string;
+  task?: string;
+  model?: string;
+  provider?: string;
+};
+
+/** One line of the ledger: what a single call cost, and nothing about what it was
+ *  for beyond which task asked for it. */
+export type SpendEvent = {
+  ts: number;
+  task: string;
+  provider: string;
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cost_usd: number | null;
+  ms: number;
+  cached: boolean;
+  avoided_usd: number | null;
+};
+
+export type SpendHistory = {
+  window_days: number;
+  /** Every day in the window, oldest first — including the ones nothing happened. */
+  daily: SpendBucket[];
+  by_task: SpendBucket[];
+  by_model: SpendBucket[];
+  totals: SpendBucket;
+  recent: SpendEvent[];
+  first_ts: number | null;
+  session: TokenMeter;
+  ceiling_usd: number | null;
+  provider: string;
+  logging: boolean;
+  ledger_path: string;
+  rates: { priced_on: string; models: ModelInfo[] };
+};
+
+export const getSpend = (days = 30) => intel<SpendHistory>(`/spend?days=${days}`);
+
+export const clearSpend = () => intel<{ cleared: boolean }>("/spend", { method: "DELETE" });
+
 // ------------------------------------------------------------ sample datasets
 
 /** A public Lance dataset offered to a console with nothing in it yet.

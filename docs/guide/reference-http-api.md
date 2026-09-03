@@ -48,6 +48,8 @@ Optional. Every route answers with nothing configured, and says what is missing.
 | `GET` | `/intel/meter` | Tokens and dollars spent by this process, beside the bytes it read. |
 | `POST` | `/intel/meter/reset` | — |
 | `POST` | `/intel/selftest` | One real call, end to end, reported honestly. |
+| `DELETE` | `/intel/spend` | Forget the history. |
+| `GET` | `/intel/spend` | What the key has cost, broken down by day, by task and by model. |
 | `POST` | `/intel/tables/{name:path}/filter` | English in, a Lance predicate out — as a draft, never as an action. |
 | `POST` | `/intel/tables/{name:path}/summary` | Describe a table in a few sentences, and remember the answer. |
 

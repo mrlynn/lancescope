@@ -161,6 +161,7 @@ MUTATING_ROUTES: dict[tuple[str, str], tuple[bool, str]] = {
     ("POST", "/intel/tables/{name:path}/summary"): (READS, "reads rows and describes them"),
     ("DELETE", "/intel/cache"): (READS, "clears the answer cache, outside any dataset"),
     ("POST", "/intel/meter/reset"): (READS, "zeroes an in-memory counter"),
+    ("DELETE", "/intel/spend"): (READS, "deletes the spend ledger beside the settings file"),
 }
 
 

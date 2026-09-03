@@ -11,14 +11,17 @@ Neither reads a dataset.
 
 from __future__ import annotations
 
+import time
+
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from server import settings as cfg
-from server.intel import cache, tasks
+from server.intel import cache, registry, tasks
 from server.intel import config as intel_config
 from server.intel import findings as intel_findings
+from server.intel import ledger as intel_ledger
 from server.intel import meter as intel_meter
 from server.intel.providers import NoProvider, ProviderError
 from server.routes import catalog as catalog_routes
@@ -26,16 +29,21 @@ from server.routes import catalog as catalog_routes
 router = APIRouter(prefix="/intel")
 
 
-def spend(provider, **kwargs):
+def spend(provider, task: str, **kwargs):
     """Make a provider call, having checked the ceiling and recorded what it cost.
 
     Every call in this module goes through here. A second path that called a
     provider directly would spend money the meter never saw, and the meter would be
     worse than useless — it would be reassuring.
+
+    `task` is required rather than defaulted, because it is what the spend panel
+    breaks the bill down by: an optional label is a label that goes missing on the
+    call somebody adds next year, and "other: $4.12" answers nothing.
     """
     intel_meter.METER.check_ceiling()
     out = provider.complete(**kwargs)
-    intel_meter.METER.record(out.usage, out.cost_usd)
+    intel_meter.METER.record(out.usage, out.cost_usd, task=task,
+                             provider=out.provider, model=out.model, ms=out.ms)
     return out
 
 # Small on purpose: this is a round trip, not a benchmark. The schema is the same
@@ -87,6 +95,7 @@ async def selftest(role: str = "fast") -> JSONResponse:
     try:
         out = spend(
             provider,
+            "selftest",
             system=SELFTEST_SYSTEM,
             user=SELFTEST_USER,
             schema=SELFTEST_SCHEMA,
@@ -165,7 +174,7 @@ async def nl_filter(name: str, body: FilterBody) -> JSONResponse:
     system, user = tasks.filter_prompt(body.question, context)
 
     try:
-        out = spend(provider, system=system, user=user,
+        out = spend(provider, "filter", system=system, user=user,
                     schema=tasks.FILTER_SCHEMA, effort="low", max_tokens=512)
     except intel_meter.SpendCeiling as e:
         return JSONResponse({"ok": False, "error": str(e), "ceiling_reached": True,
@@ -259,7 +268,11 @@ async def summarise(name: str, body: SummaryBody | None = None) -> JSONResponse:
                     model=model)
 
     if not refresh and model and (hit := cache.get(key)) is not None:
-        intel_meter.METER.record_cache_hit()
+        # Priced at what the original call cost, so the saving is visible in the
+        # ledger without ever being counted as spend.
+        intel_meter.METER.record_cache_hit(
+            task="summary", provider=resolved.provider, model=model,
+            avoided_usd=hit.get("cost_usd"))
         return JSONResponse({
             **hit, "ok": True, "cached": True, "cost_usd": 0.0, "ms": 0,
             "version": handle.ds.version,
@@ -270,7 +283,7 @@ async def summarise(name: str, body: SummaryBody | None = None) -> JSONResponse:
     system, user = tasks.summary_prompt(context)
 
     try:
-        out = spend(provider, system=system, user=user,
+        out = spend(provider, "summary", system=system, user=user,
                     schema=tasks.SUMMARY_SCHEMA, effort="low", max_tokens=600)
     except intel_meter.SpendCeiling as e:
         return JSONResponse({"ok": False, "cached": False, "error": str(e),
@@ -324,3 +337,144 @@ async def meter() -> JSONResponse:
 async def reset_meter() -> JSONResponse:
     intel_meter.METER.reset()
     return JSONResponse(intel_meter.METER.as_dict())
+
+
+# ------------------------------------------------------------------- the ledger
+
+# Long enough to read the shape of a habit, short enough that a chart of it has one
+# bar per day rather than a smear.
+DEFAULT_WINDOW_DAYS = 30
+
+# The recent-calls table is a table, not an archive. Everything else on the panel is
+# a rollup, and rollups are computed over the whole window regardless of this.
+RECENT_LIMIT = 60
+
+
+def _day(ts: float) -> str:
+    """Local calendar day, because "yesterday" means the user's yesterday."""
+    return time.strftime("%Y-%m-%d", time.localtime(ts))
+
+
+def _blank(**extra) -> dict:
+    return {"calls": 0, "cache_hits": 0, "cost_usd": 0.0, "avoided_usd": 0.0,
+            "input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0,
+            "unpriced_calls": 0, "ms_total": 0, **extra}
+
+
+def _fold(bucket: dict, row: dict) -> None:
+    """Add one ledger line to a rollup.
+
+    A cached line is not a call and its dollars are not spend: it increments the
+    hits and the avoided total and touches nothing else. Getting this wrong in the
+    other direction is how a cache ends up looking expensive.
+    """
+    if row.get("cached"):
+        bucket["cache_hits"] += 1
+        bucket["avoided_usd"] += float(row.get("avoided_usd") or 0.0)
+        return
+    bucket["calls"] += 1
+    bucket["input_tokens"] += int(row.get("input_tokens") or 0)
+    bucket["output_tokens"] += int(row.get("output_tokens") or 0)
+    bucket["cache_read_tokens"] += int(row.get("cache_read_tokens") or 0)
+    bucket["ms_total"] += int(row.get("ms") or 0)
+    cost = row.get("cost_usd")
+    if cost is None:
+        bucket["unpriced_calls"] += 1
+    else:
+        bucket["cost_usd"] += float(cost)
+
+
+def _split(bucket: dict, row: dict) -> None:
+    """Fold a line into a bucket *and* into its per-task share of that bucket.
+
+    A day's total says how much a Tuesday cost. The split says which of the things
+    this tool does cost it, which is the question somebody choosing between the ask
+    box and a hand-written filter is actually asking.
+    """
+    _fold(bucket, row)
+    task = row.get("task") or "other"
+    _fold(bucket.setdefault("tasks", {}).setdefault(task, _blank()), row)
+
+
+def _round(bucket: dict) -> dict:
+    b = dict(bucket)
+    b["cost_usd"] = round(b["cost_usd"], 6)
+    b["avoided_usd"] = round(b["avoided_usd"], 6)
+    b["avg_ms"] = round(b["ms_total"] / b["calls"]) if b["calls"] else 0
+    b.pop("ms_total", None)
+    if "tasks" in b:
+        b["tasks"] = {k: _round(v) for k, v in b["tasks"].items()}
+    return b
+
+
+@router.get("/spend")
+async def spend_history(days: int = DEFAULT_WINDOW_DAYS) -> JSONResponse:
+    """What the key has cost, broken down by day, by task and by model.
+
+    The meter answers "this process, since it started", which stops being the
+    interesting number the moment the process restarts. This reads the ledger, so it
+    survives that — and it answers the question somebody with a provider key
+    actually has, which is where the money went rather than how much is left.
+
+    Every figure is derived from lines written at the moment of the call. Nothing
+    here is estimated, and a model with no published price is reported as unpriced
+    rather than as zero — the whole panel is worth less than nothing if one number
+    on it is a guess.
+    """
+    days = max(1, min(int(days or DEFAULT_WINDOW_DAYS), 365))
+    since = time.time() - days * 86400
+    rows = intel_ledger.read(since=since)
+
+    daily: dict[str, dict] = {}
+    by_task: dict[str, dict] = {}
+    by_model: dict[str, dict] = {}
+    totals = _blank()
+
+    for row in rows:
+        _fold(totals, row)
+        _split(daily.setdefault(_day(row["ts"]), _blank(day=_day(row["ts"]))), row)
+        _fold(by_task.setdefault(row.get("task") or "other",
+                                 _blank(task=row.get("task") or "other")), row)
+        model = row.get("model") or "(unknown)"
+        _fold(by_model.setdefault(model, _blank(model=model,
+                                                provider=row.get("provider") or "")), row)
+
+    # Every day in the window, including the empty ones. A bar chart that skips the
+    # days nothing happened draws a busy week and a quiet week identically.
+    span = []
+    start = time.time() - (days - 1) * 86400
+    for i in range(days):
+        d = _day(start + i * 86400)
+        span.append(_round(daily.get(d, _blank(day=d, tasks={}))))
+
+    ceiling = intel_meter.spend_ceiling()
+    resolved = intel_config.resolve()
+
+    return JSONResponse({
+        "window_days": days,
+        "daily": span,
+        "by_task": sorted((_round(b) for b in by_task.values()),
+                          key=lambda b: (-b["cost_usd"], -b["calls"])),
+        "by_model": sorted((_round(b) for b in by_model.values()),
+                           key=lambda b: (-b["cost_usd"], -b["calls"])),
+        "totals": _round(totals),
+        # Newest first: the answer to "what did that just cost" is at the top.
+        "recent": list(reversed(rows))[:RECENT_LIMIT],
+        "first_ts": rows[0]["ts"] if rows else None,
+        "session": intel_meter.METER.as_dict(),
+        "ceiling_usd": ceiling,
+        "provider": resolved.provider,
+        "logging": intel_ledger.enabled(),
+        "ledger_path": str(intel_ledger.path()),
+        "rates": {
+            "priced_on": registry.PRICED_ON,
+            "models": [m.as_dict() for m in registry.MODELS.values()],
+        },
+    })
+
+
+@router.delete("/spend")
+async def clear_spend() -> JSONResponse:
+    """Forget the history. It is a record of the user's own machine, including this."""
+    intel_ledger.clear()
+    return JSONResponse({"cleared": True})
