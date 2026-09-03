@@ -29,8 +29,8 @@ export default async function DocPage({ params }: { params: Promise<{ slug: stri
 
   return (
     <>
-      <article className="flex-1 min-w-0 max-w-[72ch]">
-        <div className="flex items-center gap-3 mb-4 flex-wrap">
+      <article className="flex-1 min-w-0">
+        <div className="flex items-center gap-3 mb-4 flex-wrap max-w-[72ch]">
           <span className="eyebrow">{doc.section}</span>
           <span className="mono text-[10px] text-[var(--dim)]">
             {minutes} min read
@@ -52,7 +52,7 @@ export default async function DocPage({ params }: { params: Promise<{ slug: stri
             interface can load, and most of the guide is prose. */}
         {doc.diagrams && <Diagrams />}
 
-        <nav className="flex flex-wrap gap-3 justify-between mt-14 pt-6"
+        <nav className="flex flex-wrap gap-3 justify-between mt-14 pt-6 max-w-[72ch]"
              style={{ borderTop: "1px solid var(--hairline)" }}>
           {prev ? (
             <Link href={`/docs/${prev.slug}`} className="group max-w-[46%]">

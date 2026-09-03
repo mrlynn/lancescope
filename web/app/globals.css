@@ -326,6 +326,19 @@ body::before {
   line-height: 1.75;
 }
 
+/* The measure belongs to the prose, not to the column it sits in.
+ *
+ * It used to sit on the <article>, which meant everything inside was capped at 72
+ * characters — including a diagram, which has no lines for an eye to find its way
+ * back along and no use whatever for a rule about how long they should be. A graph
+ * squeezed to 72ch is a graph with 4.5px labels.
+ *
+ * So the text keeps its measure and the article keeps the width the layout gives
+ * it, which on a wide window is the difference between a diagram that fits and one
+ * that has to be scrolled. */
+.prose > * { max-width: 72ch; }
+.prose > figure.mermaid { max-width: none; }
+
 .prose > * + * { margin-top: 1.1em; }
 
 .prose h1 {
@@ -452,15 +465,94 @@ body::before {
 }
 
 .prose figure.mermaid[data-state="drawn"] {
+  position: relative;
   border: 0;
   background: transparent;
   padding: 4px 0 2px;
   text-align: center;
+  cursor: zoom-in;
 }
-.prose figure.mermaid[data-state="drawn"] svg {
-  max-width: 100%;
-  height: auto;
+
+/* A diagram wider than the column keeps its size and scrolls, rather than shrinking
+   its labels out of existence. The fade on the right edge is the only signal that
+   there is more of it — a scrollbar on macOS is invisible until you already know to
+   look, which is exactly the wrong time to find out. */
+.prose figure.mermaid[data-clipped="yes"] {
+  text-align: left;
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 44px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 44px), transparent);
 }
+
+.mermaid-expand {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--haze);
+  background: var(--ink-2);
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  padding: 4px 8px;
+  opacity: 0;
+  transition: opacity .15s, color .15s, border-color .15s;
+}
+.prose figure.mermaid:hover .mermaid-expand,
+.mermaid-expand:focus-visible { opacity: 1; }
+.mermaid-expand:hover { color: var(--bright); border-color: var(--haze); }
+
+/* Coarse pointers get no hover, so the control is simply there. */
+@media (hover: none) {
+  .mermaid-expand { opacity: 1; }
+}
+
+/* ---------------------------------------------------------------- expanded view */
+
+.mermaid-dialog {
+  width: 100vw;
+  height: 100vh;
+  max-width: 100vw;
+  max-height: 100vh;
+  padding: 0;
+  border: 0;
+  background: var(--scrim);
+  color: var(--body);
+  overflow: hidden;
+}
+.mermaid-dialog::backdrop { background: rgb(0 0 0 / 0.6); }
+
+.mermaid-stage {
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  display: grid;
+  place-items: center;
+  padding: 56px 24px 24px;
+}
+/* `place-items: center` centres a diagram smaller than the window and would clip
+   the left of one larger than it; `margin: auto` on the child centres without ever
+   pushing content out of the scrollable area. */
+.mermaid-stage > svg { margin: auto; }
+
+.mermaid-close {
+  position: absolute;
+  top: 14px;
+  right: 18px;
+  z-index: 1;
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--haze);
+  background: var(--ink-2);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  padding: 6px 11px;
+  transition: color .15s, border-color .15s;
+}
+.mermaid-close:hover { color: var(--bright); border-color: var(--haze); }
 
 /* A diagram that would not draw says so above the source it fell back to, in the
    colour the rest of the console uses for "this did not work". */
