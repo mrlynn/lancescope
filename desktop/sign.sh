@@ -187,6 +187,60 @@ APPLE_SIGNING_IDENTITY="$APPLE_SIGNING_IDENTITY" \
 APP="desktop/src-tauri/target/release/bundle/macos/LanceScope.app"
 DMG=$(ls desktop/src-tauri/target/release/bundle/dmg/*.dmg | head -1)
 
+# The PyInstaller executable, named because it is the file Apple rejected and the
+# one worth asserting about by name rather than by count.
+SIDECAR="$APP/Contents/Resources/server/lancescope-server"
+
+# Every Mach-O in a bundle, deepest path first.
+#
+# By magic number, not by `file`. The list this returns is what gets signed AND what
+# gets checked, so anything it misses is invisible twice over — which makes the
+# detection method load-bearing, and `file` a poor thing to rest it on: its output is
+# an English sentence whose wording is not contractual, the old pipeline threw its
+# stderr away with `2>/dev/null`, and a `cut -d:` over its output loses any path
+# containing a colon. Four bytes at the head of the file is the actual question.
+#
+# Deepest first because signing a container seals what it holds: sign a leaf after
+# its bundle and the bundle's seal is already broken.
+machos_in() {
+  python3 - "$1" <<'PY'
+import sys
+from pathlib import Path
+
+# Mach-O, both widths and both byte orders, plus the fat/universal wrapper.
+THIN = {
+    b"\xcf\xfa\xed\xfe", b"\xce\xfa\xed\xfe",   # little-endian, 64 and 32 bit
+    b"\xfe\xed\xfa\xcf", b"\xfe\xed\xfa\xce",   # big-endian, 64 and 32 bit
+}
+FAT = {b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca"}
+
+found = []
+for p in Path(sys.argv[1]).rglob("*"):
+    # Symlinks are skipped: codesign follows them and would sign the same file
+    # twice, and the second pass invalidates the first.
+    if p.is_symlink() or not p.is_file():
+        continue
+    try:
+        with p.open("rb") as fh:
+            head = fh.read(8)
+    except OSError:
+        continue
+    magic, rest = head[:4], head[4:8]
+    if magic in THIN:
+        found.append(str(p))
+    elif magic in FAT and len(rest) == 4:
+        # 0xCAFEBABE is also a Java class file. A fat Mach-O follows it with an
+        # architecture count; a class file follows it with a version, which is
+        # always far larger than the number of architectures anything ships.
+        big = int.from_bytes(rest, "big")
+        if 1 <= big <= 32:
+            found.append(str(p))
+
+for p in sorted(found, key=lambda s: (s.count("/"), len(s)), reverse=True):
+    print(p)
+PY
+}
+
 # Tauri signs the app it builds. It does not sign what we put inside it, and the
 # sidecar is a PyInstaller bundle carrying 81 Mach-O files — every compiled
 # extension module in Lance, PyArrow, aiohttp and the rest. PyInstaller ad-hoc signs
@@ -198,8 +252,39 @@ DMG=$(ls desktop/src-tauri/target/release/bundle/dmg/*.dmg | head -1)
 # seals what it holds and doing it in the other order would invalidate the outer
 # seal immediately.
 echo "==> signing the sidecar's own binaries"
-machos=$(find "$APP" -type f -print0 | xargs -0 file 2>/dev/null \
-         | grep "Mach-O" | cut -d: -f1 | awk '{print length"\t"$0}' | sort -rn | cut -f2-)
+machos=$(machos_in "$APP")
+found=$(printf '%s\n' "$machos" | grep -c . || true)
+
+# The list is the gate. Everything below — the signing, and the check that the
+# signing worked — walks this one list, so a file missing from it is neither signed
+# nor noticed, and `bad=0` is indistinguishable from `nothing was examined`. That is
+# not hypothetical: an entirely ad-hoc bundle went to Apple and came back with 215
+# validation errors on a run that had printed "all 0 binaries signed by …" and
+# believed itself.
+#
+# So: refuse to continue on a list that cannot be right. A Tauri bundle carrying a
+# PyInstaller sidecar has around a hundred Mach-O files in it; zero means discovery
+# broke, not that there is nothing to do.
+if [ "$found" -eq 0 ]; then
+  echo
+  echo "Found no Mach-O files in $APP." >&2
+  echo "That cannot be right — the bundle carries a Rust binary and a PyInstaller" >&2
+  echo "sidecar. Discovery is broken, and continuing would submit an unsigned" >&2
+  echo "bundle to Apple and wait forty minutes to be told so." >&2
+  echo >&2
+  echo "Nothing was built." >&2
+  exit 1
+fi
+
+# And name the one that actually broke. The sidecar is the file Apple objected to,
+# it is the only Mach-O here that PyInstaller rather than Cargo produced, and a
+# discovery that finds a hundred libraries but misses the executable they belong to
+# would otherwise pass every count-based check above.
+if [ -f "$SIDECAR" ] && ! printf '%s\n' "$machos" | grep -qxF "$SIDECAR"; then
+  echo "    discovery missed the sidecar executable: ${SIDECAR#"$APP/"}" >&2
+  exit 1
+fi
+
 count=0
 while IFS= read -r f; do
   [ -n "$f" ] || continue
@@ -210,7 +295,11 @@ while IFS= read -r f; do
 done <<EOF
 $machos
 EOF
-echo "    signed $count binaries"
+echo "    signed $count of $found binaries"
+if [ "$count" -ne "$found" ]; then
+  echo "    signed fewer than were found; not submitting" >&2
+  exit 1
+fi
 
 codesign --force --options runtime --timestamp \
   --entitlements desktop/src-tauri/entitlements.plist \
@@ -229,9 +318,16 @@ codesign --verify --deep --strict --verbose=2 "$APP"
 # shape, executables under Resources, but deep-signed — notarised in thirty seconds,
 # which is how the difference was found.
 echo "==> checking every binary carries the identity, not just a signature"
+# Re-discovered rather than reusing the list from the signing pass. Re-signing the
+# outer bundle rewrites it, and anything the earlier walk did not see would be
+# checked by neither pass — the second walk is what makes this an audit of the
+# bundle as it now stands rather than a receipt for what we remember doing to it.
+verify=$(machos_in "$APP")
+checked=0
 bad=0
 while IFS= read -r f; do
   [ -n "$f" ] || continue
+  checked=$((checked + 1))
   desc=$(codesign -dv --verbose=4 "$f" 2>&1)
   case "$desc" in
     *"TeamIdentifier=$APPLE_TEAM_ID"*) ;;
@@ -242,13 +338,19 @@ while IFS= read -r f; do
     *) echo "    hardened runtime missing: ${f#"$APP/"}"; bad=$((bad + 1)) ;;
   esac
 done <<EOF
-$machos
+$verify
 EOF
-if [ "$bad" -gt 0 ]; then
-  echo "    $bad binaries would have been rejected; not submitting" >&2
+# A pass over nothing is not a pass. This is the check the old version was missing,
+# and the reason it could announce success over an unsigned bundle.
+if [ "$checked" -eq 0 ]; then
+  echo "    examined no binaries, so this proves nothing; not submitting" >&2
   exit 1
 fi
-echo "    all $count binaries signed by $APPLE_TEAM_ID with the hardened runtime"
+if [ "$bad" -gt 0 ]; then
+  echo "    $bad of $checked binaries would have been rejected; not submitting" >&2
+  exit 1
+fi
+echo "    all $checked binaries signed by $APPLE_TEAM_ID with the hardened runtime"
 # Gatekeeper's own answer, which is the one that matters. It will say "rejected"
 # until the app is notarised and stapled; anything else here is a real problem.
 spctl --assess --type execute --verbose=4 "$APP" || true
