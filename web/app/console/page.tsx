@@ -257,10 +257,37 @@ export default function Console() {
       {list && list.tables.length === 0 ? (
         <div className="mt-24 text-center">
           <Mark size={34} mono className="mx-auto mb-5 text-[var(--rule)]" />
-          {/* Two different facts that used to render as the same sentence: a
-              database with nothing in it, and a connection this tool cannot read.
-              One is about the data; the other is about us. */}
-          {list.capabilities && !list.capabilities.discover.available ? (
+          {/* Three different facts that used to render as the same sentence: a
+              database with nothing in it, a connection this tool cannot read, and a
+              root it can normally read and could not reach this time. The first is
+              about the data; the second is about us; the third is about neither and
+              usually stops being true on its own. */}
+          {list.listing_error ? (
+            <div className="max-w-xl mx-auto">
+              <p className="text-[15px] text-[var(--bright)] leading-relaxed">
+                This database could not be listed.
+              </p>
+              <p className="text-[14px] text-[var(--haze)] leading-relaxed mt-3">
+                {list.listing_error}
+              </p>
+              <p className="mono text-[12px] text-[var(--haze)] mt-4 break-all">
+                {list.root}
+              </p>
+              {/* Said plainly, because the previous version of this screen said the
+                  database was empty and sent people looking for a problem with
+                  their data. A remote root is one network call away and that call
+                  can be refused; nothing here is known to be wrong with the table. */}
+              <p className="text-[13px] text-[var(--haze)] leading-relaxed mt-4">
+                Nothing is known to be wrong with the tables — this is about
+                reaching them. A remote root is read over the network, and the host
+                serving it can refuse or rate limit a request.
+              </p>
+              <button className="btn mt-5" onClick={() => window.location.reload()}>
+                <Icon name="refresh" size={14} />
+                Try again
+              </button>
+            </div>
+          ) : list.capabilities && !list.capabilities.discover.available ? (
             <div className="max-w-xl mx-auto">
               <p className="text-[15px] text-[var(--bright)] leading-relaxed">
                 Connected, and this cannot be browsed.

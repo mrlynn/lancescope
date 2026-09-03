@@ -121,9 +121,24 @@ async def tables() -> JSONResponse:
             "read_bytes": 0,
             "read_iops": 0,
             "note": caps.discover.reason,
+            # This root cannot be listed at all, which `capabilities` already says.
+            # Nothing was attempted, so nothing failed.
+            "listing_error": None,
         })
 
-    names = cat.discover()
+    # `discover_detail` rather than `discover`, which is the same call with the
+    # reason thrown away. A remote listing is one network call and failure is an
+    # ordinary outcome of it: the Hub rate limits, a repository goes private, a
+    # laptop loses its network. Every one of those came back here as an empty list
+    # and the console rendered "No Lance tables under hf://…" — telling someone
+    # their database is empty when what happened is that we could not ask.
+    #
+    # `Catalog.discover_detail` was written to carry exactly this and says so in its
+    # own docstring; this route, the one caller that most needed it, used the
+    # list-returning form anyway. The MCP server's `list_tables` delegates here, so
+    # an agent was being told the same thing.
+    found = cat.discover_detail()
+    names = found.tables
     out: list[dict] = []
     unreadable: list[dict] = []
     cost_bytes = cost_iops = 0
@@ -196,6 +211,10 @@ async def tables() -> JSONResponse:
             "track them. For a table with blob_columns, GET /catalog/tables/{name} "
             "walks the directory and reports the real split."
         ),
+        # Why the list is short, when it is short for a reason other than the
+        # database being small. `null` on a listing that succeeded — including one
+        # that succeeded and found nothing, which is a fact rather than a failure.
+        "listing_error": found.error,
     })
 
 

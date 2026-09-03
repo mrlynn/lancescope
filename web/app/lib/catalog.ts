@@ -41,6 +41,12 @@ export type TableList = {
   read_bytes: number;
   read_iops: number;
   note: string;
+  /** Why the listing is short, when the reason is not that the database is small.
+   *  Null on a listing that succeeded — including one that succeeded and found
+   *  nothing, which is a fact about the database rather than a failure to read it.
+   *  A remote root can fail to list for reasons that have nothing to do with what
+   *  is in it, and "no tables here" is the wrong sentence for all of them. */
+  listing_error?: string | null;
 };
 
 export type Field = {

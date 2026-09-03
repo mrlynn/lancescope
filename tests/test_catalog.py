@@ -223,3 +223,45 @@ def test_the_blob_route_does_not_shadow_the_table_it_lives_under(api):
     be declared above the bare table route — and that must not break the bare one."""
     assert api.get("/catalog/tables/blobs").status_code == 200
     assert api.get("/catalog/tables/blobs/versions").status_code == 200
+
+
+# ------------------------------------------------- a listing that could not be made
+
+def test_a_root_that_cannot_be_listed_says_so_rather_than_looking_empty(api, monkeypatch):
+    """The difference between "no tables here" and "we could not ask".
+
+    `GET /catalog/tables` used to call `Catalog.discover()`, which is
+    `discover_detail()` with the reason thrown away. A remote listing is one network
+    call — the Hub rate limits, a repository goes private, a laptop drops its
+    network — and every one of those arrived as an empty list. The console then told
+    people their database was empty, which is a claim about their data rather than
+    about our failure to read it.
+    """
+    from server.catalog import Discovery
+    from server.routes import catalog as routes
+
+    monkeypatch.setattr(
+        routes._catalog(), "discover_detail",
+        lambda: Discovery([], "the Hub answered 429 for lance-format/openvid-lance"),
+    )
+    body = api.get("/catalog/tables").json()
+
+    assert body["tables"] == []
+    assert body["listing_error"] == "the Hub answered 429 for lance-format/openvid-lance"
+
+
+def test_an_empty_root_is_not_reported_as_a_failure(api_empty_root):
+    """The other half, and the reason `listing_error` is not just a boolean: a root
+    that holds no tables listed perfectly well. Saying otherwise would send someone
+    looking for a network problem they do not have."""
+    body = api_empty_root.get("/catalog/tables").json()
+
+    assert body["tables"] == []
+    assert body["listing_error"] is None
+
+
+def test_a_root_with_tables_reports_no_listing_error(api):
+    body = api.get("/catalog/tables").json()
+
+    assert body["tables"], "the fixture corpus has tables"
+    assert body["listing_error"] is None
