@@ -3,11 +3,15 @@
 import { useEffect, useSyncExternalStore } from "react";
 import Icon, { type IconName } from "@/app/components/Icon";
 
-/** Three states, not two. The CSS has always supported "follow the OS until you
- *  say otherwise" — an absent `data-theme` attribute means exactly that — but the
- *  old two-way button gave no way back to it once you had chosen, and no way to
- *  see which of the three you were in. A segmented control shows all three at
- *  once and costs the same width the word LIGHT used to. */
+/** Three states, not two. An absent `data-theme` attribute is the third one, and
+ *  the old two-way button gave no way back to it once you had chosen, and no way
+ *  to see which of the three you were in. A segmented control shows all three at
+ *  once and costs the same width the word LIGHT used to.
+ *
+ *  The first state used to mean "follow the OS". It resolves to light while dark
+ *  is under repair — see the palette comment in globals.css — so it is labelled
+ *  for what it does rather than for what it was called. Dark is still one click
+ *  away; it is just no longer inherited from a system setting. */
 export type Choice = "system" | "light" | "dark";
 export type Theme = "light" | "dark";
 
@@ -15,7 +19,7 @@ export const THEME_KEY = "lancescope-theme";
 const EVENT = "lancescope:themechange";
 
 const OPTIONS: { id: Choice; icon: IconName; label: string }[] = [
-  { id: "system", icon: "system", label: "Follow the system" },
+  { id: "system", icon: "system", label: "No preference — light for now" },
   { id: "light", icon: "sun", label: "Light" },
   { id: "dark", icon: "moon", label: "Dark" },
 ];

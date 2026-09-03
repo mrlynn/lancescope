@@ -104,13 +104,13 @@ function themeVariables() {
   };
 }
 
-/** The theme as it actually resolves: an explicit choice if there is one, the OS
- *  otherwise. Same three states the toggle has, collapsed to the two a palette can
- *  be in. */
+/** The theme as it actually resolves. An explicit choice if there is one, and
+ *  light otherwise — the same rule the CSS follows now that dark is applied only
+ *  on `[data-theme="dark"]`. Reading `prefers-color-scheme` here instead would
+ *  draw a dark diagram onto a light page for anyone whose OS is set to dark and
+ *  who has never touched the toggle. */
 function resolvedTheme(): "light" | "dark" {
-  const chosen = document.documentElement.dataset.theme;
-  if (chosen === "light" || chosen === "dark") return chosen;
-  return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  return document.documentElement.dataset.theme === "dark" ? "dark" : "light";
 }
 
 /** Null on the server and through hydration, where there is no document to read.
@@ -119,13 +119,10 @@ function resolvedTheme(): "light" | "dark" {
 const serverTheme = () => null;
 
 function subscribeToTheme(onChange: () => void) {
-  const media = window.matchMedia?.("(prefers-color-scheme: dark)");
+  // Only the toggle can change the palette now, so its event is the only source
+  // worth listening to. An OS change moves nothing and should redraw nothing.
   window.addEventListener(THEME_EVENT, onChange);
-  media?.addEventListener("change", onChange);
-  return () => {
-    window.removeEventListener(THEME_EVENT, onChange);
-    media?.removeEventListener("change", onChange);
-  };
+  return () => window.removeEventListener(THEME_EVENT, onChange);
 }
 
 export default function Diagrams() {

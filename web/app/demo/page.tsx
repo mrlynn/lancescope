@@ -260,7 +260,7 @@ export default function Page() {
           {meter
             ? `${meter.corpus_moments.toLocaleString()} moments across ${meter.corpus_talks} talks — a sample`
             : "loading the corpus"}
-          <span className="mx-3 text-[var(--rule)]">&middot;</span>
+          <span className="mx-3 text-[var(--haze)]">&middot;</span>
           press 1, or describe something you want to see
         </div>
       )}
@@ -270,13 +270,13 @@ export default function Page() {
           {hits.length} moments in {meta.ms}ms
           {track && (
             <>
-              <span className="mx-3 text-[var(--rule)]">&middot;</span>
+              <span className="mx-3 text-[var(--haze)]">&middot;</span>
               <span style={{ color: "var(--video)" }}>
                 filtered to {track} inside the search, not after it
               </span>
             </>
           )}
-          <span className="mx-3 text-[var(--rule)]">&middot;</span>
+          <span className="mx-3 text-[var(--haze)]">&middot;</span>
           this query read{" "}
           <span style={{ color: "var(--index)" }}>
             {(meta.query_index_bytes / 1e6).toFixed(2)} MB

@@ -442,8 +442,14 @@ function TabBadge({ findings, panel, facet }: {
   return (
     <span
       className="mono text-[9px] leading-none px-1.5 py-0.5 rounded-full ml-0.5"
+      // An opaque ground rather than a tint. The badge sits on the active tab,
+      // which is already a 0.12 wash of the same accent, and tints compose: a
+      // 0.18 pill over a 0.12 tab put 9px text on an effective 0.28 of its own
+      // colour, at 3.8:1. The ring keeps it reading as accent-coloured without
+      // putting any of that colour behind the digit.
       style={{
-        background: warn ? "rgb(var(--video-rgb) / 0.18)" : "rgb(var(--index-rgb) / 0.18)",
+        background: "var(--ink-2)",
+        boxShadow: `inset 0 0 0 1px rgb(var(--${warn ? "video" : "index"}-rgb) / 0.5)`,
         color: warn ? "var(--video)" : "var(--index)",
       }}
     >

@@ -29,8 +29,9 @@ export const metadata: Metadata = {
 // component effect runs after the browser has already painted.
 //
 // Only an explicit choice is stamped on <html>. With nothing stored the
-// attribute stays absent and the CSS media query decides, which is what makes
-// "follow the OS until you say otherwise" work.
+// attribute stays absent, and absent now means light: the palette applies dark
+// on `[data-theme="dark"]` alone, so an OS set to dark no longer decides for
+// someone who has never opened the toggle.
 const NO_FLASH = `
 try {
   var t = localStorage.getItem('lancescope-theme');

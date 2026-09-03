@@ -398,7 +398,7 @@ The interface is driven from the keyboard so you never hunt for a mouse:
 | `↵` | open the first result |
 | `S` | the schema, read live off disk — this is the Act 3 slide |
 | `R` | reset the byte instrument |
-| `T` | light / dark — dark is the default, and the right one for a projector |
+| `T` | cycles light / dark — light is what it ships on, and what these captures are |
 | `Esc` | close whatever is open |
 
 ### The ten minutes

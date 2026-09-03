@@ -122,7 +122,7 @@ export default function SchemaView({ onClose }: { onClose: () => void }) {
             />
             <div
               className="flex-1 grid place-items-center"
-              style={{ background: "rgb(var(--video-rgb) / 0.22)" }}
+              style={{ background: "rgb(var(--video-rgb) / 0.14)" }}
             >
               <span className="mono text-[11px]" style={{ color: "var(--video)" }}>
                 {blob.value} {blob.unit} of video, in .blob side files

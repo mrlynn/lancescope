@@ -77,7 +77,7 @@ export function SchemaTab({ d }: { d: TableDetail }) {
           <div className="flex h-9 rounded-sm overflow-hidden border border-[var(--rule)]">
             <div style={{ width: `${Math.max(metaPct, 0.4)}%`, background: "var(--index)" }} />
             <div className="flex-1 grid place-items-center"
-                 style={{ background: "rgb(var(--video-rgb) / 0.22)" }}>
+                 style={{ background: "rgb(var(--video-rgb) / 0.14)" }}>
               <span className="mono text-[11px]" style={{ color: "var(--video)" }}>
                 {fmtBytes(blob_bytes).value} {fmtBytes(blob_bytes).unit} in .blob side files
               </span>

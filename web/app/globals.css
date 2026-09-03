@@ -1,50 +1,67 @@
 @import "tailwindcss";
 
 /* ---------------------------------------------------------------------------
-   Palette lifted from lancedb.com: a warm near-black, warm greys, coral accent.
-   Deliberately no cool tones anywhere — the whole instrument stays in one
-   temperature, which is what keeps it from reading as a generic dashboard.
+   Palette lifted from lancedb.com: warm greys, coral accent. Deliberately no cool
+   tones anywhere — the whole instrument stays in one temperature, which is what
+   keeps it from reading as a generic dashboard.
 
-   Dark is the identity and the default. Light is an override, for reading
-   tables in a lit room rather than projecting them.
+   Light is the ground the app ships on, and the one the README is captured in.
+   Dark is an override, applied only on an explicit choice: an OS set to dark no
+   longer drags the app there, because dark was shipping with borders below the
+   3:1 non-text minimum and panels 1.06:1 off the canvas, and "every edge is
+   invisible" is not a preference to inherit silently. The dark values below are
+   repaired rather than removed; when someone signs off on them, restoring
+   `@media (prefers-color-scheme: dark)` around the dark block is the whole change.
 
-   Accent tints are expressed as `rgb(var(--video-rgb) / <alpha>)` rather than as
-   a token per opacity. There were eight of those hardcoded across the app and
-   every one of them would have stayed dark.
+   Defined once, not twice. The old file carried the light palette in both a media
+   query and an attribute selector and told you to keep them in step by hand; with
+   light as the base there is nothing to keep in step.
+
+   Accent tints are expressed as `rgb(var(--video-rgb) / <alpha>)` rather than as a
+   token per opacity. There were eight of those hardcoded across the app and every
+   one of them would have stayed dark.
    --------------------------------------------------------------------------- */
 :root {
-  --ink:    #171513;   /* canvas */
-  --ink-2:  #1e1b19;   /* raised panel */
-  --ink-3:  #241f1c;   /* wells, inputs */
-  /* The four text tiers, measured against --ink rather than chosen by eye. The
-     originals were a ladder of greys that looked right in a dark room and failed
-     in daylight: --haze at 4.2:1 and --dim at 2.4:1, which is not a quiet colour
-     but an unreadable one — and between them they carry every eyebrow, unit,
-     placeholder, row number and null in the console. Each tier now clears 4.5:1
-     on the canvas, and the steps between them are wide enough that the hierarchy
-     still reads as a hierarchy. The light palette had the same fault and gets the
-     same four ratios. Change one of these and re-measure. */
-  --rule:   #5d534d;   /* borders */
-  --haze:   #a3958c;   /* de-emphasised text — 6.3:1 */
-  --body:   #c3b5ab;   /* body copy — 9.1:1 */
-  --bright: #f4ebe8;   /* headings, numbers — 15.5:1 */
-  --dim:    #918379;   /* the quietest text that is still text — 5.0:1 */
+  --ink:    #faf7f5;   /* canvas */
+  --ink-2:  #ffffff;   /* raised panel */
+  --ink-3:  #f2ede9;   /* wells, inputs */
 
-  /* Both accents already cleared 4.5:1 on this ground (7.9 and 6.8), so they are
-     exactly what they were. The coral is the identity; it does not move for a
-     contrast pass that did not ask it to. */
-  --index:  #d9a05b;   /* what finding it costs */
-  --video:  #ff734a;   /* what playing it costs — LanceDB coral */
-  --index-rgb: 217 160 91;
-  --video-rgb: 255 115 74;
+  /* The four text tiers, measured against every surface they land on rather than
+     chosen by eye. Each clears 4.5:1 on --ink, --ink-2 and --ink-3, and the steps
+     between them are wide enough that the hierarchy still reads as a hierarchy.
+     Change one of these and re-measure. */
+  --haze:   #615850;   /* de-emphasised text — 6.5:1 */
+  --body:   #4a423c;   /* body copy — 9.2:1 */
+  --bright: #1a1614;   /* headings, numbers — 16.8:1 */
+  --dim:    #75695f;   /* the quietest text that is still text — 5.0:1 */
 
-  --hairline: rgb(93 83 77 / 0.45);     /* table row separators */
-  --scrim:    rgb(12 11 10 / 0.97);     /* full-screen overlays */
-  --scrim-2:  rgb(12 11 10 / 0.94);
-  --rail:     rgb(23 21 19 / 0.97);     /* the byte instrument's own ground */
-  --rail-2:   rgb(23 21 19 / 0.9);      /* chips over a thumbnail */
-  --dots:     #2e2724;                  /* the ambient field */
-  --scrollbar: #332c28;
+  /* Borders are non-text content and have their own floor, 3:1, which the old
+     #ddd2ca missed by a mile at 1.39:1 — the reason panels read as one undivided
+     sheet. This clears 3:1 against the wells it most often sits on and 2.9:1
+     against the canvas, which is the honest number: a full 3:1 on the canvas
+     turns every hairline brown and costs more than it buys on a light ground. */
+  --rule:   #b3a294;
+
+  /* Both accents are darkened for a light ground. The stage values sit at about
+     2:1 against white, which is unreadable. The first pass at this took them to
+     4.85 and 4.64 — over the line and with nothing left over, so every place the
+     accent lands on a tint of itself (a count pill, an active tab, the blob bar,
+     a timestamp chip at 92% white over a thumbnail) fell back under it: 35 chips
+     on the demo alone sat at 4.1. These clear 5.8 on the canvas and 5.0 on a 0.14
+     tint of themselves, which is the headroom the old pair was missing, and they
+     are still the same two hues. */
+  --index:  #8b5512;
+  --video:  #b0350e;
+  --index-rgb: 139 85 18;
+  --video-rgb: 176 53 14;
+
+  --hairline: rgb(74 66 60 / 0.22);     /* table row separators */
+  --scrim:    rgb(250 247 245 / 0.97);  /* full-screen overlays */
+  --scrim-2:  rgb(250 247 245 / 0.94);
+  --rail:     rgb(255 255 255 / 0.97);  /* the byte instrument's own ground */
+  --rail-2:   rgb(255 255 255 / 0.92);  /* chips over a thumbnail */
+  --dots:     #e7ded7;                  /* the ambient field */
+  --scrollbar: #ded4cc;
 
   --stage-pad: 34px;
 }
@@ -56,63 +73,44 @@
   :root { --stage-pad: 18px; }
 }
 
-/* The light palette, defined twice on purpose: once for "the OS says light and
-   nobody has chosen otherwise", once for an explicit choice. CSS cannot share one
-   declaration block between a media query and an attribute selector, and a
-   preprocessor for fifteen lines would cost more than it saves. Keep them in
-   step — changing one without the other is the bug this comment exists to catch. */
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme="dark"]) {
-    --ink:    #faf7f5;
-    --ink-2:  #ffffff;
-    --ink-3:  #f2ede9;
-    --rule:   #ddd2ca;
-    --haze:   #615850;   /* 6.5:1 */
-    --body:   #4a423c;   /* 9.2:1 */
-    --bright: #1a1614;   /* 16.8:1 */
-    --dim:    #75695f;   /* 5.0:1 */
+/* Dark — the warm near-black, on an explicit choice only.
+   Three things were wrong with it and all three were structural rather than a
+   matter of taste. Panels sat 1.06:1 off the canvas and wells 1.12:1, so nothing
+   had an edge; --rule was 2.44:1 against the canvas and 2.29:1 against a panel,
+   under the 3:1 floor for non-text content, so the borders that were supposed to
+   compensate could not; and the dot field was quiet enough to be doing nothing.
+   Lifting the surfaces moves the ground under every text tier, so --dim moves with
+   them — at the old #918379 it fell to 4.13:1 on the new wells. Every tier below
+   clears 4.5:1 on all three surfaces, and --rule clears 3:1 on all three. */
+:root[data-theme="dark"] {
+  --ink:    #171513;
+  --ink-2:  #221e1c;   /* 1.10:1 off the canvas — an edge, not a colour change */
+  --ink-3:  #2a2523;   /* 1.20:1 */
 
-    /* Both accents are darkened for a light ground. The stage values sit at about
-       2:1 against white, which is unreadable; these clear 4.5:1 while staying
-       recognisably the same two colours. */
-    --index:  #9c5f14;
-    --video:  #cc3d10;
-    --index-rgb: 156 95 20;
-    --video-rgb: 204 61 16;
+  --haze:   #a3958c;   /* 6.3 / 5.7 / 5.2 on ink / ink-2 / ink-3 */
+  --body:   #c3b5ab;   /* 9.1 / 8.3 / 7.6 */
+  --bright: #f4ebe8;   /* 15.5 / 14.1 / 12.9 */
+  --dim:    #988b82;   /* 5.5 / 5.0 / 4.6 — was #918379, which failed on a well */
 
-    --hairline: rgb(74 66 60 / 0.16);
-    --scrim:    rgb(250 247 245 / 0.97);
-    --scrim-2:  rgb(250 247 245 / 0.94);
-    --rail:     rgb(255 255 255 / 0.97);
-    --rail-2:   rgb(255 255 255 / 0.92);
-    --dots:     #e7ded7;
-    --scrollbar: #ded4cc;
-  }
+  --rule:   #7b6d66;   /* 3.7 / 3.3 / 3.0 — was #5d534d at 2.4 / 2.3 / 2.2 */
+
+  /* Both accents already cleared 4.5:1 on this ground (7.9 and 6.8), so they are
+     exactly what they were. The coral is the identity; it does not move for a
+     contrast pass that did not ask it to. */
+  --index:  #d9a05b;
+  --video:  #ff734a;
+  --index-rgb: 217 160 91;
+  --video-rgb: 255 115 74;
+
+  --hairline: rgb(123 109 102 / 0.5);
+  --scrim:    rgb(12 11 10 / 0.97);
+  --scrim-2:  rgb(12 11 10 / 0.94);
+  --rail:     rgb(23 21 19 / 0.97);
+  --rail-2:   rgb(23 21 19 / 0.9);
+  --dots:     #3a322d;
+  --scrollbar: #453c37;
 }
 
-:root[data-theme="light"] {
-  --ink:    #faf7f5;
-  --ink-2:  #ffffff;
-  --ink-3:  #f2ede9;
-  --rule:   #ddd2ca;
-  --haze:   #615850;   /* 6.5:1 */
-  --body:   #4a423c;   /* 9.2:1 */
-  --bright: #1a1614;   /* 16.8:1 */
-  --dim:    #75695f;   /* 5.0:1 */
-
-  --index:  #9c5f14;
-  --video:  #cc3d10;
-  --index-rgb: 156 95 20;
-  --video-rgb: 204 61 16;
-
-  --hairline: rgb(74 66 60 / 0.16);
-  --scrim:    rgb(250 247 245 / 0.97);
-  --scrim-2:  rgb(250 247 245 / 0.94);
-  --rail:     rgb(255 255 255 / 0.97);
-  --rail-2:   rgb(255 255 255 / 0.92);
-  --dots:     #e7ded7;
-  --scrollbar: #ded4cc;
-}
 
 * { -webkit-font-smoothing: antialiased; }
 
@@ -189,7 +187,7 @@ body::before {
 }
 /* Disabled, not invisible. At .4 over the dark canvas a greyed `prev` landed at
    about 2:1 — a control you cannot read is not the same as one you cannot press. */
-.btn:disabled, .iconbtn:disabled { opacity: .55; cursor: not-allowed; }
+.btn:disabled, .iconbtn:disabled { opacity: .72; cursor: not-allowed; }
 
 /* The one control on a page that is the thing you came to do. Coral, filled, and
    deliberately rare — two of these next to each other means neither is primary. */
@@ -302,7 +300,7 @@ body::before {
   transition: color .15s, border-color .15s;
 }
 .pill:hover:not(:disabled) { color: var(--bright); border-color: var(--haze); }
-.pill:disabled { opacity: .55; cursor: not-allowed; }
+.pill:disabled { opacity: .72; cursor: not-allowed; }
 
 .inp {
   width: 100%;
