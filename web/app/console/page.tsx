@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import Icon, { type IconName } from "@/app/components/Icon";
 import Mark from "@/app/components/Mark";
 import AppBar from "@/app/components/nav/AppBar";
@@ -229,12 +229,59 @@ export default function Console() {
     return () => { alive = false; };
   }, [picked, tab, detail, versions, indices, fragments, rows, loadRows]);
 
-  // The tab strip is one row that scrolls, so the open tab can sit past the edge
-  // on a narrow window — a nav that does not show where you are. Nudge it back
-  // into view when it is out of view, and only along the strip: scrolling the page
-  // under someone who just pressed a button is a worse surprise than the one this
-  // is fixing.
+  // Nine tabs against a narrow window, in the order the strip gives things up.
+  //
+  // Full labels while they fit. When they stop fitting the labels go and the
+  // glyphs stay — every tab already carries one, and nine icon buttons fit a
+  // phone with room over, so the whole nav stays on screen and nothing is cut.
+  // Only if even that overflows does the strip scroll, and then it says so: the
+  // overflowing edge fades and grows an arrow to push it with. A strip that
+  // scrolls with no edge to grab is a nav that hides half of itself and does not
+  // admit it, which is what the wrapping row was replaced with the first time.
   const tabbar = useRef<HTMLDivElement>(null);
+  const [compact, setCompact] = useState(false);
+  const [more, setMore] = useState({ left: false, right: false });
+  // What the labelled strip measured last time it was labelled. Kept because the
+  // question on the way back up — would the labels fit again? — cannot be asked of
+  // a strip that is currently wearing none. Badges change it, so a table's
+  // findings clear it rather than answer for the next table.
+  const labelledWidth = useRef(0);
+  useLayoutEffect(() => { labelledWidth.current = 0; }, [findings]);
+
+  useLayoutEffect(() => {
+    const bar = tabbar.current;
+    if (!bar) return;
+    const fit = () => {
+      const room = bar.clientWidth;
+      if (!compact) {
+        labelledWidth.current = bar.scrollWidth;
+        if (bar.scrollWidth > room + 1) setCompact(true);
+      } else if (!labelledWidth.current || room >= labelledWidth.current + 8) {
+        // Back to labels either because they now fit, or because a new table's
+        // badges changed what "fit" means and the only way to measure a labelled
+        // strip is to be one. Both happen inside a layout effect, so the widened
+        // strip is measured and re-compacted, if it has to be, before it is painted.
+        //
+        // 8px of hysteresis: a threshold the strip lands exactly on would flip back
+        // and forth on every pixel of a drag.
+        setCompact(false);
+      }
+      setMore({
+        left: bar.scrollLeft > 1,
+        right: bar.scrollLeft + room < bar.scrollWidth - 1,
+      });
+    };
+    fit();
+    const ro = new ResizeObserver(fit);
+    ro.observe(bar);
+    bar.addEventListener("scroll", fit, { passive: true });
+    return () => { ro.disconnect(); bar.removeEventListener("scroll", fit); };
+  }, [compact, findings, tab]);
+
+  // The open tab can still sit past the edge on a strip that scrolls — a nav that
+  // does not show where you are. Nudge it back when it is out of view, and only
+  // along the strip: scrolling the page under someone who just pressed a button is
+  // a worse surprise than the one this is fixing.
   useEffect(() => {
     const bar = tabbar.current;
     const on = bar?.querySelector<HTMLElement>('button[data-on="true"]');
@@ -246,7 +293,13 @@ export default function Console() {
       left: Math.max(0, bar.scrollLeft + (o.left - b.left) - (b.width - o.width) / 2),
       behavior: "smooth",
     });
-  }, [tab]);
+  }, [tab, compact]);
+
+  const nudge = (dir: -1 | 1) => {
+    const bar = tabbar.current;
+    if (!bar) return;
+    bar.scrollBy({ left: dir * bar.clientWidth * 0.6, behavior: "smooth" });
+  };
 
   const current = list?.tables.find((t) => t.name === picked) ?? null;
 
@@ -385,27 +438,46 @@ export default function Console() {
 
           {/* ---------------------------------------------------------- detail */}
           <section className="flex-1 min-w-0">
-            <div className="tabbar mb-6" ref={tabbar}>
-              {TAB_GROUPS.map((group) => (
-                <div key={group[0].id} className="seg">
-                  {group.map((t) => (
-                    <button
-                      key={t.id}
-                      onClick={() => setTab(t.id as Tab)}
-                      data-on={tab === t.id}
-                      className="mono !px-3.5 text-[10px] tracking-[0.14em] uppercase"
-                    >
-                      <Icon name={t.icon} size={14} />
-                      {t.id}
-                      <TabBadge
-                        findings={findings}
-                        panel={t.id === "insights" ? null : t.id}
-                        facet={t.id === "training" ? "training" : undefined}
-                      />
-                    </button>
-                  ))}
-                </div>
-              ))}
+            <div className="tabstrip mb-6" data-more-left={more.left} data-more-right={more.right}>
+              <button
+                className="tabstrip-arrow" data-side="left" tabIndex={-1} aria-hidden={!more.left}
+                onClick={() => nudge(-1)} aria-label="Scroll the tabs left"
+              >
+                <Icon name="chevronLeft" size={14} />
+              </button>
+              <div className="tabbar" ref={tabbar} data-compact={compact}>
+                {TAB_GROUPS.map((group) => (
+                  <div key={group[0].id} className="seg">
+                    {group.map((t) => (
+                      <button
+                        key={t.id}
+                        onClick={() => setTab(t.id as Tab)}
+                        data-on={tab === t.id}
+                        // The label is the accessible name while it is on screen and
+                        // the tooltip once it is not, so a glyph-only strip still
+                        // says what each button reads.
+                        aria-label={t.id}
+                        title={compact ? t.id : undefined}
+                        className="mono !px-3 text-[10px] tracking-[0.14em] uppercase"
+                      >
+                        <Icon name={t.icon} size={14} />
+                        <span className="tab-label">{t.id}</span>
+                        <TabBadge
+                          findings={findings}
+                          panel={t.id === "insights" ? null : t.id}
+                          facet={t.id === "training" ? "training" : undefined}
+                        />
+                      </button>
+                    ))}
+                  </div>
+                ))}
+              </div>
+              <button
+                className="tabstrip-arrow" data-side="right" tabIndex={-1} aria-hidden={!more.right}
+                onClick={() => nudge(1)} aria-label="Scroll the tabs right"
+              >
+                <Icon name="chevronRight" size={14} />
+              </button>
             </div>
 
             <div className="panel p-6 min-h-[380px]">
@@ -477,7 +549,7 @@ function TabBadge({ findings, panel, facet }: {
   if (!n) return null;
   return (
     <span
-      className="mono text-[9px] leading-none px-1.5 py-0.5 rounded-full ml-0.5"
+      className="tab-badge mono text-[9px] leading-none px-1.5 py-0.5 rounded-full ml-0.5"
       // An opaque ground rather than a tint. The badge sits on the active tab,
       // which is already a 0.12 wash of the same accent, and tints compose: a
       // 0.18 pill over a 0.12 tab put 9px text on an effective 0.28 of its own
