@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Icon, { type IconName } from "@/app/components/Icon";
 import Mark from "@/app/components/Mark";
 import AppBar from "@/app/components/nav/AppBar";
@@ -33,10 +33,11 @@ import {
 // Each tab names what it reads, and carries the glyph for it — the row is
 // scannable as shapes before any of the words are read.
 //
-// Two groups, because the tabs are two kinds of thing and nine of them in one strip
-// no longer fit a laptop: the first five read the table's own metadata, the last
-// four ask something of it. The split is where the row breaks when it has to break,
-// which is a seam that means something rather than wherever the width ran out.
+// Two groups, because the tabs are two kinds of thing: the first five read the
+// table's own metadata, the last four ask something of it. The gap between the
+// groups is the seam, and it is the only one — the strip stays a single row at
+// every width and scrolls when nine tabs no longer fit, rather than wrapping the
+// second group onto a line of its own and moving the nav under the reader.
 const TAB_GROUPS: { id: string; icon: IconName }[][] = [
   [
     { id: "schema", icon: "schema" },
@@ -86,6 +87,11 @@ export default function Console() {
   // What the language layer can do right now, so the console offers it only when it
   // is actually there — and stays exactly as useful when it is not.
   const [ai, setAi] = useState<Capabilities | null>(null);
+  // Whether the demo corpus is under this root, on the same terms as `ai` above:
+  // the console links to the demo only where there is a demo to link to. The
+  // corpus is 2.5 GB and is not shipped, so in most builds there is not one, and
+  // an unconditional link there is a promise the next page cannot keep.
+  const [demoReady, setDemoReady] = useState(false);
 
   // Pins and recents are scoped to the database, so they follow a connection
   // switch rather than showing the last database's history against this one.
@@ -143,6 +149,10 @@ export default function Console() {
     loadTables(wanted(), wantedTab());
     getSettings().then(setSettings).catch(() => setSettings(null));
     getCapabilities().then(setAi).catch(() => setAi(null));
+    fetch("/api/health", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setDemoReady(Boolean(d?.ok)))
+      .catch(() => setDemoReady(false));
   }, [loadTables]);
 
   // Switching connection repoints the catalog server-side, so everything below the
@@ -219,6 +229,25 @@ export default function Console() {
     return () => { alive = false; };
   }, [picked, tab, detail, versions, indices, fragments, rows, loadRows]);
 
+  // The tab strip is one row that scrolls, so the open tab can sit past the edge
+  // on a narrow window — a nav that does not show where you are. Nudge it back
+  // into view when it is out of view, and only along the strip: scrolling the page
+  // under someone who just pressed a button is a worse surprise than the one this
+  // is fixing.
+  const tabbar = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const bar = tabbar.current;
+    const on = bar?.querySelector<HTMLElement>('button[data-on="true"]');
+    if (!bar || !on) return;
+    const b = bar.getBoundingClientRect();
+    const o = on.getBoundingClientRect();
+    if (o.left >= b.left && o.right <= b.right) return;
+    bar.scrollTo({
+      left: Math.max(0, bar.scrollLeft + (o.left - b.left) - (b.width - o.width) / 2),
+      behavior: "smooth",
+    });
+  }, [tab]);
+
   const current = list?.tables.find((t) => t.name === picked) ?? null;
 
   return (
@@ -229,9 +258,11 @@ export default function Console() {
               aria-label="Build a database from files">
           <Icon name="plus" size={16} />
         </Link>
-        <Link href="/demo" className="iconbtn" data-tip="Ctrl-F for Video" aria-label="Open the demo">
-          <Icon name="play" size={16} />
-        </Link>
+        {demoReady && (
+          <Link href="/demo" className="iconbtn" data-tip="Ctrl-F for Video" aria-label="Open the demo">
+            <Icon name="play" size={16} />
+          </Link>
+        )}
       </AppBar>
 
       <div className="flex items-center gap-3 mb-7 flex-wrap">
@@ -354,7 +385,7 @@ export default function Console() {
 
           {/* ---------------------------------------------------------- detail */}
           <section className="flex-1 min-w-0">
-            <div className="flex flex-wrap items-center gap-2 mb-6">
+            <div className="tabbar mb-6" ref={tabbar}>
               {TAB_GROUPS.map((group) => (
                 <div key={group[0].id} className="seg">
                   {group.map((t) => (

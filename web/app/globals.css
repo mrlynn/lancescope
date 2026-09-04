@@ -289,6 +289,48 @@ body::before {
   background: rgb(var(--video-rgb) / 0.11);
 }
 
+/* The console's tab bar: one row at every width, and always in the same place.
+
+   It was a `flex-wrap` row of two `.seg` groups, so a window narrow enough to
+   squeeze them broke the second group onto a line of its own — and below `lg` the
+   detail column stacks under the table rail, so the same bar also travelled
+   several hundred pixels down the page, often past the fold. The primary
+   navigation of the console changing both its shape and its position for one drag
+   of a window edge is two surprises, and the second one hides it.
+
+   So: never wrap, and let the whole strip scroll the way a single `.seg` already
+   does. The groups keep their natural width, and the partial button at the edge is
+   the affordance saying there is more to push at. In the stacked layout, where the
+   bar sits under a rail that can be taller than the screen, it sticks to the top of
+   the viewport, so which tab is open stays readable and the others stay one tap
+   away. */
+.tabbar {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.tabbar::-webkit-scrollbar { display: none; }
+/* The groups scroll with the strip rather than squeezing inside it: a group that
+   shrank would start scrolling on its own axis, and two nested scrollers in one
+   30px bar is a worse thing to push at than one. */
+.tabbar > .seg { flex: none; }
+
+@media (max-width: 1023.98px) {
+  .tabbar {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    /* Opaque: the panel below scrolls under the bar, including through the gap
+       between the two groups. */
+    background: var(--ink);
+    padding-block: 10px;
+  }
+}
+
 /* Tooltips, so an icon-only control still says what it does. Pure CSS: a title
    attribute waits a second and renders in the OS's font, which on a projector is
    both too slow and out of key with everything else here. */
