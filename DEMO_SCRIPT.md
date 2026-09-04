@@ -76,18 +76,25 @@ to *FOSDEM demo corpus*, a local directory of Lance tables.
 `extension<lance.blob.v2<BlobType>>` — the actual video bytes. This table is
 **2.5 GB on disk**, and almost all of it is that one column.
 
-### Beat 3 — Rows: browsing 2.5 GB for the price of a tweet
+### Beat 3 — Browsing 2.5 GB for the price of a tweet
 
-**Go:** `__BASE__/console?table=segments&tab=rows`
-**Do:** let the first page of rows load. Read the cost strip.
+**Go:** `__BASE__/console?table=segments&tab=query`
+**Do:** nothing — the panel reads the first page on open. Read the cost strip.
 **Show:** the grid, with the cost visible in the same frame.
-**Say:** A page of rows costs on the order of **a few kilobytes and one IO**. The
-video column is not read — it is *described* from the schema: size, position, and
-"not materialised". Heavy columns never come back in a result. Browsing a table
-full of video is cheap because nothing decided to open the video.
-**Then:** click one video cell to materialise it, and watch the cost change. That
-is the whole design — spending the bytes is a decision someone makes, and the app
-says what it cost.
+**Say:** A page of rows costs on the order of **a few kilobytes and one IO**, and
+nobody had to ask for it. The video column is not read — it is *described* from the
+schema: size, position, and "not materialised". Heavy columns never come back in a
+result. Browsing a table full of video is cheap because nothing decided to open the
+video.
+**Then:** click one video cell to materialise it, and watch the cost change. Then
+click a **heavy column** chip above the grid and watch it change again. That is the
+whole design — spending the bytes is a decision someone makes, and the app says what
+it cost.
+
+**Note:** browsing and querying used to be two panels. They were the same box twice —
+one with completions and no way to ask in English, one the other way round — so they
+are one panel now, and the next three beats happen without leaving it. Old
+`&tab=rows` links land here.
 
 ### Beat 4 — Versions and Compare: did that write help?
 

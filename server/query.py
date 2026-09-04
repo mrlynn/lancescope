@@ -63,6 +63,10 @@ class QuerySpec:
     mode: str = "scan"
     filter: str | None = None
     columns: list[str] | None = None
+    # Heavy columns the reader has deliberately asked for, having been told what
+    # they weigh. Empty is the default and the point: a query result leaves the
+    # vectors on disk unless somebody names one.
+    expand: list[str] | None = None
     limit: int = 25
     offset: int = 0
     # full-text
@@ -331,9 +335,10 @@ def read_analysis(text: str) -> dict:
 def _projection(ds, requested: list[str] | None, expanded: set[str]) -> tuple[list, list]:
     """Columns to read, and the heavy ones deliberately left out.
 
-    The same rule the row browser uses. A blob column is never expandable here at
-    all: a query workspace that could materialise one would undo the claim this
-    repository is built on.
+    A heavy column stays out of a result until somebody names it in `expanded`,
+    having been shown what it weighs. A blob column is never expandable at all: a
+    query workspace that could materialise one would undo the claim this repository
+    is built on.
     """
     schema = {f.name: f for f in ds.schema}
     names = requested if requested else list(schema)
@@ -531,7 +536,7 @@ def build_scanner(handle: Handle, spec: QuerySpec, projected: list[str],
 def explain(handle: Handle, spec: QuerySpec) -> PlanReading:
     """The plan, without running anything. Free, and often the whole answer."""
     spec = spec.normalised()
-    projected, _ = _projection(handle.ds, spec.columns, set())
+    projected, _ = _projection(handle.ds, spec.columns, set(spec.expand or []))
     try:
         return read_plan(build_scanner(handle, spec, projected).explain_plan(verbose=False))
     except QueryError:
@@ -610,7 +615,7 @@ def run_hybrid(handle: Handle, spec: QuerySpec, *, cell) -> QueryOutcome:
     """
     spec = spec.normalised()
     ds = handle.ds
-    projected, omitted = _projection(ds, spec.columns, set())
+    projected, omitted = _projection(ds, spec.columns, set(spec.expand or []))
     schema = {f.name: f for f in ds.schema}
 
     fts_spec = replace(spec, mode="fts", limit=max(spec.k, spec.limit))
@@ -695,7 +700,7 @@ def run(handle: Handle, spec: QuerySpec, *, cell) -> QueryOutcome:
         return run_hybrid(handle, spec, cell=cell)
 
     ds = handle.ds
-    projected, omitted = _projection(ds, spec.columns, set())
+    projected, omitted = _projection(ds, spec.columns, set(spec.expand or []))
     schema = {f.name: f for f in ds.schema}
 
     # Building the scanner and planning it both validate the query, and both can
