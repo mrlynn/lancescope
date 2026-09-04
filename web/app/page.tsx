@@ -141,18 +141,19 @@ export default function Home() {
             : "Browse a dataset's schema, history, indices, fragments and rows."}
           foot={list ? `${tables} table${tables === 1 ? "" : "s"} ready` : "checking…"}
         />
-        <Card
-          href="/demo"
-          icon="play"
-          title="Ctrl-F for Video"
-          body="Multimodal search over conference talks, where the video and its index are the same table."
-          foot={health === null
-            ? "checking…"
-            : demoReady
-              ? `${health.moments.toLocaleString()} moments · ${health.talks} talks`
-              : "corpus not built — make ingest"}
-          dim={health !== null && !demoReady}
-        />
+        {/* Only where the corpus is actually there. A build without it used to show
+            this dimmed, which still promised a demo and then delivered an empty page
+            — the corpus is 2.5 GB and gitignored, so that is every build but a
+            developer's own. Absent is a better answer than broken. */}
+        {demoReady && health !== null && (
+          <Card
+            href="/demo"
+            icon="play"
+            title="Ctrl-F for Video"
+            body="Multimodal search over conference talks, where the video and its index are the same table."
+            foot={`${health.moments.toLocaleString()} moments · ${health.talks} talks`}
+          />
+        )}
         <Card
           href="/console/settings"
           icon="settings"
