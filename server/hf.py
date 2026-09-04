@@ -199,15 +199,20 @@ class Sample:
     scale: str         # measured, from the table named in `first`
     tables: int
     first: str
+    # Most of these live under `lance-format`, but nothing about the offer requires it —
+    # a sample built and published by whoever runs this console belongs under their own
+    # namespace, and hardcoding the org would have meant either pushing to somebody
+    # else's repository or not offering it at all.
+    org: str = "lance-format"
 
     @property
     def uri(self) -> str:
-        return f"{PREFIX}lance-format/{self.slug}"
+        return f"{PREFIX}{self.org}/{self.slug}"
 
     def as_dict(self) -> dict:
         return {"slug": self.slug, "uri": self.uri, "title": self.title,
                 "what": self.what, "shows": self.shows, "scale": self.scale,
-                "tables": self.tables, "first": self.first}
+                "tables": self.tables, "first": self.first, "org": self.org}
 
 
 # Curated rather than listed. `lance-format` publishes forty-eight datasets, and
@@ -229,6 +234,20 @@ SAMPLES: tuple[Sample, ...] = (
         scale="937,957 rows · 1 table · video in a blob column",
         tables=1,
         first="data/train",
+    ),
+    Sample(
+        org="mlynn",
+        slug="roll-of-the-realm-lance",
+        title="The Roll of the Realm",
+        what="Five thousand invented knights, sixty-four of whom sat for a portrait.",
+        shows="The same lesson as OpenVid at a size you can hold in your head. The "
+              "table is 607 MB and reading every scalar of all 5,000 rows costs "
+              "317 KB in 36 IOs — then opening a single portrait costs 9.4 MB, "
+              "twenty-nine times more than reading the entire rest of the table. "
+              "Built by this repository, so you can rebuild it and change it.",
+        scale="5,000 rows · 1 table · 576 MB of it in blob side files",
+        tables=1,
+        first="data/knights",
     ),
     Sample(
         slug="mnist-lance",

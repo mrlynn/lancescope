@@ -1019,6 +1019,15 @@ def sniff_media_type(data: bytes) -> str | None:
         return "image/webp"
     if data[4:8] == b"ftyp":
         return "video/mp4"
+    # BMP, whose signature is two bytes and would match far too much on its own — so the
+    # DIB header size that follows it has to be one a BMP actually uses. Worth having
+    # because an uncompressed bitmap is what an image column looks like when somebody
+    # stored pixels rather than a compressed file, which is the shape that makes a blob
+    # column weigh anything at all.
+    if data[:2] == b"BM" and len(data) >= 18:
+        dib = int.from_bytes(data[14:18], "little")
+        if dib in (12, 40, 52, 56, 64, 108, 124):
+            return "image/bmp"
     return None
 
 

@@ -480,7 +480,9 @@ function RowPanel({
 
         <div className="overflow-y-auto px-5 py-4 flex-1">
           {columns.map((c) => (
-            <Field key={c} name={c} v={row[c]} />
+            <Field key={c} name={c} v={row[c]}
+                   table={table}
+                   rowid={typeof row._rowid === "number" ? row._rowid : undefined} />
           ))}
 
           {omitted.length > 0 && (
@@ -550,7 +552,9 @@ function cellBytes(v: Cell | undefined): number | null {
   return null;
 }
 
-function Field({ name, v }: { name: string; v: Cell }) {
+function Field({ name, v, table, rowid }: {
+  name: string; v: Cell; table?: string; rowid?: number;
+}) {
   const text = cellText(v);
   const heavy = typeof v === "object" && v !== null;
   return (
@@ -564,7 +568,7 @@ function Field({ name, v }: { name: string; v: Cell }) {
       {v === null ? (
         <span className="mono text-[12px] text-[var(--dim)]">null</span>
       ) : heavy ? (
-        <HeavyValue v={v} />
+        <HeavyValue v={v} name={name} table={table} rowid={rowid} />
       ) : (
         <div className="mono text-[12px] leading-relaxed whitespace-pre-wrap break-words
                         max-h-[320px] overflow-y-auto"
@@ -576,7 +580,9 @@ function Field({ name, v }: { name: string; v: Cell }) {
   );
 }
 
-function HeavyValue({ v }: { v: Cell & object }) {
+function HeavyValue({ v, name, table, rowid }: {
+  v: Cell & object; name?: string; table?: string; rowid?: number;
+}) {
   if ("blob" in v) {
     const b = fmtBytes(v.size_bytes ?? 0);
     return (
@@ -588,6 +594,26 @@ function HeavyValue({ v }: { v: Cell & object }) {
         <div className="text-[11px] text-[var(--haze)] mt-1">
           Described from its Blob V2 descriptor. Opening this row did not read it.
         </div>
+        {/* And then the offer, which is the other half of that sentence rather than a
+            contradiction of it. The panel described the cell for nothing; reading it
+            costs what the button says, and the button is the only thing that spends it.
+
+            This used to be reachable only for `binary` columns, through the omitted-
+            column list, because `readable()` tests the type for /binary/ and a Blob V2
+            column's type is `extension<lance.blob.v2<BlobType>>`. A described blob is
+            not an omitted column — it never went through that list at all — so the one
+            kind of column this repository is an argument about was the one kind you
+            could not open. */}
+        {table && typeof rowid === "number" && name && (
+          <CellMedia
+            key={`${rowid}:${name}`}
+            className="mt-2.5"
+            table={table}
+            column={name}
+            row={{ rowid }}
+            bytes={v.size_bytes ?? null}
+          />
+        )}
       </div>
     );
   }

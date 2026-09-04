@@ -1,5 +1,5 @@
 .PHONY: local
-.PHONY: help setup download prepare prepare-force embed build ingest scan doctor open cost findings run-config verify test check docs ui sidecar app api mcp web demo dev tidy bench clean
+.PHONY: help setup download prepare prepare-force embed build ingest scan doctor open cost findings run-config verify test check docs ui sidecar app api mcp web demo dev tidy bench clean roll publish-roll
 
 PY := .venv/bin/python
 UVICORN := .venv/bin/uvicorn
@@ -208,6 +208,34 @@ sidecar: ui
 	uv run --only-group console --with pyinstaller pyinstaller \
 	  --noconfirm --distpath packaging/dist --workpath packaging/build \
 	  packaging/lancescope.spec
+
+# The table the console's hidden tour teaches with, made real. Writes a Lance table with
+# scalars, a likeness vector and a sparse Blob V2 portrait column, so the lessons the tour
+# gives on a made-up vault can be checked against one that exists.
+#
+#   make roll                    5,000 knights, 64 portraits — a real index and real side files
+#   make roll KNIGHTS=600        smaller and quicker; below 5,000 there is no ANN index, which
+#                                the console will tell you, correctly
+#   make roll PORTRAITS=256      ~2.3 GB, the shape worth publishing
+roll:
+	$(PY) ingest/build_roll.py \
+	  --out $(if $(OUT),$(OUT),data/roll/knights.lance) \
+	  --knights $(if $(KNIGHTS),$(KNIGHTS),5000) \
+	  --portraits $(if $(PORTRAITS),$(PORTRAITS),64)
+
+# Send a built Roll to the Hub. Three uploads whose order matters, then a read-back
+# over `hf://` that checks the things the upload log cannot: that the console can list
+# the table, that a row browse is still cheap, and that the portraits are a format a
+# browser will draw. Each of those has been wrong at least once.
+#
+#   make publish-roll REPO=<org>/roll-of-the-realm-lance
+#   make publish-roll REPO=... YES=1     no prompt, for a rebuild-and-publish loop
+#
+# It replaces the table in that repository rather than merging into it, and says so
+# before it starts. See docs/guide/howto-roll.md.
+publish-roll:
+	@[ -n "$(REPO)" ] || { echo "usage: make publish-roll REPO=<org>/<repo>"; exit 1; }
+	@scripts/publish_roll.sh $(REPO) $(if $(YES),--yes,)
 
 bench:
 	$(PY) scripts/blob_bench.py

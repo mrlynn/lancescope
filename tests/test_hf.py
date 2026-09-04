@@ -205,7 +205,11 @@ def test_the_offered_samples_are_curated_rather_than_listed():
 
 def test_every_sample_says_what_it_is_and_why_this_console_makes_it_interesting():
     for s in hf.SAMPLES:
-        assert s.uri.startswith("hf://datasets/lance-format/"), s.uri
+        # Not `lance-format/` — `Sample.org` exists so a console's own published
+        # sample can be offered from its own namespace. What has to hold is that the
+        # URI is a Hub dataset root, whoever owns it.
+        assert s.uri == f"hf://datasets/{s.org}/{s.slug}", s.uri
+        assert s.org and "/" not in s.org, s.org
         assert s.what and s.shows and s.scale, s.slug
         # `shows` is the reason to open *this* one here; a restatement of `what`
         # would make the six cards interchangeable.
@@ -222,7 +226,8 @@ def test_the_first_sample_is_the_one_that_makes_the_argument():
 def test_a_sample_uri_parses_the_way_any_other_hub_root_does():
     for s in hf.SAMPLES:
         parsed = hf.parse(s.uri)
-        assert parsed is not None and parsed.repo.startswith("lance-format/")
+        assert parsed is not None and parsed.repo == f"{s.org}/{s.slug}"
+        assert parsed.path == ""
 
 
 def test_samples_report_whether_they_are_already_a_connection(settings_file):

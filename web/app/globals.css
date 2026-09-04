@@ -64,6 +64,26 @@
   --scrollbar: #ded4cc;
 
   --stage-pad: 34px;
+
+  /* The easter egg's sprite palette. Fixed art colours rather than semantic tokens: these
+     are pictures, and a picture whose colours move with the theme stops being the same
+     picture. Only the two extremes swap in dark, so silhouettes still read. */
+  --px-0: #241f1c;   /* outline        */
+  --px-1: #5d534d;   /* stone, dark    */
+  --px-2: #8b7f76;   /* stone          */
+  --px-3: #b3a294;   /* stone, light   */
+  --px-4: #46586b;   /* metal, dark    */
+  --px-5: #8ea4ba;   /* metal, light   */
+  --px-6: #e0cba8;   /* parchment/skin */
+  --px-7: #a5342a;   /* red cloth      */
+  --px-8: #c9a227;   /* gold           */
+  --px-9: #7a5330;   /* wood           */
+  --px-a: #31694a;   /* green          */
+  --px-b: #efece5;   /* white          */
+  /* The ground the art stands on. Its own token rather than a surface borrowed from the
+     console, because the one thing it must guarantee is contrast against --px-0: a picture
+     whose outlines vanish is a smudge, and in dark that is exactly what happened. */
+  --px-bg: #ece7e1;
 }
 
 /* The stage gutter is a proportion of a desktop window, not a constant. Kept at
@@ -109,6 +129,14 @@
   --rail-2:   rgb(23 21 19 / 0.9);
   --dots:     #3a322d;
   --scrollbar: #453c37;
+
+  /* Dark: the outline lifts off the near-black ground and the stone lightens, or every
+     sprite becomes a silhouette of itself. Everything else is the same picture. */
+  --px-0: #0d0b0a;
+  --px-1: #6e625b;
+  --px-2: #9c8f85;
+  --px-3: #c4b5a8;
+  --px-bg: #3a342f;
 }
 
 
@@ -375,6 +403,16 @@ body::before {
   padding-top: 1.1em;
   border-top: 1px solid var(--hairline);
 }
+/* Left, explicitly. The footer is the only part of the sheet whose contents are flex
+   children rather than flow, and it was picking up a centred alignment that fought the
+   left-aligned copy directly above it. */
+.egg-actions-col {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  text-align: left;
+}
+.egg-actions-col > * { align-self: stretch; }
 
 .prose h3 {
   font-size: 15px;
@@ -627,6 +665,390 @@ body::before {
   transition: color .15s, border-color .15s;
 }
 .mermaid-close:hover { color: var(--bright); border-color: var(--haze); }
+
+/* The game. Full viewport, opaque — this is a takeover rather than an overlay, and at the
+   97% of --scrim the app's own header ghosts through the rail, which reads as a bug. As
+   with .kiosk-dialog above, `display` goes under `[open]` and nowhere else, for exactly
+   the reason documented there. */
+.egg-dialog {
+  width: 100vw; height: 100vh; max-width: 100vw; max-height: 100vh;
+  padding: 0; border: 0;
+  background: var(--ink); color: var(--body); overflow: hidden;
+}
+.egg-dialog[open] { display: block; }
+.egg-dialog::backdrop { background: rgb(0 0 0 / 0.72); }
+
+.egg-stage { position: relative; width: 100%; height: 100%; display: flex; flex-direction: column; }
+
+.egg-rail {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  padding: 12px 64px 12px clamp(16px, 3vw, 34px);   /* right pad is the close button's lane */
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--haze); border-bottom: 1px solid var(--hairline);
+}
+.egg-rail b { color: var(--bright); font-weight: 600; letter-spacing: 0.06em; }
+.egg-rail .egg-sep { color: var(--rule); }
+.egg-brand { color: var(--video); letter-spacing: 0.2em; }
+.egg-rail-right { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-left: auto; }
+
+/* Out of the rail, so a rail that wraps does not strand the only way out on its own line. */
+.egg-close { position: absolute; top: 9px; right: clamp(12px, 3vw, 30px); z-index: 1; }
+
+.egg-body {
+  flex: 1 1 auto; min-height: 0;
+  display: grid; grid-template-columns: minmax(0, 1fr); overflow: auto;
+}
+@media (min-width: 900px) {
+  .egg-body { grid-template-columns: minmax(260px, 320px) minmax(0, 1fr); overflow: hidden; }
+  .egg-side, .egg-main { overflow: auto; }
+}
+.egg-side {
+  padding: 22px clamp(16px, 3vw, 26px) 28px;
+  border-right: 1px solid var(--hairline);
+  display: flex; flex-direction: column; gap: 20px;
+}
+.egg-main {
+  padding: 20px clamp(16px, 3vw, 30px) 32px;
+  display: flex; flex-direction: column; gap: 14px;
+}
+
+/* --- the tour ------------------------------------------------------------------- */
+
+/* The scene band: one drawing per chapter, on a ground with a horizon. Sits above the copy
+   because it is the establishing shot — you should know where you are before you read. */
+.egg-band {
+  position: relative;
+  display: flex; align-items: flex-end; justify-content: center; flex-wrap: wrap;
+  gap: clamp(8px, 2vw, 26px);
+  min-height: 124px; padding: 28px 18px 0;
+  border: 1px solid var(--hairline); border-radius: 3px;
+  background: var(--px-bg);
+  overflow: hidden;
+}
+/* The ground the sprites stand on. */
+.egg-band::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 12px;
+  background: var(--px-1); opacity: .55;
+}
+.egg-band > * { position: relative; z-index: 1; margin-bottom: 6px; }
+.egg-band-note {
+  position: absolute; top: 9px; right: 11px; z-index: 2;
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 9.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--px-1);
+}
+/* Four huts and a runner, against one castle: chapter II's whole argument, drawn. */
+.egg-band-vs {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 11px; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--rule); align-self: center; margin-bottom: 34px !important;
+}
+.egg-band-huts { display: flex; align-items: flex-end; gap: 4px; }
+
+/* He bobs, once a second, and only if nobody asked for less motion. */
+@media (prefers-reduced-motion: no-preference) {
+  .egg-band-knight { animation: egg-bob 1.6s steps(2, end) infinite; }
+  @keyframes egg-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+}
+
+.egg-chapter-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.egg-chapter-n {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 10px; letter-spacing: .18em; text-transform: uppercase; color: var(--video);
+}
+.egg-chapter-t {
+  font-size: 24px; font-weight: 800; letter-spacing: -0.01em; color: var(--bright);
+}
+/* Seven marks. Where you are is the only thing this has to say. */
+.egg-progress { display: flex; gap: 5px; }
+.egg-progress li {
+  width: 26px; height: 3px; border-radius: 2px; background: var(--ink-3);
+  border: 1px solid var(--hairline);
+}
+.egg-progress li.done { background: var(--rule); border-color: var(--rule); }
+.egg-progress li.here { background: var(--video); border-color: var(--video); }
+
+/* The scene is the explanation, so it is set like prose that expects to be read rather
+   than like UI copy that expects to be skimmed. */
+.egg-scene {
+  font-size: 15px; line-height: 1.7; color: var(--body); max-width: 68ch;
+}
+.egg-scene:first-of-type { color: var(--bright); font-size: 16px; }
+
+/* --- out of the story ------------------------------------------------------------ */
+
+.egg-plainbar { display: flex; }
+.egg-plain-toggle {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 10px; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--haze);
+  border: 1px dashed var(--rule); border-radius: 3px; padding: 5px 11px;
+  transition: color .15s, border-color .15s;
+}
+.egg-plain-toggle:hover { color: var(--index); border-color: var(--index); }
+.egg-plain-toggle[aria-expanded="true"] { color: var(--index); border-color: var(--index); }
+
+/* Deliberately a different register from the chapter: dashed border, mono, amber. You are
+   meant to feel that you have stepped outside the fiction rather than deeper into it. */
+.egg-plain {
+  border: 1px dashed rgb(var(--index-rgb) / .55); border-radius: 3px;
+  background: var(--ink-3);
+  padding: 15px 17px;
+  display: flex; flex-direction: column; gap: 13px;
+}
+.egg-plain-glosses { display: flex; flex-direction: column; gap: 7px; }
+.egg-plain-glosses > div {
+  display: grid; grid-template-columns: minmax(0, 20ch) minmax(0, 1fr); gap: 4px 16px;
+  padding-bottom: 7px; border-bottom: 1px solid var(--hairline);
+}
+.egg-plain-glosses > div:last-child { border-bottom: 0; padding-bottom: 0; }
+.egg-plain-glosses dt {
+  font-size: 13px; line-height: 1.5; color: var(--index); font-style: italic;
+}
+.egg-plain-glosses dd {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 12px; line-height: 1.55; color: var(--bright);
+}
+.egg-plain-says {
+  font-size: 13.5px; line-height: 1.7; color: var(--body); max-width: 74ch;
+  border-top: 1px solid var(--hairline); padding-top: 12px;
+}
+.egg-plain-links { display: flex; flex-wrap: wrap; gap: 8px; }
+.egg-plain-link {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 11px; letter-spacing: .06em;
+  color: var(--bright);
+  border: 1px solid var(--rule); border-radius: 3px; padding: 6px 11px;
+  transition: color .15s, border-color .15s;
+}
+.egg-plain-link:hover { color: var(--video); border-color: var(--video); }
+
+@media (max-width: 640px) {
+  .egg-plain-glosses > div { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* The choices. These lived in the diagnosis game's stylesheet and went out with it, which
+   left the tour's only interaction rendering as bare text — the buttons were still buttons,
+   they just stopped looking like anything. */
+.egg-options { display: flex; flex-direction: column; gap: 8px; align-items: stretch; }
+.egg-option {
+  display: flex; align-items: baseline; text-align: left;
+  padding: 13px 15px;
+  border: 1px solid var(--rule); border-radius: 3px; background: var(--ink-2);
+  font-size: 14px; line-height: 1.5; color: var(--body);
+  transition: border-color .15s, color .15s, background .15s;
+}
+.egg-option:hover { border-color: var(--video); color: var(--bright); background: var(--ink-3); }
+.egg-option:active { transform: translateY(1px); }
+
+/* What came back. A quoted block rather than another paragraph, so an answer never reads as
+   more of the scene. */
+.egg-said {
+  font-size: 13.5px; line-height: 1.7; color: var(--haze);
+  border-left: 2px solid var(--rule); padding-left: 13px; max-width: 74ch;
+}
+
+.egg-option-cost {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 12px; color: var(--haze); font-variant-numeric: tabular-nums;
+  white-space: nowrap; margin-left: auto; padding-left: 16px;
+}
+.egg-option:hover /* --- out of the story ------------------------------------------------------------ */
+
+.egg-plainbar { display: flex; }
+.egg-plain-toggle {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 10px; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--haze);
+  border: 1px dashed var(--rule); border-radius: 3px; padding: 5px 11px;
+  transition: color .15s, border-color .15s;
+}
+.egg-plain-toggle:hover { color: var(--index); border-color: var(--index); }
+.egg-plain-toggle[aria-expanded="true"] { color: var(--index); border-color: var(--index); }
+
+/* Deliberately a different register from the chapter: dashed border, mono, amber. You are
+   meant to feel that you have stepped outside the fiction rather than deeper into it. */
+.egg-plain {
+  border: 1px dashed rgb(var(--index-rgb) / .55); border-radius: 3px;
+  background: var(--ink-3);
+  padding: 15px 17px;
+  display: flex; flex-direction: column; gap: 13px;
+}
+.egg-plain-glosses { display: flex; flex-direction: column; gap: 7px; }
+.egg-plain-glosses > div {
+  display: grid; grid-template-columns: minmax(0, 20ch) minmax(0, 1fr); gap: 4px 16px;
+  padding-bottom: 7px; border-bottom: 1px solid var(--hairline);
+}
+.egg-plain-glosses > div:last-child { border-bottom: 0; padding-bottom: 0; }
+.egg-plain-glosses dt {
+  font-size: 13px; line-height: 1.5; color: var(--index); font-style: italic;
+}
+.egg-plain-glosses dd {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 12px; line-height: 1.55; color: var(--bright);
+}
+.egg-plain-says {
+  font-size: 13.5px; line-height: 1.7; color: var(--body); max-width: 74ch;
+  border-top: 1px solid var(--hairline); padding-top: 12px;
+}
+.egg-plain-links { display: flex; flex-wrap: wrap; gap: 8px; }
+.egg-plain-link {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 11px; letter-spacing: .06em;
+  color: var(--bright);
+  border: 1px solid var(--rule); border-radius: 3px; padding: 6px 11px;
+  transition: color .15s, border-color .15s;
+}
+.egg-plain-link:hover { color: var(--video); border-color: var(--video); }
+
+@media (max-width: 640px) {
+  .egg-plain-glosses > div { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* The choices. These lived in the diagnosis game's stylesheet and went out with it, which
+   left the tour's only interaction rendering as bare text — the buttons were still buttons,
+   they just stopped looking like anything. */
+.egg-options { display: flex; flex-direction: column; gap: 8px; align-items: stretch; }
+.egg-option {
+  display: flex; align-items: baseline; text-align: left;
+  padding: 13px 15px;
+  border: 1px solid var(--rule); border-radius: 3px; background: var(--ink-2);
+  font-size: 14px; line-height: 1.5; color: var(--body);
+  transition: border-color .15s, color .15s, background .15s;
+}
+.egg-option:hover { border-color: var(--video); color: var(--bright); background: var(--ink-3); }
+.egg-option:active { transform: translateY(1px); }
+
+/* What came back. A quoted block rather than another paragraph, so an answer never reads as
+   more of the scene. */
+.egg-said {
+  font-size: 13.5px; line-height: 1.7; color: var(--haze);
+  border-left: 2px solid var(--rule); padding-left: 13px; max-width: 74ch;
+}
+
+.egg-option-cost { color: var(--bright); }
+.egg-hint { font-size: 12.5px; color: var(--rule); font-style: italic; }
+
+.egg-arms-row {
+  display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
+  padding: 12px 0; border-top: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--hairline);
+}
+.egg-arms-note { font-size: 12px; color: var(--haze); margin-left: 6px; }
+
+/* What the chapter earned. Always last, always the same shape. */
+.egg-fact {
+  border: 1px solid var(--rule); border-left: 2px solid var(--video); border-radius: 3px;
+  background: var(--ink-2); padding: 16px 18px;
+  display: flex; flex-direction: column; gap: 12px; align-items: flex-start;
+}
+.egg-fact > p { font-size: 14.5px; line-height: 1.7; color: var(--bright); max-width: 68ch; }
+.egg-fact-term {
+  font-size: 13px; line-height: 1.65; color: var(--haze); max-width: 68ch;
+  border-top: 1px solid var(--hairline); padding-top: 11px; width: 100%;
+}
+.egg-fact-term b {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 12px; color: var(--index); letter-spacing: .04em;
+}
+
+/* The scale, and the glossary that fills as you go. Between them they are the whole of the
+   progress this thing reports — no score, because a lesson with a score is an exam. */
+.egg-scale { width: 100%; }
+.egg-scale-v {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 26px; color: var(--bright); font-variant-numeric: tabular-nums;
+}
+.egg-scale-note { font-size: 11.5px; line-height: 1.55; color: var(--haze); margin-top: 5px; }
+
+.egg-glossary { width: 100%; }
+.egg-glossary-empty { font-size: 12px; line-height: 1.55; color: var(--rule); font-style: italic; }
+.egg-glossary dl { display: flex; flex-direction: column; gap: 11px; }
+.egg-glossary dt {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 11.5px; color: var(--index); letter-spacing: .04em;
+}
+.egg-glossary dd { font-size: 12px; line-height: 1.55; color: var(--haze); margin-top: 2px; }
+
+.egg-retour {
+  margin-left: auto;
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 9.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--haze);
+  border: 1px solid var(--rule); border-radius: 3px; padding: 3px 9px;
+  transition: color .15s, border-color .15s;
+}
+.egg-retour:hover { color: var(--video); border-color: var(--video); }
+
+/* --- the doors out ---------------------------------------------------------------- */
+
+/* Seven words, seven links into the console the player is standing in. A list rather than
+   buttons: the point is that it reads as a map, not a menu of things to do next. */
+.egg-doors { display: flex; flex-direction: column; gap: 6px; }
+.egg-door {
+  display: grid; grid-template-columns: 9rem auto; gap: 2px 14px;
+  padding: 9px 12px; border: 1px solid var(--rule); border-radius: 3px;
+  background: var(--ink-3);
+  transition: border-color .15s, background .15s;
+}
+.egg-door:hover { border-color: var(--video); background: var(--ink-2); }
+.egg-door-word {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 12px; color: var(--index); letter-spacing: .04em;
+}
+.egg-door-tab { font-size: 13px; color: var(--bright); font-weight: 600; }
+.egg-door:hover .egg-door-tab { color: var(--video); }
+.egg-door-look {
+  grid-column: 2; font-size: 12px; line-height: 1.5; color: var(--haze);
+}
+
+/* --- the cards ------------------------------------------------------------------- */
+
+.egg-card {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  background: var(--scrim-2); padding: 24px; overflow: auto;
+}
+.egg-card-side { background: var(--ink); }
+@media (min-width: 900px) {
+  .egg-card-side { place-items: center start; padding-left: clamp(16px, 6vw, 90px); }
+  .egg-card-side .egg-sheet { width: min(540px, 54vw); }
+}
+.egg-sheet {
+  width: min(540px, calc(100vw - 32px));
+  max-height: calc(100vh - 100px);
+  padding: 26px 28px 0;
+  background: var(--ink-2); border: 1px solid var(--rule); border-radius: 6px;
+  box-shadow: 0 24px 60px rgb(0 0 0 / 0.35);
+  text-align: left;
+  /* A column with one scrolling half, rather than one scroll box with a sticky child.
+     Sticky was the obvious way and it was subtly wrong: the bar carried a negative bottom
+     margin to reach the sheet's padding edge, `bottom: 0` positions the margin box, and the
+     difference was a band at the foot of the card where the copy scrolled past underneath
+     the buttons in full view. */
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.egg-sheet-body { overflow: auto; min-height: 0; }
+/* The buttons stay put while the copy above them scrolls. A card whose primary action is
+   below the fold on a 610px window is a card with no primary action. */
+.egg-actions {
+  flex-shrink: 0;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+  margin: 0 -28px; padding: 14px 28px 18px;
+  background: var(--ink-2); border-top: 1px solid var(--hairline);
+}
+/* Left, explicitly: the footer is the only part of the sheet whose contents are flex
+   children rather than flow, and it picked up a centred alignment that fought the copy. */
+.egg-actions-col { flex-direction: column; align-items: flex-start; gap: 8px; text-align: left; }
+.egg-actions-col > * { align-self: stretch; }
+
+/* Announced, not shown. Clip rather than display:none, which is not read out. */
+.egg-sr {
+  position: absolute;
+  width: 1px; height: 1px;
+  margin: -1px; padding: 0; border: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
 
 /* A diagram that would not draw says so above the source it fell back to, in the
    colour the rest of the console uses for "this did not work". */

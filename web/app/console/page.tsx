@@ -114,7 +114,12 @@ export default function Console() {
         // are your 23 columns" is a strange first answer to "find my photos". Set
         // here, alongside the table it belongs to, rather than in an effect of its
         // own: a synchronous setState in an effect is a cascading render.
-        if (picked && wantTab && TABS.some((x) => x.id === wantTab)) {
+        //
+        // `picked` is only set when `?table=` names a table that exists, but a bare
+        // `?tab=insights` is still a meaningful request: the console falls back to the
+        // first table, and the asked-for tab is the right one to open it on. Gating the
+        // tab on a named table made that link land on the schema instead, silently.
+        if (wantTab && d.tables.length > 0 && TABS.some((x) => x.id === wantTab)) {
           setTab(wantTab as Tab);
         }
       })

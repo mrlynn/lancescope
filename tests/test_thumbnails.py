@@ -29,6 +29,41 @@ def test_the_bytes_say_what_they_are():
     assert query.sniff_media_type(b"\x00\x00\x00\x18ftypmp42") == "video/mp4"
 
 
+def test_a_bitmap_is_recognised_without_its_two_byte_signature_matching_everything():
+    """`BM` alone is two bytes and would claim far too much.
+
+    An uncompressed bitmap is what an image column looks like when somebody stored
+    pixels rather than a compressed file — the shape that makes a blob column weigh
+    anything — so it is worth recognising, but only when the DIB header size that
+    follows the signature is one a BMP actually uses.
+    """
+    import struct
+
+    def header(dib: int) -> bytes:
+        return struct.pack("<2sIHHII", b"BM", 70, 0, 0, 54, dib) + bytes(50)
+
+    assert query.sniff_media_type(header(40)) == "image/bmp"     # BITMAPINFOHEADER
+    assert query.sniff_media_type(header(124)) == "image/bmp"    # BITMAPV5HEADER
+    assert query.sniff_media_type(header(41)) is None            # not a real one
+    # Two matching bytes and nothing behind them is not a bitmap.
+    assert query.sniff_media_type(b"BM" + bytes(4)) is None
+    assert query.sniff_media_type(b"BMP file, said the text") is None
+
+
+def test_the_portrait_column_the_roll_ships_is_one_a_browser_can_draw():
+    """The Roll exists to be looked at, and it once shipped images nothing could show.
+
+    Its portraits were uncompressed PPM, chosen so the column would weigh what a
+    photograph weighs. That part was right and the format was not: no browser draws a
+    PPM, so `/blob` served the whole column as `application/octet-stream` and the one
+    dataset built by this repository to be *seen* could not be.
+    """
+    from ingest.build_roll import Arms, portrait_bytes
+
+    painted = portrait_bytes(Arms("azure", "cross", "or"), 200_000)
+    assert query.sniff_media_type(painted[:64]) == "image/bmp"
+
+
 def test_unrecognisable_bytes_are_not_guessed_at():
     # Better octet-stream than a confident wrong type: a browser told `image/png`
     # about something else renders a broken image rather than offering a download.

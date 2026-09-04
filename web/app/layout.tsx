@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import EasterEgg from "@/app/components/egg/EasterEgg";
 import KioskBanner from "@/app/components/KioskBanner";
 import { Martian_Mono, Schibsted_Grotesk } from "next/font/google";
 import "./globals.css";
@@ -49,6 +50,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         {/* Above everything, on every screen, because the constraint applies to
             every screen. Renders nothing unless the server says it is a kiosk. */}
         <KioskBanner />
+        {/* Nothing, until ten particular keys. */}
+        <EasterEgg />
         {children}
       </body>
     </html>
