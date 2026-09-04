@@ -364,3 +364,31 @@ class NullProvider:
 
     def complete(self, **_) -> Completion:
         raise NoProvider(self.reason, self.setup_hint)
+
+
+# ------------------------------------------------------- openai-compat model listing
+
+def openai_compat_models(base_url: str, api_key: str | None = None,
+                         timeout: float = PROBE_TIMEOUT_S * 4) -> list[str] | None:
+    """What the endpoint says it serves, or None if it will not say.
+
+    `/v1/models` is part of the API these servers claim to speak, so asking is
+    reasonable even though the answer varies wildly: OpenAI proper returns fifty
+    entries including embeddings and speech models, vLLM returns the one model it was
+    started with. Nothing here filters that list — a name-pattern filter would hide
+    the model somebody actually wanted the first time a vendor renamed a family.
+
+    None means the question could not be asked, which is a normal answer: plenty of
+    gateways serve `/chat/completions` and nothing else, and those keep the free-text
+    box.
+    """
+    headers = {"authorization": f"Bearer {api_key}"} if api_key else {}
+    try:
+        r = httpx.get(f"{base_url.rstrip('/')}/models", headers=headers, timeout=timeout)
+        r.raise_for_status()
+        data = r.json().get("data")
+    except (httpx.HTTPError, ValueError):
+        return None
+    if not isinstance(data, list):
+        return None
+    return sorted({m["id"] for m in data if isinstance(m, dict) and m.get("id")})

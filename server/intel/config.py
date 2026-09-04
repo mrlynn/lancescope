@@ -46,7 +46,6 @@ class Resolved:
     reason: str
     available: bool
     models: dict[str, str]              # role -> model id
-    installed_models: list[str]
     key_source: str | None = None
     host: str | None = None
     setup_hint: str = ""
@@ -62,8 +61,6 @@ class Resolved:
                 "deep": deep.as_dict(),
                 "fast": fast.as_dict(),
             },
-            "installed_models": self.installed_models,
-            "known_good_local": list(registry.LOCAL_KNOWN_GOOD),
             "tools_capable": deep.tools,
             "key_source": self.key_source,
             "host": self.host,
@@ -92,7 +89,7 @@ def resolve(settings: cfg.Settings | None = None) -> Resolved:
 
     if not intel.enabled:
         return Resolved("none", "the language layer is switched off in settings",
-                        False, {}, [], setup_hint="Enable it in settings.")
+                        False, {}, setup_hint="Enable it in settings.")
 
     want = (intel.provider or "auto").lower()
 
@@ -106,12 +103,11 @@ def resolve(settings: cfg.Settings | None = None) -> Resolved:
                                                      else ", found by auto-detection"),
                 True,
                 {"deep": deep, "fast": intel.model_fast or deep},
-                [m.id for m in registry.for_provider("anthropic")],
                 key_source=source,
             )
         if want == "anthropic":
             return Resolved("none", "provider is set to anthropic, but no key is set",
-                            False, {}, [], setup_hint=SETUP_HINT)
+                            False, {}, setup_hint=SETUP_HINT)
 
     if want in ("ollama", "auto"):
         host = ollama_host(intel.ollama_host)
@@ -120,7 +116,7 @@ def resolve(settings: cfg.Settings | None = None) -> Resolved:
             model = _pick_local(intel.model, installed)
             if model is None:
                 return Resolved("none", f"ollama is running at {host} with no models "
-                                        f"pulled", False, {}, [], host=host,
+                                        f"pulled", False, {}, host=host,
                                 setup_hint="Pull one, e.g. `ollama pull qwen3:8b`.")
             return Resolved(
                 "ollama",
@@ -128,11 +124,11 @@ def resolve(settings: cfg.Settings | None = None) -> Resolved:
                                        else ", found by auto-detection"),
                 True,
                 {"deep": model, "fast": intel.model_fast or model},
-                installed, host=host,
+                host=host,
             )
         if want == "ollama":
             return Resolved("none", f"provider is set to ollama, but nothing is "
-                                    f"answering at {host}", False, {}, [], host=host,
+                                    f"answering at {host}", False, {}, host=host,
                             setup_hint="Start it with `ollama serve`.")
 
     if want == "openai-compat":
@@ -140,22 +136,23 @@ def resolve(settings: cfg.Settings | None = None) -> Resolved:
         key, source = cfg.api_key_for(intel, "openai-compat")
         if not base:
             return Resolved("none", "provider is set to openai-compat with no base URL",
-                            False, {}, [], setup_hint="Set the base URL in settings.")
+                            False, {}, setup_hint="Set the base URL in settings.")
         if not intel.model:
             return Resolved("none", "provider is set to openai-compat with no model",
-                            False, {}, [], host=base,
-                            setup_hint="Name the model in settings — this endpoint "
-                                       "cannot be asked what it serves.")
+                            False, {}, host=base,
+                            setup_hint="Pick the model in settings — the endpoint is "
+                                       "asked what it serves, and typed in when it "
+                                       "will not say.")
         return Resolved("openai-compat", f"an OpenAI-compatible endpoint at {base}",
                         True, {"deep": intel.model, "fast": intel.model_fast or intel.model},
-                        [], key_source=source, host=base)
+                        key_source=source, host=base)
 
     if want == "none":
-        return Resolved("none", "provider is set to none", False, {}, [],
+        return Resolved("none", "provider is set to none", False, {},
                         setup_hint=SETUP_HINT)
 
     return Resolved("none", "no key is set and nothing is serving models locally",
-                    False, {}, [], setup_hint=SETUP_HINT)
+                    False, {}, setup_hint=SETUP_HINT)
 
 
 def provider_for(role: str = "deep", settings: cfg.Settings | None = None) -> Provider:

@@ -17,15 +17,16 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import Icon, { type IconName } from "@/app/components/Icon";
 import AppBar from "@/app/components/nav/AppBar";
 import SampleDatasets from "@/app/components/samples/SampleDatasets";
+import ModelPicker from "@/app/components/settings/ModelPicker";
 import Spend from "@/app/components/settings/Spend";
 import { Caveat, Copy, Empty, Eyebrow, fmtWhen } from "@/app/components/console/atoms";
 import { dbParent } from "@/app/lib/dbname";
 import { type RuntimeReport, getRuntime } from "@/app/lib/catalog";
 import {
   type Capabilities, type IntelProbe, type IntelligenceView, type Probe,
-  type SelfTest, type SettingsState,
-  activateConnection, addConnection, getCapabilities, getSettings, probeConnection,
-  probeIntelligence, removeConnection, runSelfTest, saveIntelligence,
+  type ProviderModels, type SelfTest, type SettingsState,
+  activateConnection, addConnection, getCapabilities, getModels, getSettings,
+  probeConnection, probeIntelligence, removeConnection, runSelfTest, saveIntelligence,
 } from "@/app/lib/settings";
 
 /* ---------------------------------------------------------------------- tabs */
@@ -478,6 +479,31 @@ function Intelligence({ intel, probe, caps, onProbe, onSaved, onError, kiosk = f
     setSaved(false);
   };
 
+  // What this provider could be asked for. Re-read when the provider or the endpoint
+  // in the form changes — including before Save, since the answer is about the URL in
+  // the box and not the one on disk. Debounced because the URL arrives one keystroke
+  // at a time, and each one would otherwise be a probe.
+  const [models, setModels] = useState<ProviderModels | null>(null);
+  const [listing, setListing] = useState(false);
+  const wantProvider = (draft.provider as string) ?? intel?.provider ?? "auto";
+  const wantHost = (draft.ollama_host as string) ?? intel?.ollama_host ?? "";
+  const wantBase = (draft.base_url as string) ?? intel?.base_url ?? "";
+
+  useEffect(() => {
+    // On a kiosk the router that answers this is not mounted at all, so asking would
+    // be a 404 with nothing to show for it.
+    if (kiosk) return;
+    let live = true;
+    const t = setTimeout(() => {
+      setListing(true);
+      getModels(wantProvider, wantHost, wantBase)
+        .then((m) => { if (live) setModels(m); })
+        .catch(() => { if (live) setModels(null); })
+        .finally(() => { if (live) setListing(false); });
+    }, 250);
+    return () => { live = false; clearTimeout(t); };
+  }, [kiosk, wantProvider, wantHost, wantBase]);
+
   // Before the reading-state check, because on a kiosk the panel is never going to
   // arrive: the router that answers these routes is not mounted at all. A form that
   // renders and then 404s on save would be worse than a sentence.
@@ -577,22 +603,18 @@ function Intelligence({ intel, probe, caps, onProbe, onSaved, onError, kiosk = f
           </select>
         </Field>
         <Field label="model" wide>
-          {provider === "ollama" && probe?.ollama.models.length ? (
-            <select className="inp mono" value={v("model", intel.model ?? "")}
-                    onChange={(e) => set("model", e.target.value)}>
-              <option value="">— pick —</option>
-              {probe.ollama.models.map((m) => <option key={m} value={m}>{m}</option>)}
-            </select>
-          ) : (
-            <input className="inp mono" placeholder="claude-opus-5"
-                   value={v("model", intel.model ?? "")}
-                   onChange={(e) => set("model", e.target.value)} />
-          )}
+          <ModelPicker role="deep" catalog={models} loading={listing}
+                       placeholder="narrating and reasoning"
+                       disabled={provider === "none"}
+                       value={v("model", intel.model ?? "")}
+                       onChange={(m) => set("model", m)} />
         </Field>
         <Field label="fast model" wide>
-          <input className="inp mono" placeholder="for NL → filter"
-                 value={v("model_fast", intel.model_fast ?? "")}
-                 onChange={(e) => set("model_fast", e.target.value)} />
+          <ModelPicker role="fast" catalog={models} loading={listing}
+                       placeholder="for NL → filter"
+                       disabled={provider === "none"}
+                       value={v("model_fast", intel.model_fast ?? "")}
+                       onChange={(m) => set("model_fast", m)} />
         </Field>
         <Field label="spend ceiling (USD)" wide>
           <input className="inp mono" placeholder="none" inputMode="decimal"
