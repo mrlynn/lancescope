@@ -13,6 +13,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Icon from "@/app/components/Icon";
+import { AskForFilter } from "@/app/components/console/AskForFilter";
 import { Cost, Empty, Eyebrow } from "@/app/components/console/atoms";
 import { DataGrid } from "@/app/components/console/DataGrid";
 import { FilterInput } from "@/app/components/console/FilterInput";
@@ -30,6 +31,7 @@ import {
 import {
   type StoredQuery, describeSpec, useQueryHistory, useSavedQueries,
 } from "@/app/lib/queries";
+import type { Capabilities } from "@/app/lib/settings";
 
 const MODE_LABEL: Record<string, string> = {
   scan: "filter",
@@ -55,7 +57,9 @@ function filterExample(columns: CompletionColumn[]): string {
   return any ? `${any.name} IS NOT NULL` : "a predicate over this table's columns";
 }
 
-export function QueryTab({ table, root }: { table: string; root: string | null }) {
+export function QueryTab({ table, root, ai }: {
+  table: string; root: string | null; ai: Capabilities | null;
+}) {
   const [caps, setCaps] = useState<QueryCapabilities | null>(null);
   const [mode, setMode] = useState<QuerySpec["mode"]>("scan");
   const [filter, setFilter] = useState("");
@@ -65,6 +69,14 @@ export function QueryTab({ table, root }: { table: string; root: string | null }
   const [k, setK] = useState("10");
   const [limit, setLimit] = useState("25");
   const [prefilter, setPrefilter] = useState(true);
+  // Heavy columns the reader has asked for by name. Empty is the default: a result
+  // leaves the vectors on disk until somebody clicks one, and then says what it
+  // cost to have them.
+  const [expand, setExpand] = useState<string[]>([]);
+  // Where the result on screen sits, and how wide the read that produced it was.
+  // Held beside the result rather than read from the limit box, so editing that box
+  // cannot silently re-describe a page that was read at another width.
+  const [page, setPage] = useState({ offset: 0, limit: 25 });
 
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<QueryResult | null>(null);
@@ -95,6 +107,14 @@ export function QueryTab({ table, root }: { table: string; root: string | null }
   const [weight, setWeight] = useState<{ mode: string; est: Estimate | null } | null>(null);
   const [showPlan, setShowPlan] = useState(false);
   const [showRepro, setShowRepro] = useState(false);
+  // Whether to read the first page on open. Undecided until the capability probes
+  // settle, because a `?tab=query` deep link on a searchable table opens in vector
+  // mode instead, and a scan fired underneath it would be a read nobody asked for.
+  // A ref rather than state: it is a latch, and re-rendering to say "already fired"
+  // would be a render that changes nothing on screen. `probed` is what wakes the
+  // effect, and it moves whether the probe answered or failed.
+  const browseOnOpen = useRef<boolean | null>(null);
+  const [probed, setProbed] = useState(0);
 
   // Everything below is per table, and the parent remounts this on a table change
   // (`key={table}`) rather than resetting six pieces of state by hand — which is
@@ -124,10 +144,14 @@ export function QueryTab({ table, root }: { table: string; root: string | null }
         if (cap.available && typeof window !== "undefined"
             && new URLSearchParams(window.location.search).get("tab") === "query") {
           setMode("vector");
+          browseOnOpen.current = false;
           requestAnimationFrame(() => describeRef.current?.focus());
+        } else {
+          browseOnOpen.current = true;
         }
       })
-      .catch(() => setTextSearch(null));
+      .catch(() => { setTextSearch(null); browseOnOpen.current = true; })
+      .finally(() => setProbed((n) => n + 1));
   }, [table]);
 
   // Whether the predicate parses, and what it matches, before anything is run.
@@ -180,7 +204,19 @@ export function QueryTab({ table, root }: { table: string; root: string | null }
   const capFor = (m: string): QueryCapability | undefined =>
     caps?.capabilities.find((c) => c.mode === m);
 
-  const run = useCallback(async () => {
+  /** Run what is in the form.
+   *
+   *  `over` is how paging and expanding a column re-run *this* query rather than
+   *  starting a new one: everything else about the spec is read from the form, so
+   *  page 3 of a filter is the same query with one number changed. A bare `run()`
+   *  is a new question and starts at the first page — landing on page 3 of an
+   *  answer you have not seen page 1 of is never what was meant. */
+  const run = useCallback(async (
+    over?: { offset?: number; expand?: string[]; limit?: number },
+  ) => {
+    const off = over?.offset ?? 0;
+    const exp = over?.expand ?? expand;
+    const wide = over?.limit ?? (Number(limit) || 25);
     const controller = new AbortController();
     setAborter(controller);
     setBusy(true); setError(null); setCancelled(false);
@@ -201,7 +237,9 @@ export function QueryTab({ table, root }: { table: string; root: string | null }
     const spec: QuerySpec = {
       mode,
       filter: filter.trim() || null,
-      limit: Number(limit) || 25,
+      limit: wide,
+      offset: off,
+      expand: exp.length ? exp : null,
       ...(mode === "fts" || mode === "hybrid" ? { text } : {}),
       ...(mode === "vector" || mode === "hybrid"
         ? {
@@ -217,6 +255,8 @@ export function QueryTab({ table, root }: { table: string; root: string | null }
     try {
       const r = await runQuery(table, spec, controller.signal);
       setResult(r);
+      setPage({ offset: off, limit: wide });
+      setExpand(exp);
       record(table, spec, { read_bytes: r.read_bytes, ms: r.ms,
                             returned: r.returned, version: r.version });
     } catch (e) {
@@ -232,7 +272,16 @@ export function QueryTab({ table, root }: { table: string; root: string | null }
       setAborter(null);
     }
   }, [table, mode, filter, limit, text, vectorColumn, likeRow, k, prefilter, describe,
-      record]);
+      expand, record]);
+
+  // Opening the panel reads the first page. The console used to answer "pick a
+  // mode and press Run" to the question "what is in this table", which is a click
+  // and a decision in front of the most common thing anyone does here.
+  useEffect(() => {
+    if (!probed || browseOnOpen.current !== true) return;
+    browseOnOpen.current = false;    // before the await, so a re-render cannot re-fire it
+    run();
+  }, [probed, run]);
 
   /** Put a stored query back in the form. It is not run: a saved query is a
    *  question, and running it is still the reader's decision — especially since the
@@ -246,6 +295,7 @@ export function QueryTab({ table, root }: { table: string; root: string | null }
     setLikeRow(String(q.spec.like_row ?? 0));
     setK(String(q.spec.k ?? 10));
     setLimit(String(q.spec.limit ?? 25));
+    setExpand(q.spec.expand ?? []);
     setResult(null);
     setError(null);
   }, []);
@@ -254,6 +304,7 @@ export function QueryTab({ table, root }: { table: string; root: string | null }
     mode,
     filter: filter.trim() || null,
     limit: Number(limit) || 25,
+    expand: expand.length ? expand : null,
     ...(mode === "fts" || mode === "hybrid" ? { text } : {}),
     ...(mode === "vector" || mode === "hybrid"
       ? { vector_column: vectorColumn, like_row: Number(likeRow) || 0,
@@ -265,6 +316,19 @@ export function QueryTab({ table, root }: { table: string; root: string | null }
 
   return (
     <>
+      {/* A question in words, drafting into the box below rather than running.
+          Scan only: the other three modes already take a sentence, and translating
+          English into a predicate to sit beside a vector search would be answering
+          a question with the wrong half of the form. */}
+      {ai?.available && mode === "scan" && (
+        <AskForFilter
+          table={table}
+          model={ai.models_by_role.fast.id}
+          example={filterExample(columns)}
+          onDraft={setFilter}
+        />
+      )}
+
       <div className="seg mb-4 flex-wrap">
         {MODES.map((m) => {
           const c = capFor(m);
@@ -342,7 +406,7 @@ export function QueryTab({ table, root }: { table: string; root: string | null }
           <FilterInput
             value={filter}
             onChange={setFilter}
-            onEnter={run}
+            onEnter={() => run()}
             columns={columns}
             placeholder={filterExample(columns)}
           />
@@ -356,7 +420,7 @@ export function QueryTab({ table, root }: { table: string; root: string | null }
         ) : null}
 
         <button className="btn btn-accent mono text-[10px] tracking-[0.14em] uppercase"
-                onClick={run} disabled={busy}>
+                onClick={() => run()} disabled={busy}>
           <Icon name="search" size={14} />
           {busy ? "running…" : "Run"}
         </button>
@@ -469,43 +533,42 @@ export function QueryTab({ table, root }: { table: string; root: string | null }
             </pre>
           )}
 
-          <div className="flex flex-wrap items-center gap-2 mb-4">
-            <span className="eyebrow">this result</span>
-            <button className="btn mono !h-[26px] !px-2.5 text-[10px] tracking-[0.14em] uppercase"
-                    onClick={() => download(`${table}-${Date.now()}.csv`,
-                                            toCsv(result.columns, result.rows),
-                                            "text/csv")}>
-              <Icon name="external" size={12} />csv
-            </button>
-            <button className="btn mono !h-[26px] !px-2.5 text-[10px] tracking-[0.14em] uppercase"
-                    onClick={() => download(`${table}-${Date.now()}.json`,
-                                            toJson(result.columns, result.rows),
-                                            "application/json")}>
-              <Icon name="external" size={12} />json
-            </button>
-            <span className="mono text-[10px] text-[var(--haze)]">
-              the {result.returned} rows on screen — heavy columns were never read,
-              and export as the summaries shown here
-            </span>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2 mb-4">
-            <span className="eyebrow">save as</span>
-            <input className="qin w-[220px]" value={saveName}
-                   onChange={(e) => setSaveName(e.target.value)}
-                   onKeyDown={(e) => {
-                     if (e.key === "Enter" && saveName.trim()) {
-                       save(saveName.trim(), table, currentSpec());
-                       setSaveName("");
-                     }
-                   }}
-                   placeholder="what this query answers" />
-            <button className="btn mono !h-[26px] !px-2.5 text-[10px] tracking-[0.14em] uppercase"
-                    disabled={!saveName.trim()}
-                    onClick={() => { save(saveName.trim(), table, currentSpec()); setSaveName(""); }}>
-              <Icon name="check" size={12} />save
-            </button>
-          </div>
+          {/* Heavy columns this result declined to read, each priced by clicking it.
+              They sit above the grid because that is where the missing columns are,
+              and reading one re-runs this same page rather than a new query. */}
+          {(result.omitted_columns.length > 0 || expand.length > 0) && (
+            <div className="flex flex-wrap items-center gap-2 mb-4">
+              {/* Not "not read": one of these chips names a column that *was*, and
+                  a label contradicting the chip under it is the one mistake a
+                  console about honest byte accounting cannot make. The chip says
+                  which — `+` to read it, `×` to stop. */}
+              <span className="eyebrow">Heavy columns</span>
+              {result.omitted_columns.map((c) => (
+                <button
+                  key={c.name}
+                  onClick={() => run({ offset: page.offset, expand: [...expand, c.name] })}
+                  title={`${c.type} — click to read it and see what it costs`}
+                  className="btn mono !h-[26px] !px-2.5 text-[11px]"
+                >
+                  <Icon name="plus" size={12} />
+                  {c.name}{c.vector_dim ? `[${c.vector_dim}]` : ""}
+                </button>
+              ))}
+              {expand.map((c) => (
+                <button
+                  key={c}
+                  onClick={() => run({ offset: page.offset,
+                                       expand: expand.filter((x) => x !== c) })}
+                  className="btn mono !h-[26px] !px-2.5 text-[11px]"
+                  style={{ borderColor: "var(--index)", color: "var(--index)",
+                           background: "rgb(var(--index-rgb) / 0.09)" }}
+                >
+                  <Icon name="close" size={12} />
+                  {c}
+                </button>
+              ))}
+            </div>
+          )}
 
           {showRepro && (
             <pre className="mono text-[10px] leading-relaxed p-4 rounded-sm mb-4
@@ -535,16 +598,61 @@ export function QueryTab({ table, root }: { table: string; root: string | null }
             />
           )}
 
-          {result.omitted_columns.length > 0 && (
-            <p className="text-[11px] text-[var(--haze)] mt-4 leading-relaxed">
-              Not read:{" "}
-              <span className="mono">
-                {result.omitted_columns.map((c) => c.name).join(", ")}
-              </span>
-              . Heavy columns stay out of a query result — that is where the bytes
-              would have gone.
-            </p>
+          {result.mode === "scan" && result.total_rows !== null && (
+            <Pager total={result.total_rows} returned={result.returned} page={page}
+                   busy={busy} limit={limit}
+                   onLimit={(n) => { setLimit(String(n)); run({ offset: 0, limit: n }); }}
+                   onGo={(offset) => run({ offset })} />
           )}
+
+          {/* Taking what is on screen with you. Directly under the rows it exports,
+              because that is where you are when you decide to — it used to sit above
+              the diagnosis, three scrolls from the grid it describes. */}
+          <div className="flex flex-wrap items-center gap-2 mt-4">
+            <span className="eyebrow">
+              {result.mode === "scan" && result.total_rows !== null
+                ? "this page" : "this result"}
+            </span>
+            <button className="btn mono !h-[26px] !px-2.5 text-[10px] tracking-[0.14em] uppercase"
+                    onClick={() => download(`${table}-${page.offset}.csv`,
+                                            toCsv(result.columns, result.rows),
+                                            "text/csv")}>
+              <Icon name="external" size={12} />csv
+            </button>
+            <button className="btn mono !h-[26px] !px-2.5 text-[10px] tracking-[0.14em] uppercase"
+                    onClick={() => download(`${table}-${page.offset}.json`,
+                                            toJson(result.columns, result.rows),
+                                            "application/json")}>
+              <Icon name="external" size={12} />json
+            </button>
+            {/* Which is only true while nothing has been expanded. Saying it
+                anyway would put the console's central claim on a row it just
+                stopped being true of. */}
+            <span className="mono text-[10px] text-[var(--haze)]">
+              the {result.returned} rows on screen — {expand.length === 0
+                ? "heavy columns were never read, and export"
+                : `${expand.join(", ")} was read, and every heavy column exports`}{" "}
+              as the summaries shown here
+            </span>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 mt-4">
+            <span className="eyebrow">save as</span>
+            <input className="qin w-[220px]" value={saveName}
+                   onChange={(e) => setSaveName(e.target.value)}
+                   onKeyDown={(e) => {
+                     if (e.key === "Enter" && saveName.trim()) {
+                       save(saveName.trim(), table, currentSpec());
+                       setSaveName("");
+                     }
+                   }}
+                   placeholder="what this query answers" />
+            <button className="btn mono !h-[26px] !px-2.5 text-[10px] tracking-[0.14em] uppercase"
+                    disabled={!saveName.trim()}
+                    onClick={() => { save(saveName.trim(), table, currentSpec()); setSaveName(""); }}>
+              <Icon name="check" size={12} />save
+            </button>
+          </div>
+
         </>
       )}
 
@@ -706,6 +814,86 @@ function Stat({ label, value, tone }: { label: string; value: string; tone?: "in
         {value}
       </div>
     </div>
+  );
+}
+
+/** Paging, for the one mode that has pages.
+ *
+ *  A top-k search returns k rows by construction, so offering a page 2 there would
+ *  promise rows that do not exist behind the ones on screen — which is why this is
+ *  rendered only for a scan with a real total. */
+function Pager({ total, returned, page, busy, limit, onLimit, onGo }: {
+  total: number;
+  returned: number;
+  page: { offset: number; limit: number };
+  busy: boolean;
+  limit: string;
+  onLimit: (n: number) => void;
+  onGo: (offset: number) => void;
+}) {
+  const last = page.offset + returned >= total;
+  return (
+    <div className="flex flex-wrap items-center gap-3 mt-5">
+      <span className="mono text-[11px] text-[var(--haze)]">
+        {total === 0
+          ? "0 rows"
+          : `${(page.offset + 1).toLocaleString()}–`
+            + `${(page.offset + returned).toLocaleString()} of `
+            + `${total.toLocaleString()}`}
+      </span>
+
+      {/* How many rows a page read is, stated as the read it is. Twenty-five at a
+          time is a defensible default and a poor way to look for something; four
+          hundred is the same read, four hundred rows wide. */}
+      <label className="flex items-center gap-1.5 mono text-[11px] text-[var(--haze)]
+                        whitespace-nowrap">
+        <span>rows per read</span>
+        <select
+          className="qin !h-[26px] !py-0 !px-1.5 !text-[11px] w-[68px]"
+          value={limit}
+          onChange={(e) => onLimit(Number(e.target.value))}
+        >
+          {[25, 50, 100, 250, 500].map((n) => (
+            <option key={n} value={String(n)}>{n}</option>
+          ))}
+        </select>
+      </label>
+
+      <div className="flex gap-2 ml-auto">
+        <PageBtn disabled={busy || page.offset === 0} onClick={() => onGo(0)}>
+          first
+        </PageBtn>
+        <PageBtn disabled={busy || page.offset === 0}
+                 onClick={() => onGo(Math.max(0, page.offset - page.limit))}>
+          <Icon name="chevronLeft" size={13} />
+          prev
+        </PageBtn>
+        <PageBtn disabled={busy || last}
+                 onClick={() => onGo(page.offset + page.limit)}>
+          next
+          <Icon name="chevronRight" size={13} />
+        </PageBtn>
+        <PageBtn disabled={busy || last}
+                 onClick={() =>
+                   onGo(Math.max(0, (Math.ceil(total / page.limit) - 1) * page.limit))}>
+          last
+        </PageBtn>
+      </div>
+    </div>
+  );
+}
+
+function PageBtn({ disabled, onClick, children }: {
+  disabled: boolean; onClick: () => void; children: React.ReactNode;
+}) {
+  return (
+    <button
+      disabled={disabled}
+      onClick={onClick}
+      className="btn mono !h-[26px] !px-2.5 !gap-1.5 text-[11px]"
+    >
+      {children}
+    </button>
   );
 }
 

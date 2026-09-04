@@ -127,6 +127,54 @@ def test_a_heavy_column_never_appears_in_a_result(api):
             assert heavy in [c["name"] for c in body["omitted_columns"]]
 
 
+def test_a_heavy_column_is_read_only_when_the_query_names_it(api):
+    """What the row browser used to be for, now the same query with one field set.
+
+    The default is the claim: the vectors stay on disk. Asking for one by name is a
+    decision the reader makes after being told what it weighs, and it must actually
+    be honoured — an `expand` that quietly did nothing would be the worst of both.
+    """
+    plain = run(api, "vectors", {"mode": "scan", "limit": 5}).json()
+    assert "vector" not in plain["columns"]
+    assert "vector" in [c["name"] for c in plain["omitted_columns"]]
+
+    wide = run(api, "vectors",
+               {"mode": "scan", "limit": 5, "expand": ["vector"]}).json()
+    assert "vector" in wide["columns"]
+    assert "vector" not in [c["name"] for c in wide["omitted_columns"]]
+    # Read, but still rendered as a summary with a head preview rather than 1,536
+    # floats down the wire — expanding a column buys you a look at it, not a dump.
+    cell = wide["rows"][0]["vector"]
+    assert cell["vector_dim"] == 8 and len(cell["head"]) > 0
+
+    # And it cost something to have them, which is what makes it worth a click.
+    # Compared against a *second* plain read: the first one paid for the manifest
+    # and the footers, and charging the vectors for that would be a test that
+    # passes for the wrong reason.
+    warm = run(api, "vectors", {"mode": "scan", "limit": 5}).json()
+    assert wide["read_bytes"] > warm["read_bytes"]
+
+
+def test_a_query_refuses_to_expand_a_blob_column(api):
+    """The one thing this repository exists to show never happens. The row browser
+    refused it; the panel that absorbed the row browser has to refuse it too."""
+    r = run(api, "blobs", {"mode": "scan", "limit": 5, "expand": ["payload"]})
+    assert r.status_code == 400
+    assert "blob" in r.json()["detail"].lower()
+
+
+def test_paging_a_scan_walks_the_table_without_repeating_itself(api):
+    """Rows had a pager and the query panel did not, which is why there were two
+    panels. The offset was always in the spec; nothing on screen sent it."""
+    first = run(api, "ordinary", {"mode": "scan", "limit": 3, "offset": 0}).json()
+    second = run(api, "ordinary", {"mode": "scan", "limit": 3, "offset": 3}).json()
+    assert first["total_rows"] == second["total_rows"]
+    assert first["rows"] and second["rows"]
+    assert first["rows"] != second["rows"]
+    # A total that ignored the offset would report a page 2 that is really page 1.
+    assert first["truncated"] is True
+
+
 def test_querying_a_blob_table_stays_cheap(api):
     """The claim the repository is built on, in miniature: describing and reading
     around a blob column must not scale with the blobs."""

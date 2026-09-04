@@ -178,25 +178,6 @@ export type Cell =
   | { bytes: number; materialised: true }
   | { vector_dim: number; head: number[] };
 
-export type Rows = {
-  name: string;
-  offset: number;
-  limit: number;
-  returned: number;
-  total_rows: number;
-  filter: string | null;
-  columns: string[];
-  omitted_columns: {
-    name: string;
-    type: string;
-    vector_dim: number | null;
-    reason: string;
-  }[];
-  rows: Record<string, Cell>[];
-  read_bytes: number;
-  read_iops: number;
-};
-
 /** Whose question a finding answers. A panel says where the evidence lives; a facet
  *  says who is paying for it, and the two are different axes — an unindexed vector
  *  column is evidence on Indices and a per-query cost to anyone running an eval. */
@@ -369,17 +350,10 @@ export const getRunConfig = (n: string, columns?: string[]) =>
   get<RunConfig>(`/tables/${n}/run-config`
     + (columns?.length ? `?columns=${encodeURIComponent(columns.join(","))}` : ""));
 
-export function getRows(
-  n: string,
-  opts: { offset?: number; limit?: number; filter?: string | null; expand?: string[] } = {},
-): Promise<Rows> {
-  const q = new URLSearchParams();
-  q.set("offset", String(opts.offset ?? 0));
-  q.set("limit", String(opts.limit ?? 25));
-  if (opts.filter) q.set("filter", opts.filter);
-  if (opts.expand?.length) q.set("expand", opts.expand.join(","));
-  return get<Rows>(`/tables/${n}/rows?${q}`);
-}
+// `GET /tables/{n}/rows` has no client here any more: the panel that used it was
+// folded into the query workspace, which pages through `POST .../query` with an
+// offset. The endpoint stays — it is the cheapest way to browse a table over HTTP,
+// and the MCP server reads rows through it.
 
 /* ------------------------------------------------------------------- query */
 
@@ -414,6 +388,8 @@ export type QuerySpec = {
   mode: "scan" | "fts" | "vector" | "hybrid";
   filter?: string | null;
   columns?: string[] | null;
+  /** Heavy columns the reader asked for by name, having been told what they weigh. */
+  expand?: string[] | null;
   limit?: number;
   offset?: number;
   text?: string | null;

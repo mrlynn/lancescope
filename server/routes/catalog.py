@@ -1120,6 +1120,7 @@ class QueryBody(BaseModel):
     mode: str = "scan"
     filter: str | None = None
     columns: list[str] | None = None
+    expand: list[str] | None = None
     limit: int = 25
     offset: int = 0
     text: str | None = None

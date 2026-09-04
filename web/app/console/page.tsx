@@ -10,13 +10,12 @@ import SampleDatasets from "@/app/components/samples/SampleDatasets";
 import { Copy, Cost, Empty } from "@/app/components/console/atoms";
 import TableRail from "@/app/components/console/TableRail";
 import {
-  FragmentsTab, IndicesTab, RowsTab, SchemaTab, VersionsTab,
+  FragmentsTab, IndicesTab, SchemaTab, VersionsTab,
 } from "@/app/components/console/tabs";
 import {
-  ApiError,
-  type Findings, type Fragments, type Indices, type Rows, type TableDetail,
+  type Findings, type Fragments, type Indices, type TableDetail,
   type TableList, type Versions,
-  getFindings, getFragments, getIndices, getRows, getTable, getVersions, listTables,
+  getFindings, getFragments, getIndices, getTable, getVersions, listTables,
 } from "@/app/lib/catalog";
 import {
   InsightsTab, PanelFindings, PartialAnalysis,
@@ -44,7 +43,6 @@ const TAB_GROUPS: { id: string; icon: IconName }[][] = [
     { id: "versions", icon: "history" },
     { id: "indices", icon: "index" },
     { id: "fragments", icon: "fragments" },
-    { id: "rows", icon: "rows" },
   ],
   [
     { id: "query", icon: "search" },
@@ -54,10 +52,14 @@ const TAB_GROUPS: { id: string; icon: IconName }[][] = [
   ],
 ];
 const TABS = TAB_GROUPS.flat();
-type Tab = "schema" | "versions" | "indices" | "fragments" | "rows" | "query"
+type Tab = "schema" | "versions" | "indices" | "fragments" | "query"
   | "compare" | "training" | "insights";
 
-const PAGE = 25;
+// Rows was a second query panel: a plain filter box beside one that completed
+// columns, an English box the other did not have, and the same grid under both.
+// It is one panel now, and this keeps every link that pointed at the old one
+// landing on the panel that absorbed it rather than on the schema.
+const MERGED_TABS: Record<string, Tab> = { rows: "query" };
 
 export default function Console() {
   const [list, setList] = useState<TableList | null>(null);
@@ -70,18 +72,10 @@ export default function Console() {
   const [versions, setVersions] = useState<Versions | null>(null);
   const [indices, setIndices] = useState<Indices | null>(null);
   const [fragments, setFragments] = useState<Fragments | null>(null);
-  const [rows, setRows] = useState<Rows | null>(null);
   // Fetched once per table rather than per tab: the same list is rendered inline
   // under four panels and collected in Insights, and it is one cheap metadata read.
   const [findings, setFindings] = useState<Findings | null>(null);
 
-  const [offset, setOffset] = useState(0);
-  // How wide a page read is. Kept here rather than in the panel because every
-  // paging control has to agree with it, and because it survives a tab switch.
-  const [limit, setLimit] = useState(PAGE);
-  const [filter, setFilter] = useState("");
-  const [expanded, setExpanded] = useState<string[]>([]);
-  const [rowsError, setRowsError] = useState<string | null>(null);
   const [cost, setCost] = useState<{ bytes: number; iops: number } | null>(null);
   const [settings, setSettings] = useState<SettingsState | null>(null);
   // What the language layer can do right now, so the console offers it only when it
@@ -106,7 +100,6 @@ export default function Console() {
     setPicked(name);
     setDetail(null); setVersions(null); setIndices(null); setFragments(null);
     setFindings(null);
-    setRows(null); setOffset(0); setFilter(""); setExpanded([]); setRowsError(null);
   }, []);
 
   const loadTables = useCallback((want?: string | null, wantTab?: string | null) => {
@@ -125,8 +118,9 @@ export default function Console() {
         // `?tab=insights` is still a meaningful request: the console falls back to the
         // first table, and the asked-for tab is the right one to open it on. Gating the
         // tab on a named table made that link land on the schema instead, silently.
-        if (wantTab && d.tables.length > 0 && TABS.some((x) => x.id === wantTab)) {
-          setTab(wantTab as Tab);
+        const asked = wantTab ? MERGED_TABS[wantTab] ?? wantTab : null;
+        if (asked && d.tables.length > 0 && TABS.some((x) => x.id === asked)) {
+          setTab(asked as Tab);
         }
       })
       .catch((e) => setListError(e instanceof Error ? e.message : "unreachable"));
@@ -171,23 +165,6 @@ export default function Console() {
     }
   }, [loadTables, selectTable]);
 
-  const loadRows = useCallback(
-    async (name: string, off: number, f: string, exp: string[], lim = PAGE) => {
-      try {
-        const d = await getRows(name, {
-          offset: off, limit: lim, filter: f || null, expand: exp,
-        });
-        setRows(d);
-        setRowsError(null);
-        setCost({ bytes: d.read_bytes, iops: d.read_iops });
-      } catch (e) {
-        // A filter the user typed is theirs to fix; keep the page they were on.
-        setRowsError(e instanceof ApiError ? e.message : "request failed");
-      }
-    },
-    [],
-  );
-
   useEffect(() => {
     if (!picked) return;
     let alive = true;
@@ -218,8 +195,6 @@ export default function Console() {
           const d = await getFragments(picked);
           if (!alive) return;
           setFragments(d); setCost({ bytes: d.read_bytes, iops: d.read_iops });
-        } else if (tab === "rows" && !rows) {
-          await loadRows(picked, 0, "", []);
         }
       } catch (e) {
         if (alive) setListError(e instanceof Error ? e.message : "request failed");
@@ -227,7 +202,7 @@ export default function Console() {
     };
     run();
     return () => { alive = false; };
-  }, [picked, tab, detail, versions, indices, fragments, rows, loadRows]);
+  }, [picked, tab, detail, versions, indices, fragments]);
 
   // Nine tabs against a narrow window, in the order the strip gives things up.
   //
@@ -495,37 +470,13 @@ export default function Console() {
                 ? <><FragmentsTab d={fragments} /><PanelFindings d={findings} panel="fragments" /></>
                 : <Empty>reading fragments…</Empty>)}
               {tab === "query" && (picked
-                ? <QueryTab key={picked} table={picked} root={root} />
+                ? <QueryTab key={picked} table={picked} root={root} ai={ai} />
                 : <Empty>pick a table to query</Empty>)}
               {tab === "training" && <TrainingTab d={detail} findings={findings} />}
               {tab === "compare" && (picked
                 ? <CompareTab key={picked} table={picked} />
                 : <Empty>pick a table to compare</Empty>)}
               {tab === "insights" && <InsightsTab d={findings} table={picked} ai={ai} />}
-              {tab === "rows" && (
-                <RowsTab
-                  d={rows}
-                  error={rowsError}
-                  expanded={expanded}
-                  table={picked}
-                  ai={ai}
-                  onPage={(off) => { setOffset(off); if (picked) loadRows(picked, off, filter, expanded, limit); }}
-                  onPageSize={(n) => {
-                    // Back to the first page: keeping the offset would leave you
-                    // somewhere you did not ask to be, in a page of a new width.
-                    setLimit(n); setOffset(0);
-                    if (picked) loadRows(picked, 0, filter, expanded, n);
-                  }}
-                  onFilter={(f) => { setFilter(f); setOffset(0); if (picked) loadRows(picked, 0, f, expanded, limit); }}
-                  onExpand={(col) => {
-                    const next = expanded.includes(col)
-                      ? expanded.filter((c) => c !== col)
-                      : [...expanded, col];
-                    setExpanded(next);
-                    if (picked) loadRows(picked, offset, filter, next, limit);
-                  }}
-                />
-              )}
             </div>
           </section>
         </div>

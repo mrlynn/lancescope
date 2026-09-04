@@ -58,9 +58,14 @@ epoch reads, how many loader workers the fragment split can feed, and the versio
 record in the run config. It reports the layout and nothing about the data — it
 cannot tell you whether your labels are right, and says so.
 
-### Rows, and a filter you can write in English
+### Browsing, and a filter you can write in English
 
-<img src="docs/assets/console-rows.png" alt="The rows tab on the segments table, showing a plain-English question box above an SQL predicate box, with rows listed below and a read cost of 8.2 KB across 3 IOs." width="100%">
+<img src="docs/assets/console-rows.png" alt="The query panel on the segments table, showing a plain-English question box above an SQL predicate box, with rows listed below and a read cost of 8.2 KB across 3 IOs." width="100%">
+
+The query panel opens by reading the first page, so looking at a table costs no
+clicks. Ask in English and the draft predicate lands in the filter box — the same
+box that completes column names and their values — for you to read before anything
+runs.
 
 Heavy columns — vectors, images, and Blob V2 columns holding the large data — are
 described from the schema rather than materialised. Browsing a table that holds
