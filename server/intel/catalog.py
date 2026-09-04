@@ -37,7 +37,7 @@ from server.intel.providers import (
 # the list about as fast as you can alt-tab.
 CACHE_TTL_S = 15.0
 
-_cache: dict[tuple, tuple[float, "ProviderModels"]] = {}
+_cache: dict[tuple, tuple[float, ProviderModels]] = {}
 
 
 @dataclass(frozen=True)
