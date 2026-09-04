@@ -7,7 +7,8 @@
  *  So the same list renders in two places — inline under the panel that owns each
  *  finding, and collected in Insights — from one fetch. */
 
-import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
+import { type ReactNode, useCallback, useEffect, useState } from "react";
 import Icon from "@/app/components/Icon";
 import { Empty } from "@/app/components/console/atoms";
 import { fmtBytes } from "@/app/lib/api";
@@ -185,6 +186,22 @@ export function InsightsTab({ d, table, ai }: {
   );
 }
 
+/** Where the provider, model and key live. The settings page reads its tab from the
+ *  query string, so this lands on the panel rather than on the page above it.
+ *
+ *  Every sentence here that names the model, or says one is missing, points at the
+ *  one screen that can change that — a model name the reader cannot act on is a
+ *  dead end, and the reader is usually reading it because they want it different. */
+function IntelLink({ children }: { children: ReactNode }) {
+  return (
+    <Link href="/console/settings?tab=intelligence"
+          className="underline underline-offset-2 hover:text-[var(--bright)]"
+          data-tip="Provider, model and key">
+      {children}
+    </Link>
+  );
+}
+
 /** A description of the table in a few sentences, written from what the console
  *  already knows and cached against the version it describes.
  *
@@ -204,7 +221,8 @@ function Summary({ table, ai, partial, onSpend }: {
     return (
       <p className="text-[12px] text-[var(--haze)] leading-relaxed mb-4">
         A provider would add a written summary here — the findings below need none.
-        {ai?.setup_hint ? ` ${ai.setup_hint}` : ""}
+        {ai?.setup_hint ? ` ${ai.setup_hint}` : ""}{" "}
+        <IntelLink>Configure one in settings</IntelLink>.
       </p>
     );
   }
@@ -232,8 +250,8 @@ function Summary({ table, ai, partial, onSpend }: {
             {busy ? "writing…" : "Describe this table"}
           </button>
           <span className="mono text-[10px] text-[var(--haze)]">
-            {ai.models_by_role.deep.id}, from the schema and the findings below —
-            never the rows
+            <IntelLink>{ai.models_by_role.deep.id}</IntelLink>, from the schema and the
+            findings below — never the rows
           </span>
         </div>
       )}
@@ -251,7 +269,10 @@ function Summary({ table, ai, partial, onSpend }: {
                       border: "1px solid rgb(var(--video-rgb) / 0.4)",
                       color: "var(--video)" }}>
           <Icon name="warning" size={14} />
-          <span>{state.error}{state.setup_hint ? ` — ${state.setup_hint}` : ""}</span>
+          <span>
+            {state.error}{state.setup_hint ? ` — ${state.setup_hint}` : ""}{" "}
+            <IntelLink>Check the provider settings</IntelLink>.
+          </span>
         </div>
       )}
 
