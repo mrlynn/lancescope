@@ -124,8 +124,6 @@ export type Capabilities = {
   provider: string;
   reason: string;
   models_by_role: { deep: ModelInfo; fast: ModelInfo };
-  installed_models: string[];
-  known_good_local: string[];
   tools_capable: boolean;
   key_source: string | null;
   host: string | null;
@@ -157,6 +155,47 @@ async function intel<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const getCapabilities = () => intel<Capabilities>("/capabilities");
+
+/** One suggestion in the model picker, carrying where it came from.
+ *
+ *  `source` is the honest part: `registry` is a model we ship a price for,
+ *  `installed` is pulled onto this machine, `endpoint` is one the server named when
+ *  asked. Only the first two can be shown with a price. */
+export type ModelOption = {
+  id: string;
+  source: "registry" | "installed" | "endpoint";
+  context: number | null;
+  input_usd_per_mtok: number | null;
+  output_usd_per_mtok: number | null;
+  priced: boolean;
+  priced_on: string | null;
+  tools: boolean;
+  note: string;
+  recommended_for: string[];
+};
+
+/** What a provider could be asked for — never what it may be limited to.
+ *
+ *  `free_text` is true for every provider, and the picker honours it: the list is
+ *  the help, and a model nobody here has heard of still has to be typeable. */
+export type ProviderModels = {
+  provider: string;
+  options: ModelOption[];
+  reachable: boolean;
+  reason: string;
+  free_text: boolean;
+  host: string | null;
+  priced_on: string;
+};
+
+/** `host` and `base_url` ask about the endpoint currently in the form, not the one
+ *  last saved — so a picker is useful before the Save button has been pressed. */
+export const getModels = (provider = "auto", host?: string, baseUrl?: string) => {
+  const q = new URLSearchParams({ provider });
+  if (host) q.set("host", host);
+  if (baseUrl) q.set("base_url", baseUrl);
+  return intel<ProviderModels>(`/models?${q}`);
+};
 
 export const runSelfTest = (role = "fast") =>
   intel<SelfTest>(`/selftest?role=${role}`, { method: "POST" });

@@ -29,6 +29,9 @@ class Model:
     structured_output: bool = True
     tools: bool = True
     note: str = ""
+    # Roles this model is the first thing to reach for. Advice for a picker, not a
+    # constraint: any model in the list can be chosen for either role.
+    recommended_for: tuple[str, ...] = ()
 
     @property
     def priced(self) -> bool:
@@ -45,6 +48,7 @@ class Model:
             "tools": self.tools,
             "priced_on": PRICED_ON if self.priced else None,
             "note": self.note,
+            "recommended_for": list(self.recommended_for),
         }
 
 
@@ -52,11 +56,11 @@ MODELS: dict[str, Model] = {
     m.id: m
     for m in (
         Model("claude-opus-5", "anthropic", 1_000_000, 5.0, 25.0,
-              note="default when a key is present"),
+              note="default when a key is present", recommended_for=("deep",)),
         Model("claude-sonnet-5", "anthropic", 1_000_000, 2.0, 10.0,
               note="cheaper default for high-volume translation"),
         Model("claude-haiku-4-5", "anthropic", 200_000, 1.0, 5.0,
-              note="cheapest translation path"),
+              note="cheapest translation path", recommended_for=("fast",)),
     )
 }
 

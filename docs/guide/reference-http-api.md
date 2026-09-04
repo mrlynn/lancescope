@@ -49,6 +49,7 @@ Optional. Every route answers with nothing configured, and says what is missing.
 | `GET` | `/intel/capabilities` | What the language layer is right now, and why it is that. |
 | `GET` | `/intel/meter` | Tokens and dollars spent by this process, beside the bytes it read. |
 | `POST` | `/intel/meter/reset` | — |
+| `GET` | `/intel/models` | What could be picked for this provider, and where each suggestion came from. |
 | `POST` | `/intel/selftest` | One real call, end to end, reported honestly. |
 | `DELETE` | `/intel/spend` | Forget the history. |
 | `GET` | `/intel/spend` | What the key has cost, broken down by day, by task and by model. |

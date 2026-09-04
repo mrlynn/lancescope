@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 
 from server import settings as cfg
 from server.intel import cache, registry, tasks
+from server.intel import catalog as intel_catalog
 from server.intel import config as intel_config
 from server.intel import findings as intel_findings
 from server.intel import ledger as intel_ledger
@@ -78,6 +79,24 @@ async def capabilities() -> JSONResponse:
     only way to know whether a daemon is up.
     """
     return JSONResponse(intel_config.resolve().as_dict())
+
+
+@router.get("/models")
+async def models(provider: str = "auto", host: str | None = None,
+                 base_url: str | None = None) -> JSONResponse:
+    """What could be picked for this provider, and where each suggestion came from.
+
+    A list, never a gate: `free_text` says so, and the settings page keeps the box you
+    can type into. Cheap by construction — the registry is in memory and the two
+    probes are metadata calls that spend no tokens — and cached for a few seconds so
+    a page that renders twice does not ask a local daemon twice.
+
+    `host` and `base_url` let a half-filled settings form ask about the endpoint in
+    the box rather than the one on disk. They are read and discarded; nothing here
+    writes settings.
+    """
+    return JSONResponse(
+        intel_catalog.models_for(provider, host=host, base_url=base_url).as_dict())
 
 
 @router.post("/selftest")
