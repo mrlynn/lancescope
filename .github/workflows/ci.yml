@@ -62,6 +62,43 @@ jobs:
       - run: npm run lint
       - run: npm run build
 
+  # The desktop shell. Five pull requests of Rust landed before anything was
+  # compiling it here, which meant `main` could go red for macOS users and stay
+  # green on this page — the one place a reviewer looks.
+  #
+  # macOS because that is the only target: `tauri.conf.json` bundles `app` and `dmg`
+  # and `capabilities` name macOS. Check and test rather than build: assembling the
+  # `.app` needs the PyInstaller sidecar, which needs the whole Python environment,
+  # and none of that is what breaks. What breaks is the Rust.
+  #
+  # `desktop/ui` is committed, so `tauri-build` finds a frontend directory and does
+  # not need `make ui` first.
+  desktop:
+    name: desktop shell
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: desktop/src-tauri
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+      # `tauri-build` checks that every path in `bundle.resources` exists, and the
+      # sidecar is PyInstaller output — gitignored, and minutes to build. Nothing
+      # below reads it; they compile Rust. An empty directory gets past the check.
+      - run: mkdir -p packaging/dist/lancescope-server
+        working-directory: .
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test
+      # Release too: the development server path is `cfg`'d out of it, so it is the
+      # profile that ships and a different one from the profile above.
+      - run: cargo check --release
+
   # The version matrix. A Lance reader is not universal, and `pylance>=3` in
   # pyproject.toml is a claim about eight major versions that nothing was checking.
   # This runs the same contract tests against each one, so the floor stays true as

@@ -16,6 +16,12 @@ RUFF := ruff@0.16.5
 # Reporting "docker not installed" there is worse than not looking: it tells you the
 # one check you cannot run locally is one you have, and quietly stops running it.
 # So look where it actually lives, and only then believe it is missing.
+# rustup edits shell startup files, so cargo is on the PATH of the shells it edited
+# and not necessarily this one. `desktop/build.sh` looks in the same places and for
+# the same reason.
+CARGO := $(shell command -v cargo 2>/dev/null || \
+    ls $(HOME)/.cargo/bin/cargo 2>/dev/null)
+
 DOCKER := $(shell command -v docker 2>/dev/null || \
   for d in "$$HOME/.docker/bin/docker" \
            /usr/local/bin/docker \
@@ -129,6 +135,24 @@ check:
 	uv run --only-group test python -m pytest -q
 	@echo "==> web"
 	cd web && npx tsc --noEmit && npm run lint && npm run build
+	@if [ -n "$(CARGO)" ]; then \
+		echo "==> desktop shell"; \
+		: "tauri-build checks that every path in bundle.resources exists, and the"; \
+		: "sidecar is PyInstaller output that is gitignored and takes minutes to"; \
+		: "make. None of these four commands reads it — they compile Rust — so an"; \
+		: "empty directory is enough to get past the check. `make sidecar` writes"; \
+		: "the real one here and is untouched by this."; \
+		mkdir -p packaging/dist/lancescope-server; \
+		cd desktop/src-tauri && \
+		$(CARGO) fmt --check && \
+		$(CARGO) clippy --all-targets -- -D warnings && \
+		$(CARGO) test -q && \
+		$(CARGO) check --release || exit 1; \
+	else \
+		echo "==> desktop shell  SKIPPED — no cargo on PATH or in ~/.cargo/bin."; \
+		echo "    CI checks it on macOS on every pull request. Only the shell is"; \
+		echo "    unchecked here; nothing else in this target depends on Rust."; \
+	fi
 	@if [ -n "$(DOCKER)" ] && $(DOCKER) info >/dev/null 2>&1; then \
 		echo "==> docker image"; \
 		PATH="$(DOCKER_BIN):$$PATH" \
