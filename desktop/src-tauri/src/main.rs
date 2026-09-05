@@ -47,6 +47,17 @@ const READY_TIMEOUT: Duration = Duration::from_secs(20);
 /// a stdout nobody is reading is the generic error toast in a different costume.
 const TAIL_LINES: usize = 40;
 
+/// The colour behind the window, including the strip the transparent title bar
+/// leaves above the page.
+///
+/// Nothing set this, so that strip was whatever the platform chose and did not
+/// match the page under it. This is `--ink` from `web/app/globals.css`, the light
+/// canvas — light rather than the system appearance, because the console's dark
+/// theme is opt-in and a machine set to dark still renders it light until somebody
+/// says otherwise. When the theme moves out of the browser's storage and into the
+/// settings file, this reads that instead.
+const STAGE: tauri::window::Color = tauri::window::Color(0xfa, 0xf7, 0xf5, 0xff);
+
 /// The child, kept so it can be killed. Tauri hands `AppHandle` around freely and
 /// the exit hook needs to reach this from a different thread than started it.
 struct Server(Mutex<Option<Child>>);
@@ -289,7 +300,35 @@ fn boot(handle: tauri::AppHandle) {
                 .min_inner_size(760.0, 560.0)
                 // The app's own chrome, rather than a browser's, is most of what
                 // makes this feel like an application instead of a tab.
+                //
+                // `Transparent` rather than `Overlay`, deliberately. Overlay is what
+                // puts HTML under the traffic lights, and it costs a title bar whose
+                // height varies by OS version, a drag region we would have to build,
+                // and a window that cannot be dragged while unfocused (tauri#4316).
+                // None of that buys anything the colour below does not.
                 .title_bar_style(tauri::TitleBarStyle::Transparent)
+                // The window already wears its name in the page's own header, so the
+                // system title is a second one saying the same thing.
+                .hidden_title(true)
+                .background_color(STAGE)
+                // The window is this server's console and nothing else.
+                //
+                // Without this, a link to the guide or to LanceDB navigates the app
+                // window away from the console with no back button to return it —
+                // present today, and the reason for the `opener` plugin. It is also
+                // what will keep `http://127.0.0.1:*` honest when this window is
+                // eventually granted a command: the pattern has to be a wildcard
+                // because the port is the kernel's, so the guarantee has to come
+                // from here instead.
+                .on_navigation(move |url| {
+                    let ours = url.scheme() == "http"
+                        && url.host_str() == Some("127.0.0.1")
+                        && url.port() == Some(port);
+                    if !ours {
+                        let _ = tauri_plugin_opener::open_url(url.as_str(), None::<&str>);
+                    }
+                    ours
+                })
                 .build();
 
                 // Only once the real window exists, so there is never a moment with
@@ -338,6 +377,32 @@ fn boot(handle: tauri::AppHandle) {
 
 fn main() {
     tauri::Builder::default()
+        // First, and it has to be: the point of this plugin is to decide whether
+        // this process should exist at all, and it can only do that before anything
+        // else has started. A second launch used to spawn a second sidecar on a
+        // second port, leaving two servers and two windows over one database.
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            // The window the user already has, brought forward — which is what they
+            // meant by double-clicking a second time.
+            for label in ["main", "splash"] {
+                if let Some(window) = app.get_webview_window(label) {
+                    let _ = window.unminimize();
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                    return;
+                }
+            }
+        }))
+        // Size and position, remembered. `splash` is skipped because it is 480x300
+        // and transient, and restoring the console's geometry onto it — or worse,
+        // saving its geometry over the console's — is how a workbench comes back
+        // the size of a progress dialog.
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_denylist(&["splash", "failure"])
+                .build(),
+        )
+        .plugin(tauri_plugin_opener::init())
         .manage(Server(Mutex::new(None)))
         .setup(|app| {
             let handle = app.handle().clone();
@@ -350,6 +415,7 @@ fn main() {
                 .inner_size(480.0, 300.0)
                 .resizable(false)
                 .center()
+                .background_color(STAGE)
                 // Decorations kept. A splash with no way to close it is a splash you
                 // have to reach Activity Monitor to escape, and the case this window
                 // exists for is the one where something is wrong.

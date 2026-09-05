@@ -9,7 +9,19 @@ rust-version = "1.77"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+# `devtools` in release too. Without it a shipped build has no inspector, which is
+# the one thing that would let somebody diagnose a window that came up wrong on a
+# machine this was never built on. It costs binary size and nothing else.
+tauri = { version = "2", features = ["devtools"] }
+# One process. A second launch finds the first and raises its window rather than
+# starting a second 475 MB sidecar on a second port.
+tauri-plugin-single-instance = "2"
+# The window comes back where it was left. Entirely Rust: it restores on ready and
+# saves on exit, and nothing in the page knows it exists.
+tauri-plugin-window-state = "2"
+# Opening a link in the user's browser rather than in this window. Called from Rust,
+# so the page is granted nothing.
+tauri-plugin-opener = "2"
 
 [profile.release]
 # A desktop app people download: size is a feature. These cost compile time and
@@ -18,4 +30,8 @@ opt-level = "s"
 lto = true
 codegen-units = 1
 strip = true
-panic = "abort"
+# `panic = "abort"` was here for size and has been removed. It was affordable while
+# the shell had no commands and nothing the page could reach; it stops being
+# affordable the moment one exists, because without unwinding a panic in a command
+# takes the whole application down instead of returning an error to the caller. The
+# four settings above are where the size argument actually lives.
