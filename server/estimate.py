@@ -44,7 +44,12 @@ from pathlib import Path
 
 import lance
 
-from server.catalog import Handle, fragment_blob_bytes, is_blob_field
+from server.catalog import (
+    Handle,
+    capabilities_for,
+    fragment_blob_bytes,
+    is_blob_field,
+)
 
 # Per data file, on top of the columns themselves: the footer, the column metadata
 # blocks, and the global buffers. Derived rather than guessed — on `moments` the
@@ -326,7 +331,7 @@ def _side_file_bytes(handle: Handle, blob_columns: set[str]) -> int | None:
     if len(blob_columns) != 1:
         return None
     uri = str(handle.uri)
-    if "://" in uri and not uri.startswith("file://"):
+    if not capabilities_for(uri).disk_split.ok:
         return None
     try:
         per_file = fragment_blob_bytes(Path(uri), handle.ds.version)

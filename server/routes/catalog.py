@@ -21,11 +21,12 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from server import compare, kiosk, query
+from server import compare, kiosk, query, sources
 from server import estimate as server_estimate
 from server.catalog import (
     Catalog,
     Handle,
+    capabilities_for,
     disk_usage,
     fragment_blob_bytes,
     is_blob_field,
@@ -93,10 +94,18 @@ async def runtime_report() -> JSONResponse:
     — which is when a reader most needs to know whether the console is empty
     because the database is empty or because the reader cannot see into it.
     """
-    # `kiosk` rides along rather than joining the runtime report itself, which
-    # describes the Lance reader and not the deployment around it. The console
-    # already fetches this route, so telling it here costs no second request.
-    return JSONResponse({**lance_runtime().as_dict(), "kiosk": kiosk.enabled()})
+    # `kiosk` and `sources` ride along rather than joining the runtime report
+    # itself, which describes the Lance reader and not the deployment around it. The
+    # console already fetches this route, so telling it here costs no second request.
+    #
+    # `sources` includes adapters that failed to load, which is the whole reason it
+    # is worth reporting: an installed plugin that did not register is otherwise
+    # indistinguishable from one that was never installed.
+    return JSONResponse({
+        **lance_runtime().as_dict(),
+        "kiosk": kiosk.enabled(),
+        "sources": [r.as_dict() for r in sources.loaded()],
+    })
 
 
 # ------------------------------------------------------------------------- listing
@@ -1087,7 +1096,14 @@ async def table(name: str) -> JSONResponse:
 
     # Cached against the dataset version: the UI hits this on every table click and
     # the walk is O(files in the table).
-    usage = disk_usage(h.uri, generation=ds.version)
+    #
+    # Guarded, because the walk is `Path.rglob` and a remote root has nothing to
+    # walk. Unguarded it returned zeros — `{blob_bytes: 0, meta_bytes: 0, ratio: 0}`
+    # — which is a measurement that was never taken, reported in the shape of one
+    # that was. `server/intel/runconfig.py` has always asked this question the right
+    # way round; this is the same guard, in the route that shows the number.
+    disk = capabilities_for(h.uri).disk_split
+    usage = disk_usage(h.uri, generation=ds.version) if disk.ok else None
 
     return JSONResponse({
         "name": name,
@@ -1106,7 +1122,11 @@ async def table(name: str) -> JSONResponse:
             "num_indices": len(ds.list_indices()),
         },
         "manifest_bytes": _int(meta, "total_files_size"),
-        "on_disk": usage.as_dict(),
+        "on_disk": usage.as_dict() if usage is not None else None,
+        # Null and a reason, never zeros. A consumer that cannot tell "no blob
+        # bytes" from "nobody counted" will answer the wrong question confidently —
+        # the training panel reads this to decide whether a table is heavy.
+        "on_disk_note": None if usage is not None else disk.reason,
         "read_bytes": d.read_bytes,
         "read_iops": d.read_iops,
     })

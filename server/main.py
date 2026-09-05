@@ -24,7 +24,7 @@ from fastapi.responses import JSONResponse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "ingest"))
 
-from server import credentials, hf, kiosk
+from server import credentials, kiosk, sources
 from server import settings as cfg
 from server.catalog import Catalog
 from server.routes import catalog as catalog_routes
@@ -108,7 +108,7 @@ async def upstream_throttled(request: Request, exc: Exception) -> JSONResponse:
     Re-raised when the message is anything else, because a missing file or a bad
     permission is a real failure and swallowing it here would hide it.
     """
-    if not hf.is_throttled(exc):
+    if not sources.is_throttled(exc):
         raise exc
     return JSONResponse(
         status_code=503,

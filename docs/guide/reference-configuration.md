@@ -28,6 +28,53 @@ Two sources, one rule: **the environment wins.** A deployment that pins a root o
 | `LANCESCOPE_CACHE` | cached answers (default `~/.cache/lancescope`) |
 | `LANCESCOPE_SPEND_CEILING` | dollars, per process. Refuses before spending past it |
 | `API_ORIGIN` | where the web app proxies `/api/*` |
+| `LANCESCOPE_NO_PLUGINS` | refuse to load third-party source adapters. Also implied by kiosk mode |
+
+## Storage credentials
+
+Read from the environment, or from a `.cred` file beside the project root (override the location with `LANCESCOPE_CRED_FILE`), written as `KEY=value` lines. The environment wins, and every surface that resolves one reports which of the two it came from — never the value.
+
+These are exported into the process environment at startup rather than passed along, because the libraries that need them read the environment and nowhere else. That is also what makes them consistent: the same variable resolves the listing and the open, so a store that lists is a store that opens.
+
+| variable | for |
+| --- | --- |
+| `HF_TOKEN` | HuggingFace, for gated or private datasets and a higher rate limit |
+| `HUGGING_FACE_HUB_TOKEN` | the same, under the name the Hub's own tools use |
+| `AWS_ACCESS_KEY_ID` | S3, and any S3-compatible store |
+| `AWS_SECRET_ACCESS_KEY` | S3, and any S3-compatible store |
+| `AWS_SESSION_TOKEN` | S3 with temporary credentials |
+| `AWS_REGION` | S3 |
+| `AWS_DEFAULT_REGION` | S3, if `AWS_REGION` is unset |
+| `AWS_ENDPOINT` | an S3-compatible store — MinIO, R2, B2 |
+| `AWS_PROFILE` | a named profile from the shared AWS config |
+| `AWS_ALLOW_HTTP` | an S3-compatible store reached over plain HTTP |
+| `GOOGLE_APPLICATION_CREDENTIALS` | Google Cloud Storage, path to a key file |
+| `GOOGLE_SERVICE_ACCOUNT` | Google Cloud Storage, path to a service account |
+| `AZURE_STORAGE_ACCOUNT_NAME` | Azure — required for `az://`, which carries no account name of its own |
+| `AZURE_STORAGE_ACCOUNT_KEY` | Azure |
+| `AZURE_STORAGE_SAS_KEY` | Azure, with a shared access signature |
+| `AZURE_STORAGE_TOKEN` | Azure, with a bearer token |
+| `LANCEDB_API_KEY` | LanceDB Cloud and Enterprise |
+| `LANCEDB_REGION` | LanceDB Cloud region (default `us-east-1`) |
+| `LANCEDB_HOST_OVERRIDE` | replaces the LanceDB endpoint entirely, for Enterprise |
+
+S3-compatible stores — MinIO, Cloudflare R2, Backblaze B2 — need no scheme of their own: point `AWS_ENDPOINT` at them and use `s3://`.
+
+## Source adapters
+
+Which schemes this build can list. A scheme with no adapter is saved and reported as unbrowsable rather than silently listing nothing; adding one is an installable package, documented in [Write a source adapter](/docs/howto-write-a-source).
+
+| scheme | listed through |
+| --- | --- |
+| *(none — a local path)* | a bounded directory walk |
+| `hf://` | the HuggingFace Hub API |
+| `s3://` | Lance's object store |
+| `gs://` | Lance's object store |
+| `az://` | Lance's object store |
+| `abfss://` | Lance's object store |
+| `db://` | a Lance namespace, over REST |
+
+`GET /catalog/runtime` reports the same list at run time, including any adapter that failed to load and why.
 
 ## The settings file
 

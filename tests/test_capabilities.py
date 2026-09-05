@@ -18,11 +18,18 @@ from server.catalog import (
     capabilities_for,
 )
 
-REMOTE = ["s3://bucket/tables", "gs://bucket/tables", "db://team/warehouse",
-          "az://container/tables"]
+# A scheme nothing installed serves. Deliberately not a real one: `s3://` used to
+# stand in for "remote and unbrowsable" and stopped meaning that the moment an
+# object-store source shipped, which quietly turned these into tests of nothing.
+# What they are actually about is a root with no adapter behind it.
+UNSERVED = ["widget://host/db", "nosuchstore://team/warehouse"]
+
+# Cloud object stores, which are listed through Lance's own object store.
+LISTABLE = ["s3://bucket/tables", "gs://bucket/tables", "az://container/tables",
+            "abfss://c@acct.dfs.core.windows.net/tables"]
 
 
-@pytest.mark.parametrize("uri", REMOTE)
+@pytest.mark.parametrize("uri", UNSERVED)
 def test_a_remote_uri_cannot_be_discovered(uri):
     caps = capabilities_for(uri)
     assert caps.remote is True
@@ -31,7 +38,7 @@ def test_a_remote_uri_cannot_be_discovered(uri):
     assert "adapter" in caps.discover.reason
 
 
-@pytest.mark.parametrize("uri", REMOTE)
+@pytest.mark.parametrize("uri", UNSERVED)
 def test_a_remote_uri_is_unverified_rather_than_broken(uri):
     """Three states, not two.
 
@@ -47,6 +54,25 @@ def test_a_remote_uri_is_unverified_rather_than_broken(uri):
     assert caps.disk_split.state == UNSUPPORTED
 
 
+@pytest.mark.parametrize("uri", LISTABLE)
+def test_an_object_store_can_be_listed_but_not_weighed(uri):
+    """What shipping an adapter changes, and what it does not.
+
+    Listing became possible because Lance's object store can do it. The byte figures
+    did not: they are claimed only where they have been measured, and no read against
+    a live bucket has been. `disk_split` stays impossible either way — it comes from
+    walking a directory, and a bucket is not one.
+    """
+    caps = capabilities_for(uri)
+    assert caps.remote is True
+    assert caps.discover.state == AVAILABLE
+    assert caps.inspect.state == UNVERIFIED
+    assert caps.io_meter.state == UNVERIFIED
+    assert caps.column_bytes.state == UNVERIFIED
+    assert caps.disk_split.state == UNSUPPORTED
+    assert caps.disk_split.reason
+
+
 def test_a_local_path_can_do_everything(corpus):
     caps = capabilities_for(corpus)
     assert caps.remote is False
@@ -55,7 +81,7 @@ def test_a_local_path_can_do_everything(corpus):
 
 
 def test_discovery_on_a_remote_root_returns_nothing_and_says_why(catalog):
-    cat = Catalog("s3://bucket/tables")
+    cat = Catalog("widget://host/db")
     assert cat.discover() == []
     # The empty list is not the answer; the capability is. A caller that cannot tell
     # them apart is the bug this exists to prevent.
@@ -68,7 +94,7 @@ def test_the_listing_names_the_state_instead_of_showing_nothing(api, catalog):
 
     from server.routes import catalog as routes
 
-    remote = Catalog("s3://bucket/tables")
+    remote = Catalog("widget://host/db")
     app = FastAPI()
     routes.bind(remote)
     app.include_router(routes.router)
@@ -97,7 +123,7 @@ def test_probing_a_remote_uri_explains_rather_than_ticking(catalog, settings_fil
     settings_routes.bind(catalog)
     app.include_router(settings_routes.router)
     body = TestClient(app).post("/settings/connections/probe",
-                                json={"uri": "s3://bucket/tables"}).json()
+                                json={"uri": "widget://host/db"}).json()
 
     assert body["reachable"] is None          # never claimed to have checked
     assert body["capabilities"]["remote"] is True

@@ -17,6 +17,10 @@ calling `huggingface_hub`, which reads `HF_TOKEN` from the environment and nowhe
 else. Without the export, a private dataset would list and then fail to open, which
 is a worse outcome than not working at all.
 
+The cloud storage names are here for the same reason and with less ceremony: Lance's
+`object_store` reads them directly, for both the listing and the open, and nothing in
+this repository ever holds one of those values.
+
 Nothing here logs a value, and `source()` reports names only.
 """
 
@@ -27,8 +31,28 @@ from pathlib import Path
 
 CRED_FILE = "LANCESCOPE_CRED_FILE"
 
-# Read from `.cred` and exported so that Lance's own Hub access sees them too.
-EXPORTED = ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN")
+# Read from `.cred` and exported so that Lance's own storage access sees them too.
+#
+# Every name here is read by a Rust library rather than by this process: the Hub
+# token by `huggingface_hub`, the rest by `object_store`, which both the listing in
+# `server/sources/objectstore.py` and the open in `lance.dataset` go through. That
+# shared path is the point — a bucket that lists is a bucket that opens, because the
+# same variable resolved both.
+EXPORTED = (
+    "HF_TOKEN", "HUGGING_FACE_HUB_TOKEN",
+    # AWS, and every S3-compatible store: MinIO, R2 and Backblaze are an
+    # `AWS_ENDPOINT` away rather than a scheme of their own.
+    "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN",
+    "AWS_REGION", "AWS_DEFAULT_REGION", "AWS_ENDPOINT", "AWS_PROFILE",
+    "AWS_ALLOW_HTTP",
+    # Google Cloud Storage: application default credentials, or a service account.
+    "GOOGLE_APPLICATION_CREDENTIALS", "GOOGLE_SERVICE_ACCOUNT",
+    # Azure. `az://container/path` carries no account name, so unless the root is
+    # written out as `abfss://container@account.dfs.core.windows.net/...` the name
+    # has to come from here — measured: without it the store refuses at construction.
+    "AZURE_STORAGE_ACCOUNT_NAME", "AZURE_STORAGE_ACCOUNT_KEY",
+    "AZURE_STORAGE_SAS_KEY", "AZURE_STORAGE_TOKEN",
+)
 
 
 def cred_path() -> Path:

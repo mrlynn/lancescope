@@ -9,15 +9,16 @@ import type {
 // ------------------------------------------------------------------- schema
 
 export function SchemaTab({ d }: { d: TableDetail }) {
-  const { blob_bytes, meta_bytes, ratio, files } = d.on_disk;
+  // The split comes from walking the directory, and a remote root has none to walk.
+  // The server sends null and a reason rather than zeros, because rendering those as
+  // "0 B of ordinary Lance files" states a measurement that was never taken — on a
+  // console whose whole claim is honest byte accounting, that is the one thing it
+  // must not do.
+  const measured = d.on_disk !== null;
+  const { blob_bytes, meta_bytes, ratio, files } =
+    d.on_disk ?? { blob_bytes: 0, meta_bytes: 0, ratio: 0, files: 0 };
   const total = Math.max(blob_bytes + meta_bytes, 1);
   const metaPct = (meta_bytes / total) * 100;
-  // The split comes from walking the directory, and a remote root has none to walk,
-  // so the numbers arrive as zeros. Rendering them as "0 B of ordinary Lance files"
-  // states a measurement that was never taken — on a console whose whole claim is
-  // honest byte accounting, that is the one thing it must not do. A real table
-  // always has at least one file.
-  const measured = files > 0;
 
   return (
     <>
@@ -60,10 +61,8 @@ export function SchemaTab({ d }: { d: TableDetail }) {
       <Eyebrow>{measured ? `On disk — ${files.toLocaleString()} files` : "On disk"}</Eyebrow>
       {!measured ? (
         <p className="text-[12px] text-[var(--haze)] leading-relaxed">
-          Not measured. The blob and metadata split comes from walking the directory
-          a table lives in, and this one is not in a directory this console can walk.
-          Everything above was read from the table itself, and the byte costs are
-          real; only this panel is missing.
+          Not measured. {d.on_disk_note} Everything above was read from the table
+          itself, and the byte costs are real; only this panel is missing.
         </p>
       ) : blob_bytes > 0 ? (
         <>
