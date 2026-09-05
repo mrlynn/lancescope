@@ -22,6 +22,15 @@ tauri-plugin-window-state = "2"
 # Opening a link in the user's browser rather than in this window. Called from Rust,
 # so the page is granted nothing.
 tauri-plugin-opener = "2"
+# The folder picker behind File > Open. Called from Rust, never granted to the page:
+# the page gets a command with no arguments if it ever gets one at all, and this
+# plugin's own commands would let a caller compose the dialog itself.
+tauri-plugin-dialog = "2"
+
+# Reading the settings file the server owns, to build Open Recent from it. Already
+# in the graph as one of Tauri's own dependencies; named here because this crate
+# uses it directly.
+serde_json = "1"
 
 [profile.release]
 # A desktop app people download: size is a feature. These cost compile time and
