@@ -182,7 +182,7 @@ less.
 
 `tauri.conf.json` does **not** set `createUpdaterArtifacts`, and should not. That
 option makes the bundler write the update tarball during the build — which is
-before the 108 Mach-O binaries inside are signed, before the entitlements are
+before the Mach-O binaries inside are signed, before the entitlements are
 reapplied, before notarisation and before the ticket is stapled. It would ship an
 update Gatekeeper refuses on arrival, which is worse than shipping none.
 

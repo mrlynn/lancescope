@@ -213,6 +213,32 @@ EOF
     echo "Nothing was built."
     exit 1
   fi
+
+  # Sign something, rather than checking that a password was supplied.
+  #
+  # The first version of this checked the variables were set and called that a
+  # preflight — which is the exact failure this block exists to prevent, and the
+  # comment above says so. It cost a real run to find out: 151 binaries signed, a
+  # notarisation accepted, the ticket stapled, and then "Wrong password for that
+  # key" at the last step. Forty minutes to learn something a throwaway file
+  # answers in under a second.
+  PROBE=$(mktemp -d)/probe
+  echo "preflight" > "$PROBE"
+  if ! npx --yes @tauri-apps/cli@2.11.4 signer sign "$PROBE" >/dev/null 2>&1; then
+    echo
+    echo "That key and password do not sign. Usually one of:"
+    echo "  - TAURI_SIGNING_PRIVATE_KEY_PASSWORD is not the password the key was"
+    echo "    generated with."
+    echo "  - TAURI_SIGNING_PRIVATE_KEY holds a path rather than the key itself;"
+    echo "    the variable for a path is TAURI_SIGNING_PRIVATE_KEY_PATH."
+    echo "  - the secret picked up a stray newline on its way into CI."
+    echo
+    echo "Nothing was built."
+    rm -rf "$(dirname "$PROBE")"
+    exit 1
+  fi
+  rm -rf "$(dirname "$PROBE")"
+  echo "    key and password verified"
   UPDATER=1
 else
   echo "==> no update signing key; building the app and disk image only"

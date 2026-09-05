@@ -1,7 +1,7 @@
 # The signed, notarised DMG, built from a tag.
 #
 # Everything here already worked on a laptop: desktop/sign.sh does the build, the
-# deep signing of all ~81 nested Mach-O files, the notarisation and the staple.
+# deep signing of every nested Mach-O file, the notarisation and the staple.
 # What CI adds is a keychain that does not exist yet, a bound on how long Apple
 # gets, and a release to upload to. The order of the steps is load-bearing —
 # see the comments, each of which is a way this fails silently.
