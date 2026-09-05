@@ -96,7 +96,10 @@ fn server_command(app: &tauri::AppHandle) -> Result<Command, String> {
 
     let exe = app
         .path()
-        .resolve("server/lancescope-server", tauri::path::BaseDirectory::Resource)
+        .resolve(
+            "server/lancescope-server",
+            tauri::path::BaseDirectory::Resource,
+        )
         .map_err(|e| format!("cannot locate the bundled server: {e}"))?;
 
     if !exe.exists() {
@@ -178,7 +181,9 @@ fn start_server(
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
         }
         if let Ok(Some(status)) = child.try_wait() {
-            return Err(format!("the server stopped before it was ready ({status})."));
+            return Err(format!(
+                "the server stopped before it was ready ({status})."
+            ));
         }
         if Instant::now() >= deadline {
             let _ = child.kill();
@@ -213,7 +218,11 @@ fn wait_until_ready(port: u16) -> bool {
         if std::net::TcpStream::connect(&addr).is_ok() {
             return true;
         }
-        let interval = if start.elapsed() < Duration::from_secs(1) { 25 } else { 120 };
+        let interval = if start.elapsed() < Duration::from_secs(1) {
+            25
+        } else {
+            120
+        };
         std::thread::sleep(Duration::from_millis(interval));
     }
     false
@@ -223,7 +232,13 @@ fn wait_until_ready(port: u16) -> bool {
 /// the user nothing; this tells them what happened, and what the server said on its
 /// way out.
 fn failure_page(message: &str, tail: &Tail) -> String {
-    let said = tail.lock().unwrap().iter().cloned().collect::<Vec<_>>().join("\n");
+    let said = tail
+        .lock()
+        .unwrap()
+        .iter()
+        .cloned()
+        .collect::<Vec<_>>()
+        .join("\n");
     let said = if said.trim().is_empty() {
         "It printed nothing at all.".to_string()
     } else {
@@ -262,7 +277,9 @@ fn failure_page(message: &str, tail: &Tail) -> String {
 }
 
 fn escape(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 /// Everything that takes time, off the thread that has to stay responsive.
@@ -377,7 +394,9 @@ fn boot(handle: tauri::AppHandle) {
                     &handle,
                     "failure",
                     WebviewUrl::App(
-                        format!("data:text/html,{}", urlencoding(&page)).parse().unwrap(),
+                        format!("data:text/html,{}", urlencoding(&page))
+                            .parse()
+                            .unwrap(),
                     ),
                 )
                 .title("LanceScope")

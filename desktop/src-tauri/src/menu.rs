@@ -76,7 +76,10 @@ fn parse_recents(text: &str) -> Vec<Recent> {
         .iter()
         .filter_map(|c| {
             Some((
-                c.get("last_used").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                c.get("last_used")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
                 Recent {
                     id: c.get("id")?.as_str()?.to_string(),
                     label: c.get("label")?.as_str()?.to_string(),
@@ -190,8 +193,7 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
             // reasonably be called `lance` and the label alone would not say which.
             let text = format!("{}  —  {}", connection.label, connection.uri);
             recent = recent.item(
-                &MenuItemBuilder::with_id(format!("recent:{}", connection.id), text)
-                    .build(app)?,
+                &MenuItemBuilder::with_id(format!("recent:{}", connection.id), text).build(app)?,
             );
         }
     }
@@ -339,7 +341,6 @@ fn complain(app: &AppHandle, why: &str) {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -380,7 +381,8 @@ mod tests {
 
     #[test]
     fn an_entry_missing_what_it_needs_is_skipped_not_fatal() {
-        let partial = r#"{"connections": [{"label": "no id"}, {"id": "ok", "label": "L", "uri": "/u"}]}"#;
+        let partial =
+            r#"{"connections": [{"label": "no id"}, {"id": "ok", "label": "L", "uri": "/u"}]}"#;
         let got: Vec<_> = parse_recents(partial).into_iter().map(|r| r.id).collect();
         assert_eq!(got, ["ok"]);
     }
