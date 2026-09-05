@@ -96,7 +96,11 @@ export default function TableRail({
   const remainder = grouped ? matches.filter((t) => !shortcut.has(t.name)) : [];
 
   return (
-    <nav className="w-full lg:w-[262px] shrink-0">
+    // No width of its own. It used to be a flex child that owned one, and kept the
+    // declaration after moving into a pane that already has it — so a 262px rail sat
+    // inside a 262px pane whose padding leaves 222px, and every card overflowed by
+    // exactly the padding. `min-w-0` so the truncation below can fire.
+    <nav className="w-full min-w-0">
       <div className="relative mb-4">
         <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--dim)] pointer-events-none">
           <Icon name="search" size={14} />
@@ -218,23 +222,30 @@ function Row({ t, on, pinned, onPick, onPin }: {
         ? { borderColor: "var(--video)", background: "rgb(var(--video-rgb) / 0.09)" }
         : { borderColor: "var(--rule)" }}
     >
-      <button onClick={onPick} className="w-full text-left pl-3 pr-9 py-2.5">
-        <span className="flex items-center gap-2 mb-1">
-          <span style={{ color: on ? "var(--video)" : "var(--haze)" }}>
-            <Icon name="table" size={13} />
+      <button onClick={onPick} className="w-full min-w-0 text-left pl-2.5 pr-8 py-2">
+        <span className="flex items-center gap-1.5 min-w-0">
+          <span className="shrink-0" style={{ color: on ? "var(--video)" : "var(--haze)" }}>
+            <Icon name="table" size={12} />
           </span>
-          <span className="mono text-[13px] truncate"
+          {/* `min-w-0` on both the flex item and its parent, or `truncate` never
+              fires and a long table name pushes the card wider than the rail. */}
+          <span className="mono text-[12px] truncate min-w-0"
                 style={{ color: on ? "var(--video)" : "var(--bright)" }}>
             {t.name}
           </span>
         </span>
-        <span className="mono block text-[10px] text-[var(--haze)] pl-[21px]">
+        {/* Wraps rather than truncates. The hanging indent is gone, which buys back
+            21px, but `937,957 rows · 11 cols · v4` is still the widest thing this
+            rail carries — and cutting it loses the version, which is the part the
+            reader is most likely to be checking. Two short lines is the cheaper
+            trade at 10px. */}
+        <span className="mono block text-[10px] text-[var(--haze)] leading-snug mt-0.5">
           {t.rows.toLocaleString()} rows · {t.columns} cols · v{t.version}
         </span>
         {t.blob_columns.length > 0 && (
-          <span className="mono flex items-center gap-1.5 text-[10px] mt-1 pl-[21px]"
+          <span className="mono flex items-center gap-1 text-[10px] mt-0.5 truncate"
                 style={{ color: "var(--video)" }}>
-            <Icon name="fragments" size={10} />
+            <Icon name="fragments" size={9} />
             {t.blob_columns.length} blob column{t.blob_columns.length === 1 ? "" : "s"}
           </span>
         )}
@@ -247,7 +258,7 @@ function Row({ t, on, pinned, onPick, onPin }: {
         aria-label={pinned ? `Unpin ${t.name}` : `Pin ${t.name}`}
         data-tip={pinned ? "Unpin" : "Pin"}
         data-tip-side="left"
-        className={`absolute right-1.5 top-1.5 w-6 h-6 grid place-items-center rounded-sm
+        className={`absolute right-1 top-1 w-6 h-6 grid place-items-center rounded-sm
                     transition-opacity hover:text-[var(--index)]
                     ${pinned ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100"}`}
         style={{ color: pinned ? "var(--index)" : "var(--haze)" }}

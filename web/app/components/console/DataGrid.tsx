@@ -16,6 +16,7 @@
  *  rows already read, which is the only honest thing a client-side grid can say. */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import Popover from "@/app/components/console/shell/Popover";
 import Icon from "@/app/components/Icon";
@@ -451,7 +452,15 @@ function RowPanel({
     return () => { body.style.overflow = prev; };
   }, []);
 
-  return (
+  // Rendered into the document rather than where it sits in the tree.
+  //
+  // `.console-shell` is `position: relative; z-index: 10`, which makes it a stacking
+  // context — so this panel's `z-50` is fifty *within the shell*, and the centre
+  // pane's own scrollbar was being composited above it. Measured: the pane's right
+  // edge at 940 with a 10px scrollbar, the panel starting at 720, and the scrollbar
+  // painted across the panel's text. Portalling puts the panel outside that context,
+  // which is the same fix the dropdowns needed and for a related reason.
+  return createPortal(
     <>
       <div className="fixed inset-0 z-40" style={{ background: "rgb(0 0 0 / 0.28)" }}
            onClick={onClose} />
@@ -531,7 +540,8 @@ function RowPanel({
           )}
         </div>
       </aside>
-    </>
+    </>,
+    document.body,
   );
 }
 
