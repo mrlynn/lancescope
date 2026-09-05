@@ -178,15 +178,25 @@ fi
 # is absent — which in CI is a hang rather than a failure, so it is required
 # alongside the key rather than left to be discovered.
 UPDATER=0
-if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}${TAURI_SIGNING_PRIVATE_KEY_PATH:-}" ]; then
   echo "==> checking the update signing key"
   : "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD?set it too — tauri signer prompts without \
 it, and a prompt in CI is a hang rather than a failure}"
-  # The key is either a path or the key itself; both are what the signer accepts.
-  if [ -f "$TAURI_SIGNING_PRIVATE_KEY" ]; then
-    echo "    key file $TAURI_SIGNING_PRIVATE_KEY"
+  # Two variables, and they are not interchangeable: the signer reads
+  # `TAURI_SIGNING_PRIVATE_KEY` as the key itself and
+  # `TAURI_SIGNING_PRIVATE_KEY_PATH` as a file holding it. Both are accepted here
+  # because both are what somebody will have — a path on the machine that generated
+  # the key, and the contents in a CI secret, where a file does not exist.
+  #
+  # Neither is passed on the command line. `signer sign` reads both from the
+  # environment itself, and handing it the wrong one under `-f` would make it treat
+  # a key as a filename and fail with a message about a missing file.
+  if [ -n "${TAURI_SIGNING_PRIVATE_KEY_PATH:-}" ]; then
+    [ -f "$TAURI_SIGNING_PRIVATE_KEY_PATH" ] \
+      || { echo "no key file at $TAURI_SIGNING_PRIVATE_KEY_PATH"; exit 1; }
+    echo "    key file $TAURI_SIGNING_PRIVATE_KEY_PATH"
   else
-    echo "    key supplied inline"
+    echo "    key supplied in the environment"
   fi
   PUBKEY=$(python3 - <<'EOF'
 import json, pathlib, sys
@@ -508,8 +518,7 @@ if [ -n "${APPLE_ID:-}${NOTARY_PROFILE:-}" ]; then
     # From the parent, so the archive holds `LanceScope.app/...` — the updater strips
     # exactly one leading component when it unpacks.
     ( cd "$(dirname "$APP")" && tar -czf "$TARBALL" "$(basename "$APP")" )
-    npx --yes @tauri-apps/cli@2.11.4 signer sign -f "$TAURI_SIGNING_PRIVATE_KEY" \
-      "$TARBALL" >/dev/null \
+    npx --yes @tauri-apps/cli@2.11.4 signer sign "$TARBALL" >/dev/null \
       || { echo "the update artifact could not be signed"; exit 1; }
     [ -f "$TARBALL.sig" ] || { echo "signer produced no .sig beside the tarball"; exit 1; }
     echo "    $(basename "$TARBALL") and its signature"

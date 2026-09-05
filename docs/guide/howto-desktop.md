@@ -144,15 +144,30 @@ npx @tauri-apps/cli@2.11.4 signer generate -w ~/.lancescope-updater.key
 ```
 
 The **public** half goes in `desktop/src-tauri/tauri.conf.json` under
-`plugins.updater.pubkey`. The **private** half never leaves your machine or the
-repository's secrets — put it in `TAURI_SIGNING_PRIVATE_KEY` and its password in
-`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, as GitHub Actions secrets for CI and as
-environment variables locally.
+`plugins.updater.pubkey`, and is committed — it is public by design, and every
+installed copy carries it in order to check what it is offered.
+
+The **private** half never leaves your machine or the repository's secrets. Two
+variables name it and they are not interchangeable:
+
+| variable | holds |
+| --- | --- |
+| `TAURI_SIGNING_PRIVATE_KEY_PATH` | a path to the key file |
+| `TAURI_SIGNING_PRIVATE_KEY` | the key itself, as a string |
+
+Locally you have a file, so:
 
 ```bash
-TAURI_SIGNING_PRIVATE_KEY=~/.lancescope-updater.key \
+TAURI_SIGNING_PRIVATE_KEY_PATH=~/.lancescope-updater.key \
 TAURI_SIGNING_PRIVATE_KEY_PASSWORD=... \
 ./desktop/sign.sh
+```
+
+In CI there is no file, so the secret holds the contents:
+
+```bash
+gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.lancescope-updater.key
+gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD
 ```
 
 Lose the private key and no copy anybody has installed can ever be updated again,
