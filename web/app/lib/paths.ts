@@ -179,6 +179,11 @@ export const PATHS: Path[] = [
         why: "What that layer costs and what it caches, because a feature that "
           + "spends money should say how much.",
       },
+      {
+        slug: "howto-write-a-source",
+        why: "Teach it a store it does not ship support for. Five methods and one "
+          + "entry point, on the same terms the built-in adapters use.",
+      },
     ],
   },
 ];

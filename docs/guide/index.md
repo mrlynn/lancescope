@@ -22,13 +22,21 @@ number next to whatever you just did.
 byte cost of each read shown as you go. Describing 2.65 GB of video costs 23.8 KB and
 opens none of it.
 
+**Reads it wherever it is.** A local directory, the datasets LanceDB publishes on
+HuggingFace, a bucket in S3, Google Cloud Storage or Azure, or a LanceDB Cloud
+database. Measured against a real bucket: the byte counts are the same as on disk and
+only the latency differs. A store nothing installed can list is saved and said to be
+unbrowsable rather than shown as an empty database — and adding support is an
+installable package, not a wait.
+
 **Answers "why is this slow".** Run a scalar, full-text, vector or hybrid search, see
 which access path Lance chose, what it read, and the script that reproduces it
 elsewhere. Compare two versions of a table and run the same query against both.
 
-**Says what it already knows.** Seven rules over metadata — an unindexed vector
-column, small-file counts that would be misleading to act on, tombstone debt — each
-carrying the numbers it was derived from. No model is involved in any of them.
+**Says what it already knows.** Ten rules over metadata — an unindexed vector column,
+small-file counts that would be misleading to act on, tombstone debt, a fragment split
+too coarse to feed a loader's workers — each carrying the numbers it was derived from.
+No model is involved in any of them.
 
 **Adds language, optionally.** With a local model or an API key it will translate a
 question into a filter and describe a table in a few sentences. Every response reports
@@ -48,8 +56,9 @@ Lance-aware evidence rather than generic metadata.
 Four kinds of page, because four different questions bring people here.
 
 - **Start here** — one path from nothing to a real answer.
-- **How to** — a specific job, done. Connecting a database, diagnosing a query,
-  enabling the language layer, pointing an agent at it.
+- **How to** — a specific job, done. Connecting a database wherever it lives,
+  diagnosing a query, enabling the language layer, pointing an agent at it, teaching
+  it a store it does not ship support for.
 - **Reference** — precise and complete. Every route, every rule, every setting.
   These pages are **generated from the code**, so they cannot drift from it.
 - **Why it works this way** — the reasoning. Read these when a decision looks odd;
