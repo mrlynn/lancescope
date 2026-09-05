@@ -24,7 +24,7 @@ from fastapi.responses import JSONResponse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "ingest"))
 
-from server import credentials, kiosk, sources
+from server import credentials, kiosk, progress, sources
 from server import settings as cfg
 from server.catalog import Catalog
 from server.routes import catalog as catalog_routes
@@ -37,8 +37,10 @@ from server.routes import settings as settings_routes
 # Before the catalog resolves: Lance reads `HF_TOKEN` from the environment when it
 # opens an `hf://` dataset, so a token that only exists in `.cred` has to be there by
 # the time the first table is opened.
+progress.stage("credentials", "Reading stored credentials")
 _ARMED = credentials.arm()
 
+progress.stage("catalog", "Opening the database")
 ROOT = cfg.resolve_root(cfg.load())
 # Empty when nothing is configured — deliberately not `Path()`, which is the
 # working directory, and for an app the user double-clicked that is `/`.

@@ -188,17 +188,32 @@ def build_app(ui: Path | None):
 
 
 def main() -> int:
-    import uvicorn
-
     # Frozen, stdout is a pipe and therefore block buffered, so everything this
     # prints arrives when the process ends. The parent reads this stream to learn
     # the port and to show startup progress; both want it a line at a time.
     sys.stdout.reconfigure(line_buffering=True)
 
+    from server import progress
+
+    # Narrate only when a parent asked. `LANCESCOPE_WATCH_PARENT` says there is one;
+    # it is set by the desktop shell and by nothing else.
+    if os.environ.get("LANCESCOPE_WATCH_PARENT") == "1":
+        progress.arm()
+
+    # Said before the import below rather than after it, because that import *is* the
+    # wait: it unpacks a frozen Python and pulls in Lance and PyArrow, and on a first
+    # run Gatekeeper checks every dylib it touches. Nothing else here takes a
+    # noticeable amount of time.
+    progress.stage("loading", "Loading Lance")
+
+    import uvicorn
+
     # The interface, exported as static files at build time and carried inside the
     # bundle. Absent until something has exported it, which is fine: until then the
     # browser talks to the Next.js dev server instead.
     app = build_app(ui_dir())
+
+    progress.stage("serving", "Starting the server")
 
     port = int(os.environ.get("LANCESCOPE_PORT") or free_port())
 

@@ -1,0 +1,98 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>LanceScope</title>
+<!--
+  What the user looks at while the server starts.
+
+  There is a real wait here and it is not the server: it is the frozen Python above
+  it unpacking, importing Lance and PyArrow, and on a first run being checked dylib
+  by dylib by Gatekeeper. The shell mirrors the stages the server prints into
+  `stage()` below, so this says what is happening rather than spinning.
+
+  It also has to work when the server says nothing at all — an older build, or one
+  that died before its first line. So the copy starts as a sentence that is true
+  with no information, and the slow-launch explanation arrives on a timer rather
+  than on a message.
+
+  Colours are the console's own, from web/app/globals.css. The two palettes are
+  written out rather than imported because this page is loaded before anything else
+  exists and must not depend on a stylesheet it might not have.
+-->
+<style>
+  :root {
+    color-scheme: light dark;
+    --ink: #faf7f5; --well: #f2ede9; --bright: #1a1614;
+    --haze: #615850; --rule: #b3a294; --accent: #b0350e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ink: #171513; --well: #2a2523; --bright: #f4ebe8;
+      --haze: #a3958c; --rule: #7b6d66; --accent: #ff734a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; height: 100vh; background: var(--ink); color: var(--haze);
+    font: 13px/1.6 -apple-system, system-ui, sans-serif;
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 20px; padding: 28px; text-align: center;
+    /* The whole window drags: there is nothing in here to click, and a window that
+       cannot be moved out of the way is a window in the way. */
+    -webkit-user-select: none; user-select: none;
+  }
+  h1 {
+    margin: 0; font-size: 16px; font-weight: 700; letter-spacing: -0.01em;
+    color: var(--bright);
+  }
+  /* Indeterminate, because it is: nothing here knows how long the import will take,
+     and a bar that claimed to would be lying in a window whose whole job is to stop
+     the user guessing. */
+  .bar {
+    width: 200px; height: 2px; background: var(--well); overflow: hidden;
+    border-radius: 2px;
+  }
+  .bar i {
+    display: block; height: 100%; width: 40%; border-radius: 2px;
+    background: var(--accent); animation: slide 1.4s ease-in-out infinite;
+  }
+  @keyframes slide {
+    0%   { transform: translateX(-100%); }
+    100% { transform: translateX(350%); }
+  }
+  #stage {
+    font-size: 12px; min-height: 1.6em;
+    font-variant-numeric: tabular-nums;
+  }
+  #slow {
+    font-size: 11px; color: var(--haze); opacity: 0; max-width: 34ch;
+    border-top: 1px solid var(--rule); padding-top: 12px; margin-top: 2px;
+    transition: opacity .4s ease;
+  }
+  #slow[data-on="true"] { opacity: .85; }
+  @media (prefers-reduced-motion: reduce) {
+    .bar i { animation: none; width: 100%; opacity: .5; }
+    #slow { transition: none; }
+  }
+</style>
+
+<h1>LanceScope</h1>
+<div class="bar"><i></i></div>
+<div id="stage">Starting the server</div>
+<div id="slow">First launch is slower — macOS is checking every binary in the app.
+  It is quick after this.</div>
+
+<script>
+  // Called by the shell for every `LANCESCOPE_STAGE=` line the server prints. Named
+  // on `window` because an `eval` from Rust has no other way to reach it.
+  window.stage = function (text) {
+    var el = document.getElementById("stage");
+    if (el && text) el.textContent = text;
+  };
+
+  // On a timer rather than on a stage, because the case this explains is the one
+  // where no stage ever arrives.
+  setTimeout(function () {
+    var el = document.getElementById("slow");
+    if (el) el.dataset.on = "true";
+  }, 20000);
+</script>
