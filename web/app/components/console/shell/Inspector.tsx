@@ -20,6 +20,7 @@
 import { useState } from "react";
 
 import Icon from "@/app/components/Icon";
+import { Summary, TokenSpend } from "@/app/components/console/Findings";
 import { Bytes, Empty } from "@/app/components/console/atoms";
 import type { Capability, Finding, RootCapabilities } from "@/app/lib/catalog";
 import { type Workspace, totals } from "@/app/lib/workspace";
@@ -40,6 +41,9 @@ export default function Inspector({ w, table, onGoToPanel }: {
   onGoToPanel: (panel: Finding["panel"]) => void;
 }) {
   const [pane, setPane] = useState<Pane>("findings");
+  // Bumped whenever something is asked of a model, so the meter below re-reads
+  // rather than polling a number that changes only when somebody acts.
+  const [spent, setSpent] = useState(0);
   const current = w.list?.tables.find((t) => t.name === table) ?? null;
   const warn = (w.findings?.summary.warn ?? 0) > 0;
 
@@ -70,8 +74,26 @@ export default function Inspector({ w, table, onGoToPanel }: {
         ))}
       </div>
 
-      {pane === "findings" && <FindingsIndex w={w} onGoToPanel={onGoToPanel} />}
-      {pane === "cost" && <CostLedger w={w} />}
+      {pane === "findings" && (
+        <>
+          {/* The sentence about the table sits above the list of what is wrong with
+              it, which is the order somebody reads them in. It had no home once
+              Insights stopped being a tab, and this is where its subject is. */}
+          {table && (
+            <Summary table={table} ai={w.ai} partial={w.findings?.partial_analysis ?? false}
+                     onSpend={() => setSpent((n) => n + 1)} />
+          )}
+          <FindingsIndex w={w} onGoToPanel={onGoToPanel} />
+        </>
+      )}
+      {pane === "cost" && (
+        <>
+          <CostLedger w={w} />
+          {/* Tokens and dollars are the second currency, and principle three names
+              them in the same sentence as bytes and IOs. This is the pane for it. */}
+          <TokenSpend refreshKey={spent} />
+        </>
+      )}
       {pane === "connection" && <Connection caps={w.list?.capabilities ?? null} />}
     </aside>
   );
