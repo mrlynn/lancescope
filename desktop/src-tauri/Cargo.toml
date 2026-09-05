@@ -26,6 +26,10 @@ tauri-plugin-opener = "2"
 # the page gets a command with no arguments if it ever gets one at all, and this
 # plugin's own commands would let a caller compose the dialog itself.
 tauri-plugin-dialog = "2"
+# Checking, and only checking. The shell asks; the page is granted nothing, because
+# a plugin command called from Rust never reaches the ACL. See src/update.rs for why
+# installing is not wired up.
+tauri-plugin-updater = "2"
 
 # Reading the settings file the server owns, to build Open Recent from it. Already
 # in the graph as one of Tauri's own dependencies; named here because this crate
