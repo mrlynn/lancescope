@@ -76,6 +76,12 @@ dev = ["ruff>=0.9"]
 # report that they are unavailable, which they already do when the corpus is absent.
 console = [
     "pylance>=3",
+    # Named rather than inherited. It arrives anyway as a dependency of httpx, and
+    # for a long time that was enough — until the frozen app needed to *point*
+    # OpenSSL at it, at which point a bundle that is present by accident is a TLS
+    # trust store that disappears the day something upstream changes its mind. See
+    # `server/standalone.py::arm_certificates`.
+    "certifi",
     # The media decoders, so the packaged app can create a database and not merely
     # promise to. Measured rather than guessed: pillow 14.1 MB, pypdfium2 8.0 MB and
     # pypdf 3.9 MB come to 26 MB, against the 493 MB of torch this group exists to
