@@ -169,6 +169,150 @@ def findings_checks() -> None:
           f"{len(broken['findings'])} finding(s) still returned")
 
 
+def bundle_checks() -> None:
+    """The document somebody gets handed, over the corpus it is worth handing.
+
+    The fixtures already assert the scrub over every table shape. What only the real
+    corpus can show is the claim the bundle exists to carry: that a complete written
+    diagnosis of a table holding 2.65 GB of video costs kilobytes and reads none of
+    the video. A regression that made the bundle open a data file would still pass
+    every unit test and would quietly undo the headline.
+    """
+    import json
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from server.catalog import Catalog
+    from server.routes import catalog as catalog_routes
+
+    app = FastAPI()
+    catalog_routes.bind(Catalog(LANCE))
+    app.include_router(catalog_routes.router)
+    api = TestClient(app)
+
+    before = lance.dataset(str(LANCE / "segments.lance"))
+    before.io_stats_incremental()
+
+    r = api.get("/catalog/tables/segments/bundle")
+    check("a bundle answers for the blob table", r.status_code == 200)
+    b = r.json()
+
+    check("it carries every section and says so when one is missing",
+          all(k in b for k in ("schema", "versions", "indices", "fragments",
+                               "findings", "weights"))
+          and b["incomplete"] == [],
+          f"{len(b['incomplete'])} section(s) could not be collected")
+
+    cost = b["cost"]["read_bytes"]
+    check("writing up 2.65 GB of video costs kilobytes",
+          cost < 1_000_000, f"{cost:,} B in {b['cost']['read_iops']:,} IOs")
+
+    check("it reads none of the video",
+          before.io_stats_incremental().read_bytes == 0,
+          "0 B through a second handle on the same table")
+
+    # The two things that must not leave. Checked against the table's own values
+    # rather than a list somebody thought of, because the interesting leak is the
+    # one nobody predicted.
+    text = json.dumps(b)
+    titles = {t for t in before.to_table(columns=["title"]).column("title").to_pylist()
+              if t and len(t) > 3}
+    leaked = sorted(t for t in titles if t in text)
+    check("no row value leaves in it", not leaked,
+          f"{len(titles)} title(s) checked" if not leaked else str(leaked[:2]))
+
+    check("the database root is redacted by default",
+          str(LANCE) not in text and b["connection"]["root"] == "<root>"
+          and b["connection"]["scheme"] == "file",
+          b["paths"])
+
+    # A query bundle is where the root would most easily escape, because the
+    # generated Python names it.
+    q = api.post("/catalog/tables/segments/bundle",
+                 json={"mode": "scan", "filter": "segment_idx > 0", "limit": 5})
+    qb = q.json()
+    check("a query travels without its rows",
+          q.status_code == 200 and "rows" not in qb["query"]
+          and qb["query"]["rows_included"] is False
+          and qb["query"]["returned"] > 0,
+          f"{qb['query']['returned']} row(s) returned, none included")
+    check("the redaction reaches inside the generated Python",
+          str(LANCE) not in qb["query"]["reproduction"]
+          and "<root>" in qb["query"]["reproduction"])
+
+    md = api.get("/catalog/tables/segments/bundle?format=md")
+    check("the markdown is the same document, readable as it is",
+          md.status_code == 200
+          and md.text.startswith("# LanceScope — `segments`")
+          and "2.65 GB" in md.text
+          and not any(t in md.text for t in titles),
+          f"{len(md.text):,} characters")
+
+
+def datascan_checks() -> None:
+    """Checks that read the data, over a table where reading the wrong thing shows.
+
+    The fixtures assert that each check finds what it is looking for. What only this
+    corpus can assert is the property the whole layer is sold on: that asking whether
+    2.65 GB of video is all actually there reads the descriptors and none of the
+    video. A regression that materialised a payload would still pass every unit test
+    — the fixture blobs are 9 MB and the difference would look like noise — and would
+    move a quarter of a terabyte here.
+    """
+    import time
+
+    from server.catalog import Catalog
+    from server.intel import datascan
+
+    cat = Catalog(LANCE)
+    h = cat.open("segments", scope="verify-scan")
+
+    h.drain()
+    plan = datascan.plan(h)
+    priced = h.drain()
+    check("pricing every check reads no data file",
+          priced.read_bytes < 100_000, f"{priced.read_bytes:,} B on the meter")
+
+    content = next(c for c in plan["checks"] if c["check"] == "missing-content")
+    payload = content["estimate"]["blob_bytes"]
+    check("the quote names what the check will not read",
+          "none of the" in content["quote"] and payload > 2_000_000_000,
+          content["quote"])
+
+    started = time.time()
+    result = datascan.run_check(h, "missing-content", content["columns"],
+                                lambda: False)
+    check("checking every row's video costs kilobytes",
+          result.state == "done" and result.read_bytes < 1_000_000,
+          f"{result.read_bytes:,} B in {(time.time() - started) * 1000:.0f} ms")
+    check("and reads none of the video",
+          result.read_bytes < payload / 10_000,
+          f"{result.read_bytes:,} B against {payload / 1e9:.2f} GB of payload")
+    check("it says the content is present without implying it is right",
+          any("not that it is right" in f.claim for f in result.findings))
+
+    # Cancellation, which is the one place in this product where stop means stop.
+    cancelled = datascan.run_check(h, "missing-content", content["columns"],
+                                   lambda: True)
+    check("a cancelled check stops and says what it had spent",
+          cancelled.state == "cancelled" and not cancelled.findings,
+          cancelled.detail[:60])
+
+    # And the refusal that protects somebody from a bill they did not agree to.
+    moments = cat.open("moments", scope="verify-scan")
+    near = datascan.run_check(moments, "near-duplicates", ["vector"], lambda: False)
+    check("near-duplicates refuses an unindexed column rather than brute-forcing",
+          near.state == "unsupported" and near.read_bytes == 0,
+          near.detail[:70])
+
+    dup = datascan.run_check(moments, "exact-duplicates", ["talk_id"], lambda: False)
+    found = next((f for f in dup.findings if f.id == "exact-duplicates"), None)
+    check("a real duplicate on a real corpus is counted exactly",
+          found is not None and found.evidence["extra_rows"] > 0,
+          f"{(found or {}) and found.evidence['extra_rows']:,} rows beyond the first")
+
+
 def intel_checks() -> None:
     """The language layer resolves to the right thing in every state, including none.
 
@@ -853,6 +997,12 @@ def main() -> int:
 
     print("\n  findings")
     findings_checks()
+
+    print("\n  bundle")
+    bundle_checks()
+
+    print("\n  data checks")
+    datascan_checks()
 
     print("\n  intelligence")
     intel_checks()

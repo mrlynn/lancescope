@@ -185,6 +185,20 @@ class Catalog:
         """
         return self._source.target_for(self.root_uri, name).uri
 
+    def target_for(self, name: str) -> Target:
+        """Everything needed to open that table, for a caller that will own the handle.
+
+        `open()` is the right door for anything that reads and returns: the handle is
+        cached, shared within a scope, and evicted by the LRU when it goes cold. A
+        background job is the one caller that cannot use it — an eviction mid-scan
+        closes the dataset out from under a running iterator, and the job would fail
+        for a reason that has nothing to do with the table. So the job resolves the
+        target here and builds a handle it closes itself.
+        """
+        if sources.scheme_of(name):
+            return sources.source_for(name).target_for(name, "")
+        return self._source.target_for(self.root_uri, name)
+
     def exists(self, name: str) -> bool:
         """Whether that table is there.
 

@@ -85,3 +85,35 @@ while you look cannot give you a before from one moment and an after from anothe
 Every result carries **+ python** — the script that reproduces it, generated from the
 spec that actually ran. Save the query itself from the same panel; it re-runs against
 whatever the table is now, which is the point of saving it.
+
+## Hand the whole thing to somebody
+
+Under the result, and again at the foot of **Insights**, is a bundle. It collects what
+you have been reading — the schema, the versions, the layout, the findings with their
+evidence, the query and its plan, what each of them cost, and which Lance read them —
+into one document, and says what assembling it spent.
+
+Two files, because two things happen to a diagnosis:
+
+- **markdown** for an issue, a pull request, or a message. It is written to be read as
+  it is.
+- **json** for another console. **Console → Open a bundle** renders it with the same
+  finding cards, from the file, with nothing uploaded.
+
+Three things do not travel. **The rows** — the reproduction re-runs them against the
+reader's own copy, which is the honest way to share a result. **Credentials**, dropped
+by key wherever they appear. And **the database root**, replaced with `<root>` unless
+you pass `paths=kept`, because a local path carries a username and a bucket carries an
+employer, and a public issue is a poor place to find that out. The document records
+which mode produced it and reports the scheme separately, so the substitution costs no
+meaning.
+
+From a terminal, and from an agent:
+
+```bash
+lancescope bundle segments > report.md
+```
+
+The MCP tool is `table_bundle`, so an agent asked to write up what is wrong with a
+table produces the same document rather than retyping the other tools' answers into
+prose.

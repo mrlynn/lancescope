@@ -73,7 +73,36 @@ one advantage already present here: Lance-aware evidence, not generic metadata.
 
 ## Current-state assessment
 
-### What is real today
+> **Scorecard, 2026-09-05 — read this rather than the phases below.**
+>
+> The table under this note was written on 2026-09-01 and was two sprints out of date
+> within four days. It is kept because the *reasoning* below still holds and the
+> amendment above is still the goal; what follows corrects the facts. Where a phase
+> and this scorecard disagree, this scorecard is the tree.
+>
+> | Area | Status | Evidence |
+> | --- | --- | --- |
+> | Local read-only exploration | Shipped | Catalog, schema, versions, indices, fragments, rows, scoped IO cost, runtime connection switching |
+> | Dataset safety | Shipped, enforced | `tests/test_write_quarantine.py` parses every module and fails CI if a dataset mutation appears outside `routes/ingest.py`; a snapshot test drives the whole read API and every MCP tool and asserts no byte moved |
+> | Lance-specific insight | Shipped | **Ten** deterministic rules with evidence and caveats, a `training` facet, and `partial_analysis` for a rule that could not run |
+> | Findings in the UI | Shipped | Insights tab plus evidence-adjacent rendering under each panel. `feat/i3-findings-ui` is merged and gone |
+> | Query workspace | Shipped | Scalar, full-text, vector **and hybrid**; plan reading, exact bytes, pushed-down filter, generated reproduction, version compare, saved queries and history (browser-local), client-side cancellation and a server timeout |
+> | Diagnostic bundle | **Shipped** | `server/bundle.py`, `GET`/`POST /catalog/tables/{name}/bundle`, `lancescope bundle`, MCP `table_bundle`, and a viewer at `/console/bundle`. Rows, credentials and the root are scrubbed, and the scrub is tested over every fixture |
+> | Remote connections | Shipped, honestly stated | Five schemes through a plugin registry; `s3://` measured against a live bucket, `gs`/`az`/`abfss`/`db://` `unverified` rather than claimed |
+> | Language layer | Shipped | Claude, Ollama, OpenAI-compatible, null provider; NL→filter, table summaries, token/dollar ledger and spend ceiling |
+> | MCP | Shipped | Ten read-only tools, annotations asserted, blob materialisation impossible because the routes underneath cannot |
+> | Ingest | Shipped, create-only | Image and PDF anywhere; video and audio need ffmpeg on `PATH`, reported per medium as a capability |
+> | Packaged native desktop app | Shipped | Tauri shell owning the server lifecycle, signed and notarised through the release workflow |
+> | Frontend tests | **Not started** | `web/` has no test script and no first-party tests; CI runs typecheck, lint and build |
+> | Managed operations | Explicitly deferred, and now dropped | The amendment above removes them from the goal rather than postponing them |
+>
+> **The frontier, as of this date:** browser E2E coverage; promoting `gs`/`az`/`abfss`
+> and `db://` out of `unverified` against live stores; `managed_versioning` on a
+> namespace; data-level checks that read rows and say what they cost; and the agent
+> loop (I8), which is the one item in the 09-01 table that was correctly marked
+> planned.
+
+### What was real on 2026-09-01
 
 | Area | Status | Evidence |
 | --- | --- | --- |
@@ -236,12 +265,17 @@ silent; `make verify`, API contracts and UI smoke tests are green.
 
 - Build a Query workspace for scalar predicates plus vector, FTS and hybrid search;
   show editable generated syntax, parameters, result samples and cancellation.
-  *(Shipped for scalar, FTS and vector. Hybrid, saved queries, history and
-  cancellation are still open; vector search takes a literal vector or another row's,
-  because text-to-vector needs an embedder registry that knows which model produced
-  which column.)*
+  *(All shipped — scalar, FTS, vector and hybrid, with saved queries, history, a
+  client-side cancel and a server timeout. Vector search takes a literal vector,
+  another row's, or a sentence where an embedder is configured. The one thing here
+  that cannot be built is a real cancel: Lance offers no way to interrupt a running
+  scan, so the console abandons the wait and says so rather than implying the work
+  stopped.)*
 - Add query history, named/saved queries, copyable CLI/Python equivalents, and safe
-  export of result metadata (never blobs by default).
+  export of result metadata (never blobs by default). *(Shipped, and the export grew
+  into the diagnostic bundle this document asks for at line 149 — one document
+  carrying the evidence, the query, the plan, the cost and the reader, scrubbed of
+  rows, credentials and the database root.)*
 - Add query explain/diagnostic cards: index coverage, candidate scan estimate,
   actual bytes/IO/time, selected index, filters and warnings about unindexed vectors
   or partial index coverage.

@@ -24,6 +24,8 @@ Read-only. Nothing here writes to a dataset, and nothing materialises a blob col
 | `GET` | `/catalog/tables` | Every table under the root. |
 | `GET` | `/catalog/tables/{name:path}` | One table in full: schema, stats, and the real on-disk byte split. |
 | `GET` | `/catalog/tables/{name:path}/blob` | Stream the bytes of one heavy cell, honouring HTTP Range. |
+| `GET` | `/catalog/tables/{name:path}/bundle` | This table's diagnosis as one document, for somebody who is not looking at it. |
+| `POST` | `/catalog/tables/{name:path}/bundle` | The same document, with a query and its diagnosis inside it. |
 | `GET` | `/catalog/tables/{name:path}/compare` | Two versions of one table, side by side and pinned. |
 | `POST` | `/catalog/tables/{name:path}/compare/query` | The same query against both versions — the before and after of an operation. |
 | `GET` | `/catalog/tables/{name:path}/estimate` | What a full pass over these columns weighs, without reading any of them. |
@@ -102,6 +104,12 @@ The demo's own routes. They return 503 when the corpus is absent.
 | `POST` | `/meter/reset` | — |
 | `GET` | `/meter/stream` | — |
 | `GET` | `/sample` | A spread of moments from across the corpus, for the opening screen. |
+| `GET` | `/scan/jobs` | Every scan this process knows about, newest first. |
+| `DELETE` | `/scan/jobs/{job_id}` | Drop a finished job's record. |
+| `GET` | `/scan/jobs/{job_id}` | One scan. |
+| `POST` | `/scan/jobs/{job_id}/cancel` | Stop it. |
+| `POST` | `/scan/tables/{name:path}` | Start a scan of the checks named, at the version they are quoted against. |
+| `POST` | `/scan/tables/{name:path}/plan` | What each check would read, before any of it is read. |
 | `GET` | `/schema` | The actual tables, read off disk — the Act 3 slide, live. |
 | `POST` | `/search` | — |
 | `GET` | `/tracks` | — |

@@ -15,12 +15,14 @@ import json
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from pathlib import Path
+from typing import ClassVar
 
 import pyarrow as pa
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from server import bundle as server_bundle
 from server import compare, kiosk, query, sources
 from server import estimate as server_estimate
 from server.catalog import (
@@ -793,6 +795,141 @@ async def run_config(name: str, columns: str | None = None,
     })
 
 
+class QueryBody(BaseModel):
+    """One query as the workspace sends it."""
+
+    mode: str = "scan"
+    filter: str | None = None
+    columns: list[str] | None = None
+    expand: list[str] | None = None
+    limit: int = 25
+    offset: int = 0
+    text: str | None = None
+    vector_column: str | None = None
+    vector: list[float] | None = None
+    like_row: int | None = None
+    k: int = 10
+    metric: str | None = None
+    prefilter: bool = True
+    # How long the caller is prepared to wait. Not how long the query may run —
+    # that is not ours to decide, and Lance would not honour it if it were.
+    timeout_s: float | None = None
+
+    # Fields this body carries that are not part of the query. A class attribute
+    # rather than an argument to `spec()`, because every subclass adds one and the
+    # exclusion list was already being retyped at each call site — which is how a
+    # third subclass ends up passing its own field into `QuerySpec.__init__`.
+    NOT_SPEC: ClassVar[frozenset[str]] = frozenset({"timeout_s"})
+
+    def spec(self) -> query.QuerySpec:
+        return query.QuerySpec(**self.model_dump(exclude=set(self.NOT_SPEC)))
+
+
+# ------------------------------------------------------------------------- bundle
+
+class BundleBody(QueryBody):
+    """A bundle with a query in it, and whatever the browser has kept beside it.
+
+    Saved queries live in the browser (`web/app/lib/queries.ts` argues the console
+    should not write to disk every time somebody presses Run), so the only way they
+    reach a document assembled on the server is for the caller to send them. They are
+    specs, never results.
+    """
+
+    saved_queries: list[dict] = []
+
+    NOT_SPEC: ClassVar[frozenset[str]] = QueryBody.NOT_SPEC | {"saved_queries"}
+
+
+def _bundle_paths(paths: str) -> str:
+    if paths not in (server_bundle.REDACTED, server_bundle.KEPT):
+        raise HTTPException(
+            400,
+            f"unknown paths mode {paths!r} — "
+            f"{server_bundle.REDACTED} or {server_bundle.KEPT}",
+        )
+    return paths
+
+
+def _bundle_response(b, fmt: str) -> Response:
+    if fmt == "md":
+        return Response(server_bundle.to_markdown(b), media_type="text/markdown")
+    if fmt != "json":
+        raise HTTPException(400, f"unknown format {fmt!r} — json or md")
+    return JSONResponse(b.as_dict())
+
+
+@router.get("/tables/{name:path}/bundle")
+async def bundle(name: str, facet: str | None = None, columns: str | None = None,
+                 format: str = "json", paths: str = server_bundle.REDACTED) -> Response:
+    """This table's diagnosis as one document, for somebody who is not looking at it.
+
+    Declared here rather than at the end of the file for the same reason
+    `run-config` is: `/tables/{name}` is a greedy `:path` route and FastAPI matches
+    in declaration order, so a bundle route declared after it would arrive as a
+    request for a table named `moments/bundle`.
+
+    Nothing new is measured. Every section is a route above called in process, which
+    is why the bundle can report what it cost to make — and why the answer in it
+    cannot drift from the answer on screen.
+
+    `paths=redacted` by default. A local root carries a username and a bucket name
+    carries an employer; neither is a thing to discover after pasting into a public
+    issue. The document records which mode produced it, and reports the scheme
+    separately so the substitution costs no meaning.
+    """
+    _bundle_paths(paths)
+    if facet is not None and facet not in intel_findings.FACETS:
+        raise HTTPException(
+            400,
+            f"unknown facet {facet!r} — known facets: "
+            f"{', '.join(intel_findings.FACETS)}",
+        )
+    wanted = [c.strip() for c in columns.split(",") if c.strip()] if columns else None
+
+    # 404 before anything is collected, so a mistyped name is one clear error rather
+    # than six sections that each failed for the same reason.
+    open_table(name)
+
+    sections, environment, connection, incomplete = await server_bundle.collect(
+        name, facet=facet, columns=wanted)
+    b = server_bundle.assemble(
+        sections, environment=environment, connection=connection, table_name=name,
+        roots=server_bundle.roots_of(connection, sections),
+        incomplete=incomplete, paths=paths,
+    )
+    return _bundle_response(b, format)
+
+
+@router.post("/tables/{name:path}/bundle", dependencies=[Depends(kiosk.limit_heavy)])
+async def bundle_with_query(name: str, body: BundleBody, facet: str | None = None,
+                            format: str = "json",
+                            paths: str = server_bundle.REDACTED) -> Response:
+    """The same document, with a query and its diagnosis inside it.
+
+    The query runs here rather than being handed in already run, because a bundle
+    whose query result came from a different moment than its findings would describe
+    two versions of one table and say neither. It runs under the same timeout and the
+    same kiosk limit as `POST /query`, since it is the same work.
+
+    Its rows do not travel. `reproduction` does, so the reader gets the rows from
+    their own copy of the data — which is the only honest way to share a result.
+    """
+    _bundle_paths(paths)
+    open_table(name)
+    result = json.loads((await run_query(name, body)).body)
+
+    sections, environment, connection, incomplete = await server_bundle.collect(
+        name, facet=facet, columns=body.columns)
+    b = server_bundle.assemble(
+        sections, environment=environment, connection=connection, table_name=name,
+        roots=server_bundle.roots_of(connection, sections),
+        query_result=result, saved_queries=body.saved_queries,
+        incomplete=incomplete, paths=paths,
+    )
+    return _bundle_response(b, format)
+
+
 @router.get("/tables/{name:path}/query/capabilities")
 async def query_capabilities(name: str) -> JSONResponse:
     """What this table can be asked, and why not where it cannot.
@@ -1134,30 +1271,6 @@ async def table(name: str) -> JSONResponse:
 
 # -------------------------------------------------------------------------- query
 
-class QueryBody(BaseModel):
-    """One query as the workspace sends it."""
-
-    mode: str = "scan"
-    filter: str | None = None
-    columns: list[str] | None = None
-    expand: list[str] | None = None
-    limit: int = 25
-    offset: int = 0
-    text: str | None = None
-    vector_column: str | None = None
-    vector: list[float] | None = None
-    like_row: int | None = None
-    k: int = 10
-    metric: str | None = None
-    prefilter: bool = True
-    # How long the caller is prepared to wait. Not how long the query may run —
-    # that is not ours to decide, and Lance would not honour it if it were.
-    timeout_s: float | None = None
-
-    def spec(self) -> query.QuerySpec:
-        return query.QuerySpec(**self.model_dump(exclude={"timeout_s"}))
-
-
 @router.post("/tables/{name:path}/query/explain")
 async def query_explain(name: str, body: QueryBody) -> JSONResponse:
     """The plan, without running the query. Often the whole diagnosis."""
@@ -1189,6 +1302,8 @@ class CompareQueryBody(QueryBody):
     a: int
     b: int
 
+    NOT_SPEC: ClassVar[frozenset[str]] = QueryBody.NOT_SPEC | {"a", "b"}
+
 
 @router.post("/tables/{name:path}/compare/query", dependencies=[Depends(kiosk.limit_heavy)])
 async def compare_query(name: str, body: CompareQueryBody) -> JSONResponse:
@@ -1206,8 +1321,7 @@ async def compare_query(name: str, body: CompareQueryBody) -> JSONResponse:
         raise HTTPException(400, f"cannot open both versions: "
                                  f"{str(e).splitlines()[0][:160]}") from None
 
-    spec = query.QuerySpec(**body.model_dump(exclude={"a", "b", "timeout_s"}))
-    result = compare.compare_query(left, right, spec, cell=_cell)
+    result = compare.compare_query(left, right, body.spec(), cell=_cell)
     if result.a is None and result.b is None:
         raise HTTPException(400, result.a_error or "the query could not be run")
     return JSONResponse({"name": name, "versions": {"a": body.a, "b": body.b},

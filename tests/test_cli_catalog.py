@@ -281,3 +281,52 @@ def test_open_with_no_path_leaves_the_root_alone(corpus):
     t = resolve_open_target(None)
 
     assert t.root is None and t.table is None and not t.error
+
+
+# ------------------------------------------------------------------ lancescope bundle
+
+def test_bundle_writes_the_artifact_to_stdout_and_the_commentary_to_stderr(rooted, capsys):
+    """`lancescope bundle moments > report.md` has to produce a file, not a file
+    plus a sentence about redaction in the middle of it."""
+    assert cli_main(["bundle", "vectors"]) == 0
+
+    out = capsys.readouterr()
+    assert out.out.startswith("# LanceScope — `vectors`")
+    assert "redacted" in out.err
+    assert "redacted" not in out.out.split("\n")[0]
+
+
+def test_bundle_redacts_the_root_unless_asked_not_to(rooted, capsys):
+    assert cli_main(["bundle", "vectors"]) == 0
+    assert str(rooted) not in capsys.readouterr().out
+
+    assert cli_main(["bundle", "vectors", "--paths"]) == 0
+    out = capsys.readouterr()
+    assert str(rooted) in out.out
+    assert "redacted" not in out.err
+
+
+def test_bundle_json_is_the_machine_readable_document(rooted, capsys):
+    assert cli_main(["bundle", "vectors", "--json"]) == 0
+
+    d = json.loads(capsys.readouterr().out)
+    assert next(iter(d)) == "lancescope_bundle"
+    assert d["table"] == "vectors"
+
+
+def test_bundle_narrows_the_findings_to_a_facet(rooted, capsys):
+    assert cli_main(["bundle", "vectors", "--facet", "training", "--json"]) == 0
+
+    d = json.loads(capsys.readouterr().out)
+    assert d["findings"]["facet"] == "training"
+    assert all("training" in f["facets"] for f in d["findings"]["findings"])
+
+
+def test_bundle_says_which_table_is_missing_rather_than_raising(rooted, capsys):
+    assert cli_main(["bundle", "nope"]) == 2
+    assert "nope" in capsys.readouterr().err
+
+
+def test_an_unknown_facet_is_a_usage_error_not_a_traceback(rooted, capsys):
+    assert cli_main(["bundle", "vectors", "--facet", "chess"]) == 2
+    assert "chess" in capsys.readouterr().err

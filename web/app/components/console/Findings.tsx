@@ -10,6 +10,7 @@
 import Link from "next/link";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import Icon from "@/app/components/Icon";
+import BundleButton from "@/app/components/console/BundleButton";
 import { Empty } from "@/app/components/console/atoms";
 import { fmtBytes } from "@/app/lib/api";
 import type { Finding, Findings } from "@/app/lib/catalog";
@@ -152,6 +153,8 @@ export function InsightsTab({ d, table, ai }: {
             ? " Of the rules that ran, none fired — see above for the ones that did not."
             : " Every rule this console knows was checked and none of them fired."}
         </Empty>
+        {table && <BundleButton table={table}
+                                note="a clean sweep is worth being able to show too" />}
         <TokenSpend refreshKey={spent} />
       </>
     );
@@ -180,6 +183,9 @@ export function InsightsTab({ d, table, ai }: {
       <div className="space-y-3 mt-4">
         {d.findings.map((f) => <FindingCard key={f.id} f={f} />)}
       </div>
+
+      {table && <BundleButton table={table}
+                              note="these findings with their evidence, the schema, the versions, the layout and the reader" />}
 
       <TokenSpend refreshKey={spent} />
     </>

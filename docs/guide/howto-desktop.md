@@ -36,6 +36,22 @@ they are two gigabytes for one screen. So in a packaged build the demo lists its
 corpus and refuses to search it, with a message saying why. Run from a checkout for
 that.
 
+It does **not** carry `ffmpeg` either, and that one narrows a promise rather than a
+demo. **The app ingests images and PDFs. Video and audio are a checkout capability.**
+
+The decision behind that is worth stating rather than leaving to be discovered. Pillow,
+pypdfium2 and pypdf come to 26 MB, which turns "this build cannot decode a JPEG" into
+"this build ingests images and PDFs" and is plainly worth it. ffmpeg is a binary rather
+than a wheel, an order of magnitude larger, and shipping it inside a signed and
+notarised application is a licensing decision nobody has made. Ambiguity about that is
+more damaging than the limitation, so the ingest screen names it **before** a folder is
+chosen — a build that lets you pick a directory of video and then greys the row out is
+the same limitation discovered late and read as a fault.
+
+`ingest/core/binaries.py` reports it per medium in the same three-state vocabulary a
+connection uses, so a missing decoder is a capability with a reason rather than an
+error at file 312. `brew install ffmpeg` and a checkout does all four.
+
 ## Why an app rather than the launcher
 
 `LanceScope.command` is handed to your login shell, and whatever your shell does

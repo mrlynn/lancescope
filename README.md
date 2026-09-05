@@ -13,7 +13,7 @@ This measures both.*
 
 [![CI](https://github.com/mrlynn/lancescope/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/mrlynn/lancescope/actions/workflows/ci.yml) [![Images](https://github.com/mrlynn/lancescope/actions/workflows/images.yml/badge.svg)](https://github.com/mrlynn/lancescope/actions/workflows/images.yml) [![Release](https://github.com/mrlynn/lancescope/actions/workflows/release.yml/badge.svg)](https://github.com/mrlynn/lancescope/actions/workflows/release.yml) [![version](https://img.shields.io/github/v/tag/mrlynn/lancescope?label=version&color=ff734a)](https://github.com/mrlynn/lancescope/tags) [![license](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-[![python](https://img.shields.io/badge/python-3.12-3776AB?logo=python&logoColor=white)](.python-version) [![pylance](https://img.shields.io/badge/pylance-3.0%20%E2%86%92%2011.0%20%C2%B7%208%20readers-ff734a)](docs/guide/reference-versions.md) [![lance format](https://img.shields.io/badge/lance%20format-2.2%20%C2%B7%20Blob%20V2-informational)](docs/guide/explain-blobs.md) [![fastapi](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)](server/) [![next.js](https://img.shields.io/badge/Next.js%2016-000?logo=nextdotjs&logoColor=white)](web/) [![ghcr](https://img.shields.io/badge/ghcr.io-8%20tagged%20images-2496ED?logo=docker&logoColor=white)](https://github.com/mrlynn/lancescope/pkgs/container/lancescope) [![mcp](https://img.shields.io/badge/MCP-8%20read--only%20tools-6E56CF)](docs/guide/reference-mcp.md) [![ruff](https://img.shields.io/badge/lint-ruff%200.16.5-D7FF64?logo=ruff&logoColor=black)](.github/workflows/ci.yml) [![macos](https://img.shields.io/badge/macOS-Apple%20Silicon%20app-000?logo=apple&logoColor=white)](docs/guide/howto-desktop.md)
+[![python](https://img.shields.io/badge/python-3.12-3776AB?logo=python&logoColor=white)](.python-version) [![pylance](https://img.shields.io/badge/pylance-3.0%20%E2%86%92%2011.0%20%C2%B7%208%20readers-ff734a)](docs/guide/reference-versions.md) [![lance format](https://img.shields.io/badge/lance%20format-2.2%20%C2%B7%20Blob%20V2-informational)](docs/guide/explain-blobs.md) [![fastapi](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)](server/) [![next.js](https://img.shields.io/badge/Next.js%2016-000?logo=nextdotjs&logoColor=white)](web/) [![ghcr](https://img.shields.io/badge/ghcr.io-8%20tagged%20images-2496ED?logo=docker&logoColor=white)](https://github.com/mrlynn/lancescope/pkgs/container/lancescope) [![mcp](https://img.shields.io/badge/MCP-10%20read--only%20tools-6E56CF)](docs/guide/reference-mcp.md) [![ruff](https://img.shields.io/badge/lint-ruff%200.16.5-D7FF64?logo=ruff&logoColor=black)](.github/workflows/ci.yml) [![macos](https://img.shields.io/badge/macOS-Apple%20Silicon%20app-000?logo=apple&logoColor=white)](docs/guide/howto-desktop.md)
 
 **[Website](https://lancescope.mlynn.dev)** · **[Live console](https://demo.lancescope.mlynn.dev/console)** · **[Docs](https://lancescope.mlynn.dev/docs)** · **[Guide](docs/guide/index.md)** · **[Releases](https://github.com/mrlynn/lancescope/releases)**
 
@@ -31,12 +31,14 @@ This measures both.*
 
 ## What it does
 
-Four things, precisely.
+Six things, precisely.
 
 | | |
 |---|---|
 | **Reads a database, exactly** | Schema, versions, indices, fragments and rows, with the byte cost of each read shown as you go. Nothing here writes to a dataset. |
 | **Answers "why is this slow"** | Run a scalar, full-text, vector or hybrid query; see which access path Lance chose, what it read, and the Python that reproduces it elsewhere. Compare two versions of a table and run the same query against both. |
+| **Checks the data, and charges for it out loud** | Duplicates, rows missing their content, class imbalance, a split that leaks, dead embeddings. These read your columns rather than a manifest, so every one is priced from the file footers before it runs, cancelling stops the work, and each result carries the bytes it cost. Asking whether 162 videos are all actually there reads 43.4 KB and none of the 2.65 GB. |
+| **Lets the answer leave** | Take the whole diagnosis away as one document — the findings with their evidence, the plan, the exact cost, the reader underneath — as markdown to paste into an issue or JSON another console opens. No rows, no credentials, and the database root redacted unless you ask for it. |
 | **Says what it already knows** | Ten rules over metadata — an unindexed vector column, small-file counts that would mislead, tombstone debt, a manifest that understates the size of the thing it describes — each carrying the numbers it was derived from. No model is involved in any of them. |
 | **Adds language, optionally** | With a local model or an API key it translates a question into a filter and describes a table in a few sentences. Every response reports the tokens and dollars it spent beside the bytes it read. |
 
@@ -48,6 +50,31 @@ Ten rules run over the same manifests the other tabs read. Each finding carries 
 evidence on the same row — fragments, rows, pass bytes, bytes per vector — and each
 also appears under the panel holding the numbers it came from. Nothing here costs a
 token, because no model is asked.
+
+### Checking the data, quoted before it reads any
+
+Everything above is derived from manifests and costs kilobytes. The **Data** tab is the
+one place that reads your columns, so nothing on it runs until you press a button — and
+what it offers first is the bill:
+
+```
+missing-content    reads 11.9 KB–43.4 KB, and none of the 2.65 GB of blob payload
+                   those descriptors point at
+exact-duplicates   reads 6.8 KB–43.4 KB
+class-balance      name the one column that holds the label
+near-duplicates    'vector' has no vector index. Without one this would be a full pass
+                   over every vector for each row sampled
+```
+
+A Blob V2 column projects to its descriptor rather than its bytes, so asking whether
+every video is actually there costs kilobytes. A check that cannot run says which
+sentence applies rather than being greyed out. And cancelling stops the work — the one
+place in the console where it does, because that loop is ours and a Lance query's is
+not.
+
+It reports the data and not a verdict: it cannot tell you whether a label is right,
+cannot find a duplicate the embedding does not encode, and its near-duplicates are
+approximate twice over. Every one of those is written on the panel.
 
 ### What a table's shape costs a training run
 
@@ -188,11 +215,18 @@ installable package, not a wait.
 - **Browsing.** Reading a table cannot change it. That is checked rather than asserted:
   a test drives the entire read API and every MCP tool over a real corpus and then
   checks that not one byte on disk moved.
-- **Building.** The ingest wizard creates a new table from your own files — image,
-  video, audio or PDF — and that is the only thing in the project that writes one. It
-  is create-only by construction: it refuses a destination that already exists, only
-  ever appends into a table it made during that same run, and has no reachable path to
-  an overwrite.
+- **Building.** The ingest wizard creates a new table from your own files and that is
+  the only thing in the project that writes one. It is create-only by construction: it
+  refuses a destination that already exists, only ever appends into a table it made
+  during that same run, and has no reachable path to an overwrite.
+
+  **Images and PDFs anywhere; video and audio from a checkout.** Those two need
+  `ffmpeg`, which is a binary rather than a Python package — an order of magnitude
+  larger than the wheels beside it and carrying a licensing decision nobody has made —
+  so the signed app does not ship it. The wizard says which build you are on before you
+  choose a folder rather than after it has scanned one, and files it cannot decode are
+  counted and left alone rather than failing partway through a run. `brew install
+  ffmpeg` and a checkout does all four.
 
 The whole write surface is one module, and CI fails if a dataset mutation appears
 anywhere else. Deleting only ever happens when you ask for it: the button that clears a
@@ -220,11 +254,12 @@ claude mcp add lancescope --env LANCE_ROOT=/path/to/tables -- \
   uv --directory /path/to/lancescope run python -m server.mcp_server
 ```
 
-Seven tools — `list_tables`, `describe_table`, `read_rows`, `table_findings`,
-`table_fragments`, `table_indices`, `table_versions` — every one of them read-only and
-declared as such, and none able to materialise a blob column, because the routes
-underneath them cannot. It needs no key of its own: the intelligence is the agent's, and
-the tools are the same routes the console calls.
+Ten tools — `list_tables`, `describe_table`, `read_rows`, `table_findings`,
+`table_fragments`, `table_indices`, `table_versions`, `estimate_scan`,
+`table_run_config`, `table_bundle` — every one of them read-only and declared as such,
+and none able to materialise a blob column, because the routes underneath them cannot.
+It needs no key of its own: the intelligence is the agent's, and the tools are the same
+routes the console calls.
 
 Ask it *"what's in this database and what's wrong with it"* and it comes back with the
 unindexed vector column and what a search therefore costs — with the numbers those

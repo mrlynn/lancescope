@@ -88,8 +88,12 @@ class Finding:
         return asdict(self)
 
 
-def _bytes(n: float) -> str:
+def fmt_bytes(n: float) -> str:
     """The same thresholds and units `fmtBytes` uses in the interface.
+
+    Public because `server/bundle.py` renders the same evidence dicts into markdown,
+    and a second copy of these thresholds is exactly the divergence the paragraph
+    below exists to have already fixed once.
 
     A finding that says 20.0 MB and a panel that says 20.0 MB beside it should not
     be two different roundings of the same number. Every rule that had its own
@@ -168,7 +172,7 @@ def _unindexed_vector(facts: dict) -> list[Finding]:
             title=f"{col} has no vector index",
             claim=(f"Every similarity search over {col} scans all "
                    f"{rows:,} rows and reads each {dim}-dimension vector to do it — "
-                   f"{_bytes(scan_bytes)} a query. "
+                   f"{fmt_bytes(scan_bytes)} a query. "
                    f"That is fine at this size and stops being fine as the table grows."),
             evidence={"column": col, "dimensions": dim, "rows": rows,
                       "bytes_per_vector": dim * 4,
@@ -230,8 +234,8 @@ def _small_files(facts: dict) -> list[Finding]:
             "This table keeps its bytes in Blob V2 side files, which the manifest "
             "cannot see. Its data files are small because that is where the data "
             "isn't — compacting them would rewrite "
-            f"{_bytes(facts['on_disk'].blob_bytes)} of side files to tidy up "
-            f"{_bytes(facts['on_disk'].meta_bytes)} of metadata."
+            f"{fmt_bytes(facts['on_disk'].blob_bytes)} of side files to tidy up "
+            f"{fmt_bytes(facts['on_disk'].meta_bytes)} of metadata."
             if blob else ""
         ),
         evidence={"num_small_files": small,
@@ -282,8 +286,8 @@ def _blob_split(facts: dict) -> list[Finding]:
         severity="note",
         panel="schema",
         title=f"{shown}:1 blob to metadata",
-        claim=(f"{_bytes(usage.blob_bytes)} sits in Blob V2 side files against "
-               f"{_bytes(usage.meta_bytes)} of ordinary Lance files here. "
+        claim=(f"{fmt_bytes(usage.blob_bytes)} sits in Blob V2 side files against "
+               f"{fmt_bytes(usage.meta_bytes)} of ordinary Lance files here. "
                f"Scanning or filtering this table reads only the small half — the "
                f"side files are reachable through a blob handle and nothing else."),
         evidence={"blob_bytes": usage.blob_bytes, "meta_bytes": usage.meta_bytes,
@@ -309,8 +313,8 @@ def _manifest_blind(facts: dict) -> list[Finding]:
         severity="note",
         panel="schema",
         title="the manifest cannot see the side files",
-        claim=(f"Lance reports {_bytes(manifest)} of tracked files for a table "
-               f"that occupies {_bytes(true_total)} on disk. Both are correct; "
+        claim=(f"Lance reports {fmt_bytes(manifest)} of tracked files for a table "
+               f"that occupies {fmt_bytes(true_total)} on disk. Both are correct; "
                f"they answer different questions."),
         evidence={"manifest_bytes": manifest, "on_disk_bytes": true_total,
                   "understated_by": round(true_total / max(manifest, 1))},
@@ -366,13 +370,13 @@ def _loader_parallelism(facts: dict) -> list[Finding]:
         claim=(
             f"A reader hands one fragment to each worker, and this table has one. "
             f"A loader given eight workers runs one of them and leaves seven with "
-            f"nothing, so a pass over {rows:,} rows and {_bytes(pass_bytes)} is "
+            f"nothing, so a pass over {rows:,} rows and {fmt_bytes(pass_bytes)} is "
             f"single-threaded whatever it is asked for."
             if alone else
             f"A reader hands one fragment to each worker, so this table's "
             f"{fragments} fragments are the ceiling: past {fragments} workers the "
             f"extra ones are handed nothing. A pass reads {rows:,} rows and "
-            f"{_bytes(pass_bytes)}."
+            f"{fmt_bytes(pass_bytes)}."
         ),
         caveat=(
             "These fragments carry Blob V2 side files, so re-splitting rewrites the "
@@ -429,7 +433,7 @@ def _fragment_skew(facts: dict) -> list[Finding]:
     tax = largest / mean if mean else 0.0
     idle = 1 - (mean / largest) if largest else 0.0
     unit = "bytes" if by_bytes else "rows"
-    show = _bytes if by_bytes else (lambda n: f"{n:,.0f}")
+    show = fmt_bytes if by_bytes else (lambda n: f"{n:,.0f}")
     blob = facts["has_blob_columns"]
 
     return [Finding(
@@ -504,8 +508,8 @@ def _embedding_footprint(facts: dict) -> list[Finding]:
         panel="schema",
         title=f"{share:.0%} of the ordinary bytes are vectors",
         claim=(f"{', '.join(names)} accounts for about "
-               f"{_bytes(vector_bytes)} across {rows:,} rows, against "
-               f"{_bytes(against)} in this table's ordinary Lance "
+               f"{fmt_bytes(vector_bytes)} across {rows:,} rows, against "
+               f"{fmt_bytes(against)} in this table's ordinary Lance "
                f"files. Re-embedding rewrites that share of the table; the source "
                f"data is the smaller part of what is stored here."),
         caveat=(

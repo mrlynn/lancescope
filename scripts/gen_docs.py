@@ -198,6 +198,58 @@ def findings_reference() -> str:
     return "\n".join(out)
 
 
+# -------------------------------------------------------------------- datascan
+
+def datascan_reference() -> str:
+    from server.intel import datascan as d
+
+    out = [BANNER, "# Data checks", "",
+           "What the console can work out by **reading the data**, as opposed to "
+           "[Findings](/docs/reference-findings), which never opens a data file. "
+           "These cost real bytes, so none of them runs unless somebody asks — and "
+           "every one is priced before it does.", "",
+           "Three properties, and they are the whole design.", "",
+           "**Quoted first.** `POST /scan/tables/{name}/plan` weighs each check from "
+           "the data-file footers, without opening a page. On a media table the "
+           "quote carries the more interesting half: reading every video's "
+           "descriptor costs kilobytes, and the gigabytes those descriptors point at "
+           "are not read.", "",
+           "**Stoppable, and it means it.** Cancelling a scan stops the work between "
+           "batches and reports the bytes it had spent. This is the one place in the "
+           "product where cancel means cancel — a Lance query cannot be interrupted, "
+           "and the query panel says so rather than pretending otherwise.", "",
+           "**Measured afterwards.** Every result carries what it actually read, "
+           "drained from the same handle every other panel drains, so the quote can "
+           "be checked against the outcome rather than believed.", ""]
+
+    for check in d.CHECKS:
+        doc = inspect.getdoc(check.run) or ""
+        out += [f"## {check.id}", "", f"*{check.title}.*", "",
+                _first_paragraph(doc) or "—", ""]
+        rest = (doc.split("\n\n", 1)[1].strip() if "\n\n" in doc else "")
+        if rest:
+            out += [rest, ""]
+
+    out += ["## When a check will not run", "",
+            "A check reports the same three states a connection does — `available`, "
+            "`unsupported`, `unverified` — with the reason attached. Two of them "
+            "matter often:", "",
+            "- **No default column.** Which column holds a label, and which holds a "
+            "split, are not visible in a schema. Guessing produces a real-looking "
+            "answer to a question nobody asked, so these checks ask instead.",
+            "- **No vector index.** `near-duplicates` refuses rather than falling "
+            "back to a brute scan, because the fallback is one full pass over every "
+            "vector *per row sampled* — a bill nobody agreed to by pressing a button "
+            "labelled check.", "",
+            "## What none of these can tell you", "",
+            "Said here because a panel of green ticks implies otherwise. They cannot "
+            "tell you whether a label is **right**; they cannot find a duplicate the "
+            "embedding does not encode; they cannot attribute drift to a cause; and "
+            "near-duplicate results are approximate by construction, because the "
+            "index they ask is.", ""]
+    return "\n".join(out)
+
+
 # ----------------------------------------------------------------------- models
 
 def models_reference() -> str:
@@ -481,6 +533,10 @@ PAGES = {
     "reference-findings.md": (findings_reference, dict(
         title="Findings", order=3,
         summary="Every rule the console applies, and what each one checks.")),
+    "reference-data-checks.md": (datascan_reference, dict(
+        title="Data checks", order=3.5,
+        summary="Checks that read the data, what each one costs, and what none of "
+                "them can tell you.")),
     "reference-models.md": (models_reference, dict(
         title="Models and providers", order=4,
         summary="The registry: who serves what, what it costs, what it can do.")),

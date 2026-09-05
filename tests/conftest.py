@@ -14,6 +14,8 @@ console has to handle rather than the one corpus it was written against:
 - a **vector table** with no index, which is the demo's expensive finding in miniature
 - an **indexed table**, so "an index was used" has something to be true of
 - a **blob table**, because the claim this repository exists to make is about blobs
+- a **holed table**, whose rows are missing a label, a payload and an embedding, so
+  that a check which finds them has something to find
 - a **multi-version table**, so comparing two of them has two to compare
 - a **temporal table**, whose timestamps, dates, durations and decimals are the
   Python objects `json.dumps` refuses
@@ -118,6 +120,42 @@ def _blobs(root: Path) -> None:
     lance.write_dataset(table, str(root / "blobs.lance"), data_storage_version="2.2")
 
 
+def _holes(root: Path) -> None:
+    """A table whose rows are missing things, so that finding them can be asserted.
+
+    Every other fixture here is well-formed, which is right for the read path and
+    useless for the checks that read data: `missing-content` claiming a clean table
+    proves nothing when no fixture has ever had a hole in it, and `vector-health`
+    reporting live embeddings proves nothing when none has ever been dead.
+
+    So this one is deliberately broken, in the three ways that matter and one row
+    each: a null label, a blob of zero bytes, and an all-zero vector. Every one of
+    them produces a table that reads perfectly and trains badly.
+    """
+    n = 6
+    payloads = [b"" if i == 2 else bytes([i % 251]) * 9_000_000 for i in range(n)]
+    vectors = np.random.default_rng(7).random((n, VECTOR_DIM), dtype=np.float32)
+    vectors[4] = 0.0                                   # the embedder returned nothing
+    schema = pa.schema([
+        pa.field("id", pa.int64()),
+        pa.field("label", pa.string(), nullable=True),
+        pa.field("split", pa.string()),
+        pa.field("vector", pa.list_(pa.float32(), VECTOR_DIM)),
+        blob_field("payload", nullable=True),
+    ])
+    table = pa.table({
+        "id": list(range(n)),
+        # One null, and one label that repeats — so `class-balance` has a majority
+        # class and `exact-duplicates` has something to find on this column.
+        "label": [None, "a", "a", "a", "a", "b"],
+        # `id` 3 is in two splits under the same label, which is a leak on `label`.
+        "split": ["train", "train", "train", "test", "train", "test"],
+        "vector": pa.array(list(vectors), pa.list_(pa.float32(), VECTOR_DIM)),
+        "payload": blob_array(payloads),
+    }, schema=schema)
+    lance.write_dataset(table, str(root / "holes.lance"), data_storage_version="2.2")
+
+
 def _thumbnails(root: Path) -> None:
     """A table whose pictures live in an ordinary `binary` column.
 
@@ -206,6 +244,7 @@ def corpus(tmp_path_factory) -> Path:
     _vectors(root, "indexed", indexed=True)
     _searchable(root)
     _blobs(root)
+    _holes(root)
     _thumbnails(root)
     _versioned(root)
     _temporal(root)
