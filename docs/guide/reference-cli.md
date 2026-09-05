@@ -75,6 +75,31 @@ What a training run must pin about a table, as a block to paste where the run li
 | `--columns` | comma-separated columns the run reads (default: every ordinary one) |
 | `--json` | the same answer as an object, for a script |
 
+## `lancescope check`
+
+Checks that read the data — duplicates, missing content, class balance, split leakage, dead embeddings. Quoted before it reads anything.
+
+| flag | what it does |
+| --- | --- |
+| `table` | table name under the resolved root |
+| `checks` | which checks to run (default: all that can run here) |
+| `--columns` | comma-separated columns, when running one check that needs them named |
+| `--quote` | print what these checks would read and stop |
+| `--fail-on` | exit non-zero when something is found |
+| `--json` | the same answer as an object, for a script |
+
+## `lancescope bundle`
+
+One table's whole diagnosis as a document to hand to somebody who is not at this screen.
+
+| flag | what it does |
+| --- | --- |
+| `table` | table name under the resolved root |
+| `--columns` | comma-separated columns to weigh (default: every ordinary one) |
+| `--facet` | narrow the findings to one reader's question, e.g. training |
+| `--json` | the machine-readable document rather than the markdown |
+| `--paths` | keep the database root; by default it is redacted, because a local path carries a username and a bucket carries an employer |
+
 ## `lancescope open`
 
 Open a table in the console, working out which directory is the database.

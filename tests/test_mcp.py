@@ -49,6 +49,7 @@ async def test_the_tool_set_is_narrow_and_read_shaped(mcp):
     assert names == {
         "list_tables", "describe_table", "table_findings", "table_run_config",
         "estimate_scan", "table_versions", "table_indices", "table_fragments",
+        "table_bundle", "data_scan_estimate",
         "read_rows",
     }
     # Deliberately absent: anything that spends money, and anything that writes.

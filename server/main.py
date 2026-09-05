@@ -28,6 +28,7 @@ from server import credentials, kiosk, sources
 from server import settings as cfg
 from server.catalog import Catalog
 from server.routes import catalog as catalog_routes
+from server.routes import datascan as datascan_routes
 from server.routes import demo
 from server.routes import ingest as ingest_routes
 from server.routes import intel as intel_routes
@@ -50,6 +51,7 @@ async def lifespan(app: FastAPI):
         # Names only. A startup log is the last place a token should appear.
         print(f"credentials: {', '.join(_ARMED)} loaded from {credentials.cred_path()}")
     catalog_routes.bind(CATALOG)
+    datascan_routes.bind(CATALOG)
     settings_routes.bind(CATALOG)
     ingest_routes.bind(CATALOG)
     if ROOT.root is None:
@@ -154,6 +156,15 @@ def mount_routers(app: FastAPI, *, kiosk_mode: bool) -> None:
     # where every answer would be billed to whoever deployed it.
     if not kiosk_mode:
         app.include_router(intel_routes.router)
+
+    # Checks that read the data, under /scan/*. Everything under /catalog reads
+    # manifests and descriptors; everything here reads columns, and the split is in
+    # the URL so the boundary between a kilobyte read and a gigabyte one is visible
+    # before a route is called. Absent from a public demo for the same reason ingest
+    # is: a button that reads a column of somebody else's shared database is not a
+    # thing to hand an anonymous visitor.
+    if not kiosk_mode:
+        app.include_router(datascan_routes.router)
 
     # Creating a database, under /ingest/*. The only router that may write a dataset.
     # `POST /ingest/scan` lists a directory the caller names, which is a reasonable

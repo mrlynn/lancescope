@@ -148,6 +148,16 @@ MUTATING_ROUTES: dict[tuple[str, str], tuple[bool, str]] = {
     ("POST", "/catalog/tables/{name:path}/query/validate"):
         (READS, "counts what a predicate matches; writes nothing"),
     ("POST", "/catalog/tables/{name:path}/compare/query"): (READS, "a read across two versions"),
+    ("POST", "/scan/tables/{name:path}/plan"):
+        (READS, "weighs columns from the file footers; opens no page of them"),
+    ("POST", "/scan/tables/{name:path}"):
+        (READS, "starts a job that reads columns — the only thing here that costs "
+                "real bytes, and the reason it is quoted first"),
+    ("POST", "/scan/jobs/{job_id}/cancel"): (READS, "sets a flag the batch loop reads"),
+    ("DELETE", "/scan/jobs/{job_id}"):
+        (READS, "forgets the record; a scan wrote nothing to delete"),
+    ("POST", "/catalog/tables/{name:path}/bundle"):
+        (READS, "assembles routes that already read; the only file it makes is a download"),
     ("POST", "/search"): (READS, "the demo's search, a read with a body"),
     ("POST", "/meter/reset"): (READS, "zeroes an in-memory counter"),
     ("POST", "/settings/connections"): (READS, "saves the settings file, never a dataset"),

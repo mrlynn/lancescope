@@ -56,3 +56,28 @@ export function download(filename: string, contents: string, type: string) {
   a.click();
   URL.revokeObjectURL(url);
 }
+
+/** A whole diagnosis, as the two files it is worth having.
+ *
+ *  Markdown is what gets pasted into an issue; JSON is what another console opens.
+ *  Both come from the server, rendered from one object, so the file somebody reads
+ *  and the file their script parses cannot describe different tables — which is why
+ *  this hands the bytes to the browser and formats nothing itself.
+ *
+ *  The filename carries the table and the day rather than a timestamp to the second:
+ *  two bundles of the same table on the same day are the same investigation, and a
+ *  download folder holding `moments-2026-09-05.md` and `moments-2026-09-05 (1).md`
+ *  says which is later in the way the operating system already does. */
+export function bundleFilename(table: string, ext: "md" | "json"): string {
+  const day = new Date().toISOString().slice(0, 10);
+  return `lancescope-${table.replace(/[/\\]/g, "-")}-${day}.${ext}`;
+}
+
+export function downloadBundleMarkdown(table: string, markdown: string) {
+  download(bundleFilename(table, "md"), markdown, "text/markdown");
+}
+
+export function downloadBundleJson(table: string, bundle: unknown) {
+  download(bundleFilename(table, "json"), JSON.stringify(bundle, null, 2),
+           "application/json");
+}

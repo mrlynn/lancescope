@@ -33,6 +33,18 @@ installable package, not a wait.
 which access path Lance chose, what it read, and the script that reproduces it
 elsewhere. Compare two versions of a table and run the same query against both.
 
+**Checks the data, when you ask it to.** Duplicates, rows missing their content, an
+imbalanced label column, a split that leaks, embeddings that came back dead. Those read
+your columns rather than a manifest, so they are a separate surface: priced from the
+file footers before anything runs, cancellable — and cancelling stops the work rather
+than the wait — and every result carries the bytes it cost beside the evidence it
+found.
+
+**Lets the answer leave.** The whole diagnosis comes out as one document — findings
+with their evidence, the plan, the exact cost, the reader underneath — as markdown for
+an issue or JSON another console opens. The rows it returned stay behind, and so does
+the database root unless you ask for it.
+
 **Says what it already knows.** Ten rules over metadata — an unindexed vector column,
 small-file counts that would be misleading to act on, tombstone debt, a fragment split
 too coarse to feed a loader's workers — each carrying the numbers it was derived from.
@@ -45,7 +57,13 @@ the tokens and dollars it spent beside the bytes it read.
 ## What it does not do
 
 It does not write. No route creates, compacts, restores or deletes anything, and the
-only file the whole project writes is its own settings file.
+only file the whole project writes is its own settings file — except the ingest wizard,
+which creates new tables and never opens an existing one.
+
+It does not tell you whether your data is *good*. The data checks report what is
+missing, repeated, imbalanced or dead; whether a label is correct, whether two rows
+mean the same thing, and what made a distribution move are not visible from here, and
+every panel that could be mistaken for saying otherwise says so.
 
 It is not a general SQL IDE, an analytics notebook, or an autonomous administrator.
 Those positions are crowded, and taking one would dilute the only advantage it has:

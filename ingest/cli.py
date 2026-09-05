@@ -259,6 +259,22 @@ def _read_surface():
     return headless, routes, HTTPException
 
 
+def _await(route_coro):
+    """Await a route and hand back the response itself.
+
+    `_call` unwraps the JSON, which is right for every route that only speaks JSON.
+    The bundle route also renders markdown, and a caller that wants the file wants
+    the body it produced rather than a parse of it.
+    """
+    import asyncio
+
+    return asyncio.run(_identity(route_coro))
+
+
+async def _identity(route_coro):
+    return await route_coro
+
+
 def _call(route_coro):
     """Await a route and hand back the JSON it produced.
 
@@ -296,8 +312,14 @@ def _table_missing(name: str, cat) -> int:
         tables = cat.discover()
     except OSError:
         tables = []
-    if tables and len(tables) <= 10:
-        print("  this root holds: " + ", ".join(sorted(tables)), file=sys.stderr)
+    # A cliff at ten was the wrong shape: a root with eleven tables said nothing at
+    # all, which is least helpful exactly where a typo is most likely. Name what
+    # fits and count the rest.
+    if tables:
+        shown = sorted(tables)[:10]
+        rest = len(tables) - len(shown)
+        line = "  this root holds: " + ", ".join(shown)
+        print(line + (f", and {rest} more" if rest else ""), file=sys.stderr)
     return EXIT_USAGE
 
 
@@ -393,6 +415,176 @@ def cmd_run_config(args) -> int:
               f"the file, not acted on", file=sys.stderr)
     if not cfg["findings"]["analysis_complete"]:
         print("the findings sweep was incomplete; the file says so", file=sys.stderr)
+    return EXIT_OK
+
+
+def cmd_check(args) -> int:
+    """The data checks, as a gate a training pipeline can put in front of a run.
+
+    `--quote` prints what it would read and stops. That is the default posture this
+    command wants people to have: `lancescope findings` costs kilobytes and can be run
+    without thinking, and this one reads columns, so the first thing it offers is the
+    bill rather than the answer.
+
+    Exit codes match `findings`, and for the same reason: a check that could not run
+    is `3` and not `1`, because "this split leaks" and "we could not look at your
+    split" are different facts and a pipeline that treats them the same has stopped
+    being a gate.
+    """
+    import asyncio
+
+    headless, routes, HTTPException = _read_surface()
+    from server import scanjobs
+    from server.intel import datascan
+    from server.routes import datascan as scan_routes
+
+    unknown = [c for c in (args.checks or []) if c not in datascan.BY_ID]
+    if unknown:
+        print(f"unknown check(s): {', '.join(unknown)} — known: "
+              f"{', '.join(c.id for c in datascan.CHECKS)}", file=sys.stderr)
+        return EXIT_USAGE
+
+    cat = _resolved(headless)
+    if cat is None:
+        return EXIT_USAGE
+    scan_routes.bind(cat)
+
+    columns = [c.strip() for c in args.columns.split(",") if c.strip()] if args.columns else []
+    wanted = args.checks or [c.id for c in datascan.CHECKS]
+    selections = [{"check": c, "columns": columns if len(wanted) == 1 else []}
+                  for c in wanted]
+
+    try:
+        quote = _call(scan_routes.plan(
+            args.table, scan_routes.PlanBody(selections=selections)))
+    except HTTPException as e:
+        if e.status_code == 400:
+            print(e.detail, file=sys.stderr)
+            return EXIT_USAGE
+        if e.status_code != 404:
+            raise
+        return _table_missing(args.table, cat)
+
+    quoted = {q["check"]: q for q in quote["checks"] if q["check"] in set(wanted)}
+    if args.quote:
+        if args.json:
+            print(json.dumps(quote, indent=2))
+            return EXIT_OK
+        print(f"{args.table}  what these checks would read\n")
+        for cid in wanted:
+            q = quoted[cid]
+            state = q["capability"]["state"]
+            # Three cases, not two: available and priced, available and unweighable
+            # — the index probe — and refused. The middle one printed nothing at all
+            # when this had only two branches.
+            note = (q["quote"] or q["estimate_reason"] if state == "available"
+                    else q["capability"]["reason"])
+            print(f"  {cid:<18} {state:<12} {note}")
+        # Not `read_bytes`, which is zero here and would read as "this was free".
+        # The footers are read through a separate reader the handle cannot see, and
+        # `server/estimate.py` marks that `off_meter` rather than folding it in.
+        footers = sum(q["estimate"]["footer_bytes"] for q in quoted.values()
+                      if q.get("estimate"))
+        print(f"\n  weighed from the file footers — {human_bytes(footers)} through a "
+              f"reader this meter cannot see. Nothing was scanned.")
+        return EXIT_OK
+
+    runnable = [s for s in selections
+                if quoted[s["check"]]["capability"]["state"] == "available"]
+    if not runnable:
+        for cid in wanted:
+            print(f"{cid}: {quoted[cid]['capability']['reason']}", file=sys.stderr)
+        return EXIT_USAGE
+
+    job = scanjobs.submit(cat, args.table, runnable)
+    interrupted = False
+    try:
+        while job.state in scanjobs.LIVE_STATES:
+            asyncio.run(asyncio.sleep(0.2))
+    except KeyboardInterrupt:
+        # The one place a Ctrl-C in this project stops the work rather than the wait.
+        interrupted = True
+        scanjobs.cancel(job.id)
+        while job.state in scanjobs.LIVE_STATES:
+            asyncio.run(asyncio.sleep(0.1))
+
+    body = job.as_dict()
+    if args.json:
+        print(json.dumps(body, indent=2))
+    else:
+        print_check(body)
+    print(f"read {human_bytes(job.read_bytes)} in {job.read_iops:,} IOs",
+          file=sys.stderr)
+
+    if interrupted or job.state == scanjobs.CANCELLED:
+        print("cancelled; the checks that did not run are not a clean result",
+              file=sys.stderr)
+        return EXIT_INCOMPLETE
+    skipped = [r for r in job.results if r.state != "done"]
+    if skipped:
+        print("could not run: "
+              + ", ".join(f"{r.check} ({r.state})" for r in skipped), file=sys.stderr)
+    if not args.fail_on:
+        return EXIT_OK
+    if skipped:
+        return EXIT_INCOMPLETE
+    warn = sum(1 for f in job.findings if f.severity == "warn")
+    breached = warn if args.fail_on == "warn" else len(job.findings)
+    return EXIT_FAILED if breached else EXIT_OK
+
+
+def print_check(body: dict) -> None:
+    findings = body.get("findings", [])
+    warn = sum(1 for f in findings if f["severity"] == "warn")
+    print(f"{body['table']} v{body['version']}  {len(findings)} finding(s) — "
+          f"{warn} warn, {len(findings) - warn} note")
+    for r in body.get("results", []):
+        print(f"\n  {r['check']}  {r['state']}  "
+              f"{human_bytes(r['read_bytes'])} in {r['ms']:,} ms")
+        if r["state"] != "done":
+            for line in _wrap(r["detail"], 80):
+                print(f"      {line}")
+        for f in r["findings"]:
+            print(f"    {f['severity']:<5} {f['title']}")
+            if f["severity"] == "warn":
+                for line in _wrap(f["claim"], 80):
+                    print(f"          {line}")
+
+
+def cmd_bundle(args) -> int:
+    """The whole diagnosis as one file, for somebody who is not at this screen.
+
+    Markdown on stdout by default rather than JSON, because the common use is
+    `lancescope bundle moments > report.md` and pasting it somewhere. `--json` gives
+    the machine-readable document, and `--paths` is the deliberate opt-out of
+    redaction — a report going into a public issue should not have to be edited
+    afterwards to remove a username.
+    """
+    headless, routes, HTTPException = _read_surface()
+    from server import bundle as server_bundle
+
+    cat = _resolved(headless)
+    if cat is None:
+        return EXIT_USAGE
+    fmt = "json" if args.json else "md"
+    paths = server_bundle.KEPT if args.paths else server_bundle.REDACTED
+    try:
+        response = _await(routes.bundle(args.table, facet=args.facet,
+                                        columns=args.columns, format=fmt, paths=paths))
+    except HTTPException as e:
+        if e.status_code == 400:
+            print(e.detail, file=sys.stderr)
+            return EXIT_USAGE
+        if e.status_code != 404:
+            raise
+        return _table_missing(args.table, cat)
+
+    # stdout is the artifact; everything about it goes to stderr, so a redirect
+    # produces a file and not a file plus commentary.
+    body = response.body.decode("utf-8")
+    print(body, end="" if body.endswith("\n") else "\n")
+    if not args.paths:
+        print("paths are redacted; pass --paths to keep them", file=sys.stderr)
     return EXIT_OK
 
 
@@ -607,6 +799,35 @@ def build_parser() -> argparse.ArgumentParser:
                                      "every ordinary one)")
     r.add_argument("--json", action="store_true")
     r.set_defaults(fn=cmd_run_config)
+
+    k = sub.add_parser("check", help="checks that read the data — duplicates, missing "
+                                     "content, class balance, split leakage, dead "
+                                     "embeddings. Quoted before it reads anything")
+    k.add_argument("table", help="table name under the resolved root")
+    k.add_argument("checks", nargs="*",
+                   help="which checks to run (default: all that can run here)")
+    k.add_argument("--columns", help="comma-separated columns, when running one check "
+                                     "that needs them named")
+    k.add_argument("--quote", action="store_true",
+                   help="print what these checks would read and stop")
+    k.add_argument("--fail-on", choices=["warn", "any"],
+                   help="exit non-zero when something is found")
+    k.add_argument("--json", action="store_true")
+    k.set_defaults(fn=cmd_check)
+
+    b = sub.add_parser("bundle", help="one table's whole diagnosis as a document to "
+                                      "hand to somebody who is not at this screen")
+    b.add_argument("table", help="table name under the resolved root")
+    b.add_argument("--columns", help="comma-separated columns to weigh (default: every "
+                                     "ordinary one)")
+    b.add_argument("--facet", help="narrow the findings to one reader's question, "
+                                   "e.g. training")
+    b.add_argument("--json", action="store_true",
+                   help="the machine-readable document rather than the markdown")
+    b.add_argument("--paths", action="store_true",
+                   help="keep the database root; by default it is redacted, because a "
+                        "local path carries a username and a bucket carries an employer")
+    b.set_defaults(fn=cmd_bundle)
 
     o = sub.add_parser("open", help="open a table in the console, working out which "
                                     "directory is the database")

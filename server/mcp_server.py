@@ -55,6 +55,18 @@ than predicting a read: the answer is a property of the table and survives being
 handed to a reader this server does not own. It answers for a full scan and says so —
 do not reach for it on a vector or full-text query.
 
+Asked whether the *data* is any good — duplicates, missing content, a leaked split,
+dead embeddings — call data_scan_estimate. Those checks read columns rather than
+metadata, so this prices them and does not run them. Give the person the quote; the
+scan itself is a button in their console, which is where a decision to spend megabytes
+belongs.
+
+Asked to write up or share what is wrong with a table — for an issue, a colleague, a
+report — call table_bundle rather than assembling the other tools' answers into prose.
+It returns the same numbers as one document that says what collecting it cost, and it
+redacts the database root, because a path carries a username and a bucket carries an
+employer.
+
 Asked to *set up* a run rather than judge one, call table_run_config. It returns the
 block to keep beside the training code — uri, version, columns, what they weigh, the
 worker ceiling — so that none of it has to be retyped from a screen, and so the run
@@ -146,6 +158,60 @@ async def table_run_config(name: str, columns: str | None = None) -> dict:
         return NOT_CONFIGURED
     try:
         return await _body(await routes.run_config(name, columns=columns))
+    except Exception as e:                                   # noqa: BLE001
+        return _missing(name, e)
+
+
+@server.tool(annotations=READ_ONLY,
+             description="What it would cost to check this table's data — "
+                         "duplicates, missing content, class balance, split leakage, "
+                         "dead embeddings, near-duplicates. Every other tool here "
+                         "reads metadata; those checks read columns, so this prices "
+                         "them from the file footers before any of it is read, and "
+                         "reports which ones cannot run on this table and why. On a "
+                         "media table the quote carries the interesting half: "
+                         "reading every video's descriptor costs kilobytes, and the "
+                         "gigabytes they point at are not read. Answer with the "
+                         "quote and let the person decide — running a scan is a "
+                         "button in the console and deliberately not a tool here, "
+                         "because an agent should not be able to spend megabytes of "
+                         "somebody's read budget on a turn.")
+async def data_scan_estimate(name: str) -> dict:
+    if catalog() is None:
+        return NOT_CONFIGURED
+    try:
+        from server.routes import datascan as scan_routes
+
+        scan_routes.bind(catalog())
+        return await _body(await scan_routes.plan(name))
+    except Exception as e:                                   # noqa: BLE001
+        return _missing(name, e)
+
+
+@server.tool(annotations=READ_ONLY,
+             description="One table's whole diagnosis as a single document, for "
+                         "handing to somebody who is not looking at this database: "
+                         "the schema, the versions, the indices, the fragment "
+                         "layout, the findings with their evidence, what a full pass "
+                         "weighs, the reader underneath, and what assembling all of "
+                         "it cost in bytes. Nothing here is measured that the other "
+                         "tools would not measure — this collects them, so an answer "
+                         "can leave the session it was found in. Paths are redacted "
+                         "by default because a root carries a username or an "
+                         "employer; the document says which mode produced it. Reach "
+                         "for this when asked to write up, report, or share what is "
+                         "wrong with a table, rather than retyping the other tools' "
+                         "answers into prose.")
+async def table_bundle(name: str, facet: str | None = None) -> dict:
+    # No `paths` parameter, and no query. The redaction default is the safe one and an
+    # agent has no way to know whether its output is about to be pasted somewhere
+    # public; and a query in a bundle is a query this tool would have to run, which is
+    # spending bytes on a turn. Both are the console's to offer, for the same reason
+    # `read_rows` does not offer `expand`.
+    if catalog() is None:
+        return NOT_CONFIGURED
+    try:
+        return await _body(await routes.bundle(name, facet=facet))
     except Exception as e:                                   # noqa: BLE001
         return _missing(name, e)
 

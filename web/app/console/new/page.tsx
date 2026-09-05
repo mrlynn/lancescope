@@ -35,6 +35,33 @@ const ALL_KINDS: MediaKind[] = ["image", "video", "audio", "pdf"];
 const POLL_MS = 1000;
 const SLOW_POLL_MS = 5000;
 
+/** What this build can decode, before a folder is named.
+ *
+ *  A build that cannot decode video is a clear limitation; a build that lets somebody
+ *  choose a folder of video and then greys out the row is the same limitation
+ *  discovered later and read as a fault. So it goes first, in one sentence, and the
+ *  matrix at the foot of the page carries the detail.
+ */
+function Decodes({ caps }: { caps: IngestCapabilities }) {
+  const can = ALL_KINDS.filter((k) => caps.media[k]?.available
+                                   && caps.implemented.includes(k));
+  const cannot = ALL_KINDS.filter((k) => !(caps.media[k]?.available
+                                        && caps.implemented.includes(k)));
+  if (!cannot.length) return null;
+  return (
+    <p className="text-[13px] leading-relaxed max-w-2xl mb-8"
+       style={{ color: "var(--body)" }}>
+      <span className="mono" style={{ color: "var(--index)" }}>
+        This build ingests {can.join(" and ") || "nothing"}.
+      </span>{" "}
+      {cannot.join(" and ")} need{cannot.length === 1 ? "s" : ""} ffmpeg, which is a
+      binary rather than a Python package and is not shipped here — files of those
+      kinds are counted and left alone rather than failing partway through a run. From
+      a checkout, <span className="mono">brew install ffmpeg</span> and they work.
+    </p>
+  );
+}
+
 export default function NewDatabase() {
   const [caps, setCaps] = useState<IngestCapabilities | null>(null);
   const [source, setSource] = useState("");
@@ -156,10 +183,18 @@ export default function NewDatabase() {
       <AppBar crumbs={[{ label: "Console", href: "/console" }, { label: "New database" }]} />
 
       {!job && (
-        <p className="text-[14px] text-[var(--haze)] leading-relaxed max-w-2xl mb-8">
-          Point this at a folder of your own media and it will build a Lance table you
-          can search — by words, and by what the pictures look like.
-        </p>
+        <>
+          <p className="text-[14px] text-[var(--haze)] leading-relaxed max-w-2xl mb-4">
+            Point this at a folder of your own media and it will build a Lance table you
+            can search — by words, and by what the pictures look like.
+          </p>
+          {/* Said before the folder is chosen, not after the scan.
+              `ingest/core/binaries.py` has always reported this correctly per medium
+              — but it reported it once somebody had already picked a directory of
+              video and been told 412 files were found and none could be read. What a
+              build can decode is a property of the build, so it belongs on the way in. */}
+          {caps && <Decodes caps={caps} />}
+        </>
       )}
 
       {error && (

@@ -420,6 +420,14 @@ export type QuerySpec = {
   k?: number;
   metric?: string;
   prefilter?: boolean;
+  /** How long the caller is prepared to wait, in seconds. Not how long the query may
+   *  run — Lance offers no way to interrupt a scan, so this decides when the request
+   *  gives up and the server says so in a 408. Absent means the server's own default.
+   *
+   *  Not part of what a query *is*: `specKey` in `web/app/lib/queries.ts` does not
+   *  include it, so re-running the same question with a longer wait moves one history
+   *  entry rather than creating a second. */
+  timeout_s?: number | null;
 };
 
 export type QueryResult = {
@@ -629,3 +637,100 @@ export const compareVersions = (n: string, a: number, b: number) =>
 
 export const compareQuery = (n: string, a: number, b: number, spec: QuerySpec) =>
   post<QueryComparison>(`/tables/${n}/compare/query`, { ...spec, a, b });
+
+/* ------------------------------------------------------------------ bundle */
+
+/** One table's diagnosis as a document, for somebody who is not looking at this
+ *  console. Shapes mirror `server/bundle.py`.
+ *
+ *  Deliberately loose about the sections. Each one is the body of a route typed
+ *  above, and re-declaring them here as a second set of types would give the viewer
+ *  two definitions of `Findings` that could disagree — so the sections are the types
+ *  they already are, and everything the viewer renders is optional because a bundle
+ *  built against a remote root legitimately arrives with a section missing and the
+ *  reason recorded in `incomplete`. */
+export type Bundle = {
+  lancescope_bundle: number;
+  generated_at: string;
+  generated_by: string;
+  table: string;
+  paths: "redacted" | "kept";
+  cost: { read_bytes: number; read_iops: number; off_meter_ms: number; basis: string };
+  incomplete: { section: string; error: string; message: string }[];
+  environment: RuntimeReport;
+  connection: {
+    scheme: string;
+    root: string;
+    provenance: string;
+    capabilities: RootCapabilities;
+  };
+  schema?: TableDetail;
+  versions?: Versions;
+  indices?: Indices;
+  fragments?: Fragments;
+  findings?: Findings;
+  weights?: Estimate;
+  /** The diagnosis without the rows. `rows_included` is stated rather than implied,
+   *  so a reader who finds none knows the bundle withheld them rather than that the
+   *  query matched nothing. */
+  query: (Omit<QueryResult, "rows"> & { rows_included: false }) | null;
+  saved_queries: StoredQuerySpec[];
+};
+
+/** A saved query as it travels in a bundle. Structurally what `web/app/lib/queries.ts`
+ *  keeps in localStorage, declared here rather than imported because that module is
+ *  `"use client"` and this one is read by the viewer at build time too. */
+export type StoredQuerySpec = {
+  id: string;
+  table: string;
+  spec: QuerySpec;
+  name?: string;
+  at: number;
+};
+
+export type BundleOptions = {
+  facet?: string | null;
+  columns?: string[] | null;
+  /** Redacted by default, matching the server. A local root carries a username and a
+   *  bucket carries an employer, and neither is a thing to discover after pasting
+   *  into a public issue. */
+  paths?: "redacted" | "kept";
+};
+
+function bundleQuery(o: BundleOptions, format: "json" | "md"): string {
+  const p = new URLSearchParams({ format, paths: o.paths ?? "redacted" });
+  if (o.facet) p.set("facet", o.facet);
+  if (o.columns?.length) p.set("columns", o.columns.join(","));
+  return p.toString();
+}
+
+export const getBundle = (n: string, o: BundleOptions = {}) =>
+  get<Bundle>(`/tables/${n}/bundle?${bundleQuery(o, "json")}`);
+
+/** The same document with a query and its diagnosis inside it. The query runs on the
+ *  server rather than being handed in already run: a bundle whose result came from a
+ *  different moment than its findings would describe two versions of one table and
+ *  say neither. */
+export const getBundleWithQuery = (
+  n: string, spec: QuerySpec, saved: StoredQuerySpec[], o: BundleOptions = {},
+) => post<Bundle>(`/tables/${n}/bundle?${bundleQuery(o, "json")}`,
+                  { ...spec, saved_queries: saved });
+
+/** The markdown rendering, for pasting where JSON would not be read. Rendered by the
+ *  server from the same object, so the file somebody reads and the file their script
+ *  parses cannot describe different tables. */
+export async function getBundleMarkdown(
+  n: string, o: BundleOptions = {}, spec?: QuerySpec, saved?: StoredQuerySpec[],
+): Promise<string> {
+  const path = `/api/catalog/tables/${n}/bundle?${bundleQuery(o, "md")}`;
+  const res = spec
+    ? await fetch(path, {
+        method: "POST",
+        cache: "no-store",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ...spec, saved_queries: saved ?? [] }),
+      })
+    : await fetch(path, { cache: "no-store" });
+  if (!res.ok) throw new ApiError(res.status, `${res.status}`);
+  return res.text();
+}

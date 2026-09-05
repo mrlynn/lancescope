@@ -21,6 +21,7 @@ import {
   InsightsTab, PanelFindings, PartialAnalysis,
 } from "@/app/components/console/Findings";
 import { CompareTab } from "@/app/components/console/CompareTab";
+import { DataTab } from "@/app/components/console/DataTab";
 import { TrainingTab, trainingFindings } from "@/app/components/console/TrainingTab";
 import { QueryTab } from "@/app/components/console/QueryTab";
 import { usePins, useRecents } from "@/app/lib/recents";
@@ -49,11 +50,15 @@ const TAB_GROUPS: { id: string; icon: IconName }[][] = [
     { id: "compare", icon: "history" },
     { id: "training", icon: "play" },
     { id: "insights", icon: "spark" },
+    // Last in the group that asks something of the table, and last on purpose: it is
+    // the only tab that reads columns, and the only one that spends more than
+    // kilobytes. Nothing on it runs until somebody presses a button.
+    { id: "data", icon: "rows" },
   ],
 ];
 const TABS = TAB_GROUPS.flat();
 type Tab = "schema" | "versions" | "indices" | "fragments" | "query"
-  | "compare" | "training" | "insights";
+  | "compare" | "training" | "insights" | "data";
 
 // Rows was a second query panel: a plain filter box beside one that completed
 // columns, an English box the other did not have, and the same grid under both.
@@ -286,6 +291,14 @@ export default function Console() {
               aria-label="Build a database from files">
           <Icon name="plus" size={16} />
         </Link>
+        {/* The receiving end of the bundle button. It lives up here rather than
+            beside the export, because the person who needs it arrived with a file
+            and no table selected — there is nothing on screen to hang it off. */}
+        <Link href="/console/bundle" className="iconbtn"
+              data-tip="Open a bundle somebody sent you"
+              aria-label="Open a diagnostic bundle">
+          <Icon name="external" size={16} />
+        </Link>
         {demoReady && (
           <Link href="/demo" className="iconbtn" data-tip="Ctrl-F for Video" aria-label="Open the demo">
             <Icon name="play" size={16} />
@@ -480,6 +493,9 @@ export default function Console() {
                 ? <CompareTab key={picked} table={picked} />
                 : <Empty>pick a table to compare</Empty>)}
               {tab === "insights" && <InsightsTab d={findings} table={picked} ai={ai} />}
+              {tab === "data" && (picked
+                ? <DataTab key={picked} table={picked} />
+                : <Empty>pick a table to check</Empty>)}
             </div>
           </section>
         </div>

@@ -24,6 +24,7 @@ import {
   explainQuery, getQueryCapabilities, getQueryCompletions, runQuery, validateFilter,
 } from "@/app/lib/catalog";
 import { fmtBytes } from "@/app/lib/api";
+import BundleButton from "@/app/components/console/BundleButton";
 import { download, toCsv, toJson } from "@/app/lib/export";
 import {
   type TextSearchCapability, embedQuery, getTextSearchCapability,
@@ -86,6 +87,12 @@ export function QueryTab({ table, root, ai }: {
   // work stopped.
   const [aborter, setAborter] = useState<AbortController | null>(null);
   const [cancelled, setCancelled] = useState(false);
+  // How long this console will wait, sent with the query. Not how long the query may
+  // run: the server says so in its own words on a 408, and Lance would not honour a
+  // deadline if we set one. Named state rather than a red error box, because nothing
+  // is broken — the wait ran out, and the two read differently to whoever is looking.
+  const [timeout, setTimeoutS] = useState("30");
+  const [timedOut, setTimedOut] = useState<string | null>(null);
   const [saveName, setSaveName] = useState("");
 
   // Both lists are per database and live in the browser, beside recents and pins —
@@ -219,7 +226,7 @@ export function QueryTab({ table, root, ai }: {
     const wide = over?.limit ?? (Number(limit) || 25);
     const controller = new AbortController();
     setAborter(controller);
-    setBusy(true); setError(null); setCancelled(false);
+    setBusy(true); setError(null); setCancelled(false); setTimedOut(null);
     const wantsDescription =
       (mode === "vector" || mode === "hybrid") && describe.trim().length > 0;
 
@@ -239,6 +246,9 @@ export function QueryTab({ table, root, ai }: {
       filter: filter.trim() || null,
       limit: wide,
       offset: off,
+      // Null rather than absent when the box is empty or nonsense, so the server
+      // falls back to its own default instead of being handed `NaN`.
+      timeout_s: Number(timeout) > 0 ? Number(timeout) : null,
       expand: exp.length ? exp : null,
       ...(mode === "fts" || mode === "hybrid" ? { text } : {}),
       ...(mode === "vector" || mode === "hybrid"
@@ -263,6 +273,10 @@ export function QueryTab({ table, root, ai }: {
       setResult(null);
       if (e instanceof DOMException && e.name === "AbortError") {
         setCancelled(true);
+      } else if (e instanceof ApiError && e.status === 408) {
+        // Not an error. The wait ran out and the scan is still going, which is a
+        // different thing to say and a different thing to do about it.
+        setTimedOut(e.message);
       } else {
         // A query someone typed is theirs to fix; say what Lance said about it.
         setError(e instanceof ApiError ? e.message : "the query could not be run");
@@ -272,7 +286,7 @@ export function QueryTab({ table, root, ai }: {
       setAborter(null);
     }
   }, [table, mode, filter, limit, text, vectorColumn, likeRow, k, prefilter, describe,
-      expand, record]);
+      expand, record, timeout]);
 
   // Opening the panel reads the first page. The console used to answer "pick a
   // mode and press Run" to the question "what is in this table", which is a click
@@ -419,6 +433,12 @@ export function QueryTab({ table, root, ai }: {
           </Field>
         ) : null}
 
+        <Field label="wait">
+          <input className="qin !w-[70px]" value={timeout} inputMode="numeric"
+                 title="How long this console waits, in seconds. The scan itself cannot be interrupted."
+                 onChange={(e) => setTimeoutS(e.target.value)} />
+        </Field>
+
         <button className="btn btn-accent mono text-[10px] tracking-[0.14em] uppercase"
                 onClick={() => run()} disabled={busy}>
           <Icon name="search" size={14} />
@@ -492,6 +512,17 @@ export function QueryTab({ table, root, ai }: {
           <span className="mono" style={{ color: "var(--index)" }}>stopped waiting.</span>{" "}
           The scan is still running on the server until it finishes — Lance offers no
           way to interrupt one, so this abandoned the wait, not the work.
+        </div>
+      )}
+
+      {timedOut && (
+        <div className="text-[12px] leading-relaxed px-3.5 py-3 rounded-sm mb-4"
+             style={{ background: "rgb(var(--index-rgb) / 0.08)",
+                      border: "1px solid rgb(var(--index-rgb) / 0.35)",
+                      color: "var(--body)" }}>
+          <span className="mono" style={{ color: "var(--index)" }}>timed out.</span>{" "}
+          {timedOut} Raise the wait above, or narrow the query — the weight under the
+          filter box says what a full pass costs before you spend it again.
         </div>
       )}
 
@@ -635,6 +666,13 @@ export function QueryTab({ table, root, ai }: {
               as the summaries shown here
             </span>
           </div>
+          {/* The diagnosis, not the rows. Directly under the thing it describes, and
+              separate from the csv/json above because those two export what is on
+              screen and this exports why it looks like that. */}
+          <BundleButton table={table} spec={currentSpec()}
+                        saved={saved.filter((q) => q.table === table)}
+                        note="this query, its plan, what it cost, and everything the findings say about the table" />
+
           <div className="flex flex-wrap items-center gap-2 mt-4">
             <span className="eyebrow">save as</span>
             <input className="qin w-[220px]" value={saveName}

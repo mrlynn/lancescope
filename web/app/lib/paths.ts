@@ -79,6 +79,13 @@ export const PATHS: Path[] = [
           + "fragment costs an epoch, and what share of the table is embeddings.",
       },
       {
+        slug: "howto-check-data",
+        why: "Those rules read the layout. This reads the data — duplicates, "
+             + "missing content, a split that leaks — and prices each check before "
+             + "it spends a byte, which is the only reason it can sit beside a "
+             + "console whose claim is that it says what things cost.",
+      },
+      {
         slug: "howto-diagnose",
         why: "A retrieval eval that scans every vector is a slow eval with no error "
           + "message. This is how to see the access path before you spend an hour on "

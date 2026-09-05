@@ -16,10 +16,12 @@ The console's read surface, as tools an agent can call. Every one is the HTTP ro
 
 | tool | read-only | what it does |
 | --- | --- | --- |
+| `data_scan_estimate` | yes | What it would cost to check this table's data — duplicates, missing content, class balance, split leakage, dead embeddings, near-duplicates. Every other tool here reads metadata; those checks read columns, so this prices them from the file footers before any of it is read, and reports which ones cannot run on this table and why. On a media table the quote carries the interesting half: reading every video's descriptor costs kilobytes, and the gigabytes they point at are not read. Answer with the quote and let the person decide — running a scan is a button in the console and deliberately not a tool here, because an agent should not be able to spend megabytes of somebody's read budget on a turn. |
 | `describe_table` | yes | One table in full: every column with its type, whether it is a blob column, dataset statistics, and the real on-disk byte split between blob side files and everything else. |
 | `estimate_scan` | yes | What a full pass over a table's columns weighs, worked out from the file footers without reading a single row — so it holds for any reader, DuckDB, Spark or Ray included, none of which will say what they are about to move. Pass columns as a comma-separated list to weigh one projection. Two numbers come back and both matter: 'bytes' is what the columns occupy, 'floor_bytes' is what a pass costs once per-file overhead is counted, and on a table of small files Lance reads each one whole so the floor can be many times the weight. Quote the floor when it is larger. This covers a full scan only — it does not say what a vector or full-text query reads, and the caveats it returns say where else the figure stops being true. |
 | `list_tables` | yes | Every table in the database: rows, version, fragments, indices and columns, plus what listing them cost. Reads manifests, never data. |
 | `read_rows` | yes | A page of rows, with an optional SQL filter. Heavy columns — vectors, images, blobs — are described rather than read, and cannot be expanded through this tool. The response says what the read cost. |
+| `table_bundle` | yes | One table's whole diagnosis as a single document, for handing to somebody who is not looking at this database: the schema, the versions, the indices, the fragment layout, the findings with their evidence, what a full pass weighs, the reader underneath, and what assembling all of it cost in bytes. Nothing here is measured that the other tools would not measure — this collects them, so an answer can leave the session it was found in. Paths are redacted by default because a root carries a username or an employer; the document says which mode produced it. Reach for this when asked to write up, report, or share what is wrong with a table, rather than retyping the other tools' answers into prose. |
 | `table_findings` | yes | What this console has worked out about a table — an unindexed vector column, small-file counts that would be misleading to act on, tombstone debt — each with the numbers it was derived from. No model wrote these. Pass facet='training' for only the ones a training run pays for: how few workers the fragment split can feed, what an epoch reads, and what an unindexed vector costs per query. |
 | `table_fragments` | yes | Physical layout: what each fragment holds and what it weighs, in both the figure Lance reports and the bytes it actually occupies, which differ by orders of magnitude for a blob table. |
 | `table_indices` | yes | Indices on a table, their coverage, and — more usefully — which columns have none. An unindexed vector column is why a similarity search reads every row. |
@@ -59,6 +61,18 @@ Asked what something will cost to read, call estimate_scan. It weighs columns ra
 than predicting a read: the answer is a property of the table and survives being
 handed to a reader this server does not own. It answers for a full scan and says so —
 do not reach for it on a vector or full-text query.
+
+Asked whether the *data* is any good — duplicates, missing content, a leaked split,
+dead embeddings — call data_scan_estimate. Those checks read columns rather than
+metadata, so this prices them and does not run them. Give the person the quote; the
+scan itself is a button in their console, which is where a decision to spend megabytes
+belongs.
+
+Asked to write up or share what is wrong with a table — for an issue, a colleague, a
+report — call table_bundle rather than assembling the other tools' answers into prose.
+It returns the same numbers as one document that says what collecting it cost, and it
+redacts the database root, because a path carries a username and a bucket carries an
+employer.
 
 Asked to *set up* a run rather than judge one, call table_run_config. It returns the
 block to keep beside the training code — uri, version, columns, what they weigh, the
