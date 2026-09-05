@@ -132,16 +132,23 @@ of a guess as claiming they do.
 
 ## What each root can do
 
-| | local | `hf://` | object stores | `db://` |
-| --- | --- | --- | --- | --- |
-| list tables | ✅ | ✅ | ✅ | ✅ |
-| schema, versions, indices, rows | ✅ | ✅ | ⚠️ | ⚠️ |
-| byte cost of a read | ✅ | ✅ | ⚠️ | ⚠️ |
-| on-disk blob split | ✅ | ❌ | ❌ | ❌ |
+| | local | `hf://` | `s3://` | `gs` `az` `abfss` | `db://` |
+| --- | --- | --- | --- | --- | --- |
+| list tables | ✅ | ✅ | ✅ | ✅ | ✅ |
+| schema, versions, indices, rows | ✅ | ✅ | ✅ | ⚠️ | ⚠️ |
+| byte cost of a read | ✅ | ✅ | ✅ | ⚠️ | ⚠️ |
+| on-disk blob split | ✅ | ❌ | ❌ | ❌ | ❌ |
 
-⚠️ means **unverified**, not broken: the mechanism is the same one that works locally
-and on the Hub, and nothing in this repository has yet measured it against a live
-bucket or service. It is reported that way until somebody has.
+⚠️ means **unverified**, not broken: those schemes run the same lines as `s3://` —
+the same namespace, the same object store — but sharing a code path is an argument
+rather than a measurement, and nothing here has yet pointed at a live bucket of that
+kind. They are reported that way until somebody does.
+
+S3 has been. Measured against a real bucket on pylance 11.0.0, 2026-09-05: **the byte
+counts are the same as on disk and only the latency differs.** A table opens for 1,226
+bytes in 2 IOs either way — 433 ms against the bucket, no measurable time locally. One
+data-file footer is 8,192 bytes both ways: 407 ms remote against 0.49 ms local, which
+is why footers are sampled above a budget and the answer says how many it read.
 
 On an older Lance reader the `db://` column narrows: listing works as far back as the
 supported floor, while opening a table through a catalog needs a newer `lance.dataset`.

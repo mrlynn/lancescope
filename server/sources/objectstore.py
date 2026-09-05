@@ -69,10 +69,28 @@ DISCOVER_REASON = (
     "lists is a bucket that opens."
 )
 
+# Schemes whose reads have actually been measured against a live store. The others
+# share every line of this module below `handles()` — the same namespace, the same
+# object store — and that is an argument, not a measurement. They stay unverified
+# until somebody points this at one, which is the whole reason the third state
+# exists.
+VERIFIED = frozenset({"s3"})
+
+MEASURED_REASON = (
+    "Measured against `s3://mlynn-data-lake-s3/lancescope-test` on pylance 11.0.0, "
+    "2026-09-05. The byte counts are the same as on disk and only the latency "
+    "differs: `moments` opens for 1,226 bytes in 2 IOs either way, taking 433 ms "
+    "against a bucket and no measurable time locally. Twenty rows cost 445,824 bytes "
+    "in 24 IOs remotely against 387,224 in 25 locally — the object store reads ahead "
+    "differently, so the figures are close rather than identical. One data-file "
+    "footer is 8,192 bytes both ways: 407 ms remote, 0.49 ms local, which is why "
+    "footers are sampled above a budget and the answer says how many it read."
+)
+
 UNVERIFIED_REASON = (
     "Lance reads a bucket through the same object store it reads a disk through, and "
-    "the listing here goes through that store — but no read against a live bucket has "
-    "been measured from this repository, and claiming a number that has not been "
+    "the listing here goes through that store — but the reads measured from this "
+    "repository were against S3, not this scheme. Claiming a number that has not been "
     "taken is what the third state is for."
 )
 
@@ -98,13 +116,16 @@ class ObjectStoreSource:
             return RootCapabilities(
                 remote=True, discover=unusable, inspect=unusable,
                 disk_split=unusable, io_meter=unusable, column_bytes=unusable)
+        reads = (Capability(AVAILABLE, MEASURED_REASON)
+                 if self.scheme in VERIFIED
+                 else Capability(UNVERIFIED, UNVERIFIED_REASON))
         return RootCapabilities(
             remote=True,
             discover=Capability(AVAILABLE, DISCOVER_REASON),
-            inspect=Capability(UNVERIFIED, UNVERIFIED_REASON),
+            inspect=reads,
             disk_split=Capability(UNSUPPORTED, DISK_SPLIT_REASON),
-            io_meter=Capability(UNVERIFIED, UNVERIFIED_REASON),
-            column_bytes=Capability(UNVERIFIED, UNVERIFIED_REASON),
+            io_meter=reads,
+            column_bytes=reads,
         )
 
     def list_tables(self, root: str) -> Discovery:
