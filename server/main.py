@@ -50,6 +50,13 @@ async def lifespan(app: FastAPI):
     if _ARMED:
         # Names only. A startup log is the last place a token should appear.
         print(f"credentials: {', '.join(_ARMED)} loaded from {credentials.cred_path()}")
+    if (loose := credentials.insecure()) is not None:
+        # Said once, where the operator is already reading. `settings.json` is written
+        # 0600 because a key may be in it; `.cred` holds the same class of secret and
+        # is written by hand, so nothing has been enforcing anything.
+        path, mode = loose
+        print(f"credentials: {path} is mode {mode:04o} — readable by other users on "
+              f"this machine. `chmod 600` it.")
     catalog_routes.bind(CATALOG)
     datascan_routes.bind(CATALOG)
     settings_routes.bind(CATALOG)

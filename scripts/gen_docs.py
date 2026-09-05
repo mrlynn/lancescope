@@ -410,11 +410,19 @@ def configuration_reference() -> str:
            "| `LANCESCOPE_NO_PLUGINS` | refuse to load third-party source adapters. "
            "Also implied by kiosk mode |", "",
            "## Storage credentials", "",
-           "Read from the environment, or from a `.cred` file beside the project "
-           f"root (override the location with `{credentials.CRED_FILE}`), written "
-           "as `KEY=value` lines. "
+           "Read from the environment, or from a `.cred` file written as "
+           "`KEY=value` lines. "
            "The environment wins, and every surface that resolves one reports which "
            "of the two it came from — never the value.", "",
+           "Two places are searched, first that exists winning: `.cred` beside the "
+           "project root, which is the one a checkout edits and `desktop/sign.sh` "
+           "reads, and `.cred` beside `settings.json`. The second is there for the "
+           "packaged app, which has no project root — so a token that only exists in "
+           "a checkout cannot reach a build somebody installed. "
+           f"`{credentials.CRED_FILE}` names a file outright and beats both.", "",
+           "Give it mode 600. It holds the same class of secret as `settings.json`, "
+           "which is written 0600, but this one is written by hand — so the server "
+           "checks at startup and says so rather than assuming.", "",
            "These are exported into the process environment at startup rather than "
            "passed along, because the libraries that need them read the environment "
            "and nowhere else. That is also what makes them consistent: the same "
