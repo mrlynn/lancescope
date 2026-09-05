@@ -32,6 +32,9 @@ export type RootCapabilities = {
   inspect: Capability;
   disk_split: Capability;
   io_meter: Capability;
+  /** What the columns weigh, read from data-file footers. The one figure a remote
+   *  root can have and a directory walk cannot, so it is separate from disk_split. */
+  column_bytes: Capability;
 };
 
 export type TableList = {
@@ -74,7 +77,12 @@ export type TableDetail = {
     num_indices: number;
   };
   manifest_bytes: number;
-  on_disk: { blob_bytes: number; meta_bytes: number; ratio: number; files: number };
+  /** The on-disk split, or null where it could not be walked. Null rather than
+   *  zeros: a table with no blob bytes and a root nobody counted are different
+   *  answers, and only one of them should make a panel say "0 B". */
+  on_disk: { blob_bytes: number; meta_bytes: number; ratio: number; files: number } | null;
+  /** Why `on_disk` is null, straight from the capability. Null when it is not. */
+  on_disk_note: string | null;
   read_bytes: number;
   read_iops: number;
 };
@@ -326,6 +334,19 @@ export type RuntimeReport = {
    *  Carried here because every screen already has a reason to ask what the
    *  runtime is, and a second request to learn one boolean would be silly. */
   kiosk: boolean;
+  /** Which storage adapters this build has, including the ones that failed to
+   *  load — an installed plugin that did not register is otherwise
+   *  indistinguishable from one that was never installed. */
+  sources: SourceReport[];
+};
+
+/** One storage adapter. `scheme` is the URI prefix it serves with no `://`;
+ *  `provider` is "built-in" or the distribution that supplied it. */
+export type SourceReport = {
+  scheme: string;
+  provider: string;
+  ok: boolean;
+  reason: string;
 };
 
 export const getRuntime = () => get<RuntimeReport>("/runtime");

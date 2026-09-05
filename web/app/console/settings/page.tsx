@@ -338,7 +338,11 @@ function Connections({ state, onChange, onError, kiosk = false }: {
                         ? <span className="flex items-center gap-1.5"
                                 style={{ color: "var(--index)" }}>
                             <Icon name="info" size={11} />
-                            remote — saved, not browsable
+                            {/* Was "remote — saved, not browsable", which stopped
+                                being true the moment object stores could be listed:
+                                this arm now means only "no adapter serves this",
+                                and the server already says which. */}
+                            saved — no adapter for this scheme
                           </span>
                         : <><Icon name="table" size={11} />
                             {c.tables.length} table{c.tables.length === 1 ? "" : "s"}</>}

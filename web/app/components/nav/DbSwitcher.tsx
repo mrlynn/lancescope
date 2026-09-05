@@ -113,7 +113,10 @@ export default function DbSwitcher({
                     {c.reachable === false
                       ? <span style={{ color: "var(--video)" }}>unreachable</span>
                       : c.reachable === null
-                        ? "unverified"
+                        // Not "unverified", which reads as a problem with the
+                        // connection. Nothing was attempted, because nothing
+                        // installed can list this scheme — settings says which.
+                        ? "no adapter"
                         : `${c.tables.length} table${c.tables.length === 1 ? "" : "s"}`}
                   </span>
                 </span>

@@ -84,8 +84,9 @@ def writes_capability(destination: str | Path | None = None) -> Capability:
     if destination is not None and "://" in str(destination):
         return Capability(
             UNSUPPORTED,
-            f"{destination} is a remote URI. Ingest writes local files; saving to a "
-            f"bucket needs an adapter that does not exist yet.")
+            f"{destination} is a remote URI. The console can now *read* several of "
+            f"those, but ingest writes local files: writing to one needs a writer "
+            f"that does not exist yet. Build the table locally and copy it up.")
     return Capability(AVAILABLE)
 
 

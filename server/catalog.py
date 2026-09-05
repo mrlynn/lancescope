@@ -25,12 +25,25 @@ from pathlib import Path
 
 import lance
 
-from server import hf
+from server import sources
+from server.sources.base import (
+    AVAILABLE,
+    UNSUPPORTED,
+    UNVERIFIED,
+    Capability,
+    Discovery,
+    RootCapabilities,
+    Target,
+)
 
-# How deep under the root to look for tables. A Lance dataset is a directory, so an
-# uncapped walk on a real warehouse would descend into every fragment and index
-# directory it finds.
-MAX_DEPTH = 3
+# Re-exported so that every caller that imported these from here still can. The
+# definitions moved to `server/sources/base.py` because a source has to build one
+# and this module has to import the sources; they cannot both be the definition.
+__all__ = [
+    "AVAILABLE", "UNSUPPORTED", "UNVERIFIED", "Capability", "RootCapabilities",
+    "Discovery", "Catalog", "Handle", "IoDelta", "DiskUsage", "capabilities_for",
+    "disk_usage", "fragment_blob_bytes", "is_blob_field", "Target", "MAX_OPEN",
+]
 
 # Open datasets held at once, excluding pinned ones.
 MAX_OPEN = 32
@@ -47,34 +60,42 @@ class IoDelta:
         return IoDelta(self.read_bytes + other.read_bytes, self.read_iops + other.read_iops)
 
 
-@dataclass(frozen=True)
-class Discovery:
-    """The tables under a root, and why there were none if there were none."""
-
-    tables: list[str]
-    error: str | None = None
-
-    def as_dict(self) -> dict:
-        return {"tables": self.tables, "error": self.error}
-
-
 class Handle:
     """One open dataset, owned by one scope, with its own IO counter."""
 
-    __slots__ = ("name", "uri", "scope", "pinned", "version", "ds")
+    __slots__ = ("name", "target", "scope", "pinned", "version", "ds")
 
-    def __init__(self, name: str, uri: str, scope: str, pinned: bool,
+    def __init__(self, name: str, target: Target | str, scope: str, pinned: bool,
                  version: int | None = None) -> None:
         self.name = name
-        self.uri = uri
+        # A bare URI is still accepted, because a handle opened by URI is how the
+        # demo pins its two tables and how a test reaches one directly. What the
+        # source produces is a `Target`, and that is what carries anything the URI
+        # alone cannot say.
+        self.target = Target(uri=target) if isinstance(target, str) else target
         self.scope = scope
         self.pinned = pinned
         # A pinned version is what makes comparing two of them coherent: a dataset
         # written to while a comparison is on screen would otherwise produce a
         # before from one moment and an after from another.
         self.version = version
-        self.ds = (lance.dataset(uri) if version is None
-                   else lance.dataset(uri, version=version))
+        # `open_args` carries the URI for an ordinary target and a namespace client
+        # for a catalog-backed one. A pinned version applies to both: Lance resolves
+        # the table through the namespace first, then honours the version.
+        args = self.target.open_args()
+        if version is not None:
+            args["version"] = version
+        self.ds = lance.dataset(**args)
+
+    @property
+    def uri(self) -> str:
+        """Where this handle's table lives.
+
+        Read all over the console — in findings, in estimates, in the disk walk —
+        and kept as a property rather than a field so that the target stays the one
+        description of how the table is reached.
+        """
+        return self.target.uri
 
     def drain(self) -> IoDelta:
         """Bytes read through this handle since the last call, and reset.
@@ -113,6 +134,12 @@ class Catalog:
     # ------------------------------------------------------------------ discovery
 
     @property
+    def _source(self) -> sources.Source:
+        """Recomputed rather than cached: `rebind` changes the root at runtime, and
+        a source held from construction would answer for the previous one."""
+        return sources.source_for(self.root_uri)
+
+    @property
     def capabilities(self) -> RootCapabilities:
         return capabilities_for(self.root_uri)
 
@@ -142,73 +169,31 @@ class Catalog:
         connection saved to a repository that has since gone private should print a
         sentence, not prevent the console from coming up at all.
         """
-        if not self.capabilities.discover.ok:
-            return Discovery([], self.capabilities.discover.reason)
-        if hf.is_hf_uri(self.root_uri):
-            try:
-                return Discovery(hf.list_tables(self.root_uri), None)
-            except hf.HfUnavailable as e:
-                return Discovery([], str(e))
-        if not self.root.is_dir():
-            return Discovery([], f"no such directory: {self.root_uri}")
-        found: set[str] = set()
-        for path in self._walk(self.root, depth=0):
-            found.add(self._name_for(path))
-        return Discovery(sorted(found), None)
-
-    def _walk(self, base: Path, depth: int):
-        if depth > MAX_DEPTH:
-            return
-        try:
-            entries = sorted(base.iterdir())
-        except (PermissionError, FileNotFoundError):
-            return
-        for entry in entries:
-            try:
-                if not entry.is_dir():
-                    continue
-            except OSError:
-                # Listing a directory and stat'ing what is in it are separately
-                # permitted on macOS: `~/Library/Caches` reads fine and several
-                # entries inside it raise EPERM under TCC. One of those used to end
-                # the whole walk, so a root that happened to contain one listed no
-                # tables at all.
-                continue
-            if entry.suffix == ".lance":
-                yield entry
-                # A dataset's own subdirectories are fragments and indices, never
-                # nested tables. Don't descend.
-                continue
-            yield from self._walk(entry, depth + 1)
-
-    def _name_for(self, path: Path) -> str:
-        """`data/lance/moments.lance` -> `moments`; nested tables keep their path."""
-        rel = path.relative_to(self.root)
-        return str(rel.with_suffix(""))
+        caps = self.capabilities
+        if not caps.discover.ok:
+            return Discovery([], caps.discover.reason)
+        return self._source.list_tables(self.root_uri)
 
     def uri_for(self, name: str) -> str:
         """Where a table by this name lives under this root.
 
-        Joined as text for a URI, because `Path` is the wrong tool for one — it
-        collapses `hf://datasets/x` to `hf:/datasets/x` and the result no longer
-        opens. Local roots keep going through `Path` so that `~`, `..` and a
-        trailing slash still behave the way the rest of the console expects.
+        How a name and a root join is the source's business: a URI is joined as
+        text, because `Path` collapses `hf://datasets/x` to `hf:/datasets/x` and the
+        result no longer opens, while a local root goes through `Path` so that `~`,
+        `..` and a trailing slash still behave the way the rest of the console
+        expects.
         """
-        if _looks_like_uri(self.root_uri):
-            return f"{self.root_uri.rstrip('/')}/{name}.lance"
-        return str(self.root / f"{name}.lance")
+        return self._source.target_for(self.root_uri, name).uri
 
     def exists(self, name: str) -> bool:
         """Whether that table is there.
 
         A remote root cannot answer this without a round trip, and the honest
-        answer to "is it there" is the one `open()` gets by trying. Reporting True
-        here is not a claim that it exists; it is a refusal to claim it does not,
-        which is what returning False would mean to every caller.
+        answer to "is it there" is the one `open()` gets by trying. Those sources
+        report True — not a claim that it exists, but a refusal to claim it does
+        not, which is what returning False would mean to every caller.
         """
-        if _looks_like_uri(self.root_uri):
-            return True
-        return Path(self.uri_for(name)).is_dir()
+        return self._source.exists(self.root_uri, name)
 
     # ----------------------------------------------------------------------- open
 
@@ -227,11 +212,19 @@ class Catalog:
             self._open.move_to_end(key)
             return self._open[key]
 
-        uri = name if _looks_like_uri(name) else self.uri_for(name)
-        if not _looks_like_uri(uri) and not Path(uri).is_dir():
-            raise FileNotFoundError(uri)
+        # A name that is itself a URI is opened as-is rather than joined to the
+        # root. That is how the demo pins `moments` and `segments` by their full
+        # path, so that switching the console to another database mid-talk does not
+        # invalidate the handle the video is playing from.
+        if sources.scheme_of(name):
+            target = sources.source_for(name).target_for(name, "")
+        else:
+            target = self._source.target_for(self.root_uri, name)
+        if not sources.scheme_of(target.uri) and not Path(target.uri).is_dir():
+            raise FileNotFoundError(target.uri)
 
-        handle = Handle(name=name, uri=uri, scope=scope, pinned=pin, version=version)
+        handle = Handle(name=name, target=target, scope=scope, pinned=pin,
+                        version=version)
         if pin:
             self._pinned[key] = handle
             return handle
@@ -269,166 +262,9 @@ class Catalog:
         self._pinned.clear()
 
 
-def _looks_like_uri(s: str) -> bool:
-    """`s3://bucket/t.lance` and `db://…` are opened as-is rather than joined to the
-    root. One local root is all sprint 1 configures, but the signature takes a URI so
-    remote roots are an addition later rather than a rewrite."""
-    return "://" in str(s)
-
-
-# ---------------------------------------------------------------- capabilities
-
-# Three states, not two. "Unsupported" and "we have never tried this" are different
-# claims, and a console that reports the second as the first is guessing in the
-# direction that happens to be convenient.
-AVAILABLE = "available"
-UNSUPPORTED = "unsupported"
-UNVERIFIED = "unverified"
-
-
-@dataclass(frozen=True)
-class Capability:
-    state: str
-    reason: str = ""
-
-    @property
-    def ok(self) -> bool:
-        return self.state == AVAILABLE
-
-    def as_dict(self) -> dict:
-        return {"state": self.state, "reason": self.reason, "available": self.ok}
-
-
-@dataclass(frozen=True)
-class RootCapabilities:
-    """What can honestly be done with a root, before anything is attempted.
-
-    A connection is not a yes-or-no thing. Settings accepts `s3://` and `db://`
-    URIs, discovery walks a local directory, and until this existed the two facts
-    met in the worst possible place: a remote connection saved cleanly, activated
-    cleanly, and then reported an empty database — indistinguishable from a database
-    with nothing in it.
-
-    Reporting a capability rather than an outcome is what lets the UI say
-    "connected, and this cannot be browsed yet" instead of "no tables here".
-    """
-
-    remote: bool
-    discover: Capability
-    inspect: Capability
-    disk_split: Capability
-    io_meter: Capability
-    column_bytes: Capability = Capability(UNVERIFIED)
-
-    def as_dict(self) -> dict:
-        return {
-            "remote": self.remote,
-            "discover": self.discover.as_dict(),
-            "inspect": self.inspect.as_dict(),
-            "disk_split": self.disk_split.as_dict(),
-            "io_meter": self.io_meter.as_dict(),
-            "column_bytes": self.column_bytes.as_dict(),
-        }
-
-
-REMOTE_REASON = (
-    "This is a remote URI. Discovery walks a directory, so nothing here can list "
-    "what a bucket or a database endpoint holds — that needs an adapter which does "
-    "not exist yet. The connection is saved and is not broken; it cannot be browsed."
-)
-
-
-NO_ROOT_REASON = (
-    "No database is connected. Add a connection on the settings page and the console "
-    "will list what is under it."
-)
-
-
-COLUMN_BYTES_REMOTE_REASON = (
-    "Per-column bytes come from the data-file footers, which Lance reads over object "
-    "storage as readily as off a disk — so this is the one figure here that a remote "
-    "root can have and a directory walk cannot. Measured against "
-    "`hf://datasets/lance-format/openvid-lance/data/train.lance` on pylance 11.0.0: "
-    "937,957 rows across 224 fragments, one footer read in 814 ms against 0.15 ms "
-    "locally. Footers are sampled above a budget for that reason, and the answer says "
-    "how many it read."
-)
-
-
-HF_DISK_SPLIT_REASON = (
-    "The blob and metadata split comes from walking the directory the table sits in. "
-    "A Hub repository is not a directory this process can stat, so the ratio that the "
-    "console shows for a local table is not available here — and a number derived "
-    "from the manifest instead would look the same and mean something else."
-)
-
-
 def capabilities_for(root: Path | str) -> RootCapabilities:
     """What this root supports, decided from what it is rather than by trying."""
-    if not str(root).strip():
-        # An empty root is "nothing is connected yet", which is a first run rather
-        # than an error. It used to be spelled `Path()`, and a relative root means
-        # the process's working directory — which for a double-clicked .app is `/`.
-        # The console then walked the whole filesystem looking for tables and died
-        # on the first directory macOS would not let it stat.
-        return RootCapabilities(
-            remote=False,
-            discover=Capability(UNSUPPORTED, NO_ROOT_REASON),
-            inspect=Capability(UNSUPPORTED, NO_ROOT_REASON),
-            disk_split=Capability(UNSUPPORTED, NO_ROOT_REASON),
-            io_meter=Capability(UNSUPPORTED, NO_ROOT_REASON),
-            column_bytes=Capability(UNSUPPORTED, NO_ROOT_REASON),
-        )
-    if hf.is_hf_uri(root):
-        # The one remote form that has actually been exercised. Measured against
-        # `hf://datasets/lance-format/openvid-lance/data` on pylance 11.0.0: the
-        # table opens in 0.3 s, reports 937,957 rows, and the IO counters return
-        # real deltas — 24,568 bytes to open, 87,718 to read twenty rows of a table
-        # whose video column is 937,957 blobs it never touched. So `inspect` and
-        # `io_meter` are claimed here where the generic remote branch below still
-        # honestly refuses to claim them.
-        return RootCapabilities(
-            remote=True,
-            discover=Capability(AVAILABLE,
-                                "Listed through the HuggingFace Hub API, which is a "
-                                "network call rather than a directory read."),
-            inspect=Capability(AVAILABLE),
-            disk_split=Capability(UNSUPPORTED, HF_DISK_SPLIT_REASON),
-            io_meter=Capability(AVAILABLE,
-                                "Lance's counters report bytes fetched from the Hub, "
-                                "so a warm read costs less than the first one."),
-            column_bytes=Capability(AVAILABLE, COLUMN_BYTES_REMOTE_REASON),
-        )
-    if _looks_like_uri(root):
-        return RootCapabilities(
-            remote=True,
-            discover=Capability(UNSUPPORTED, REMOTE_REASON),
-            # Lance can open a remote URI directly, so a named table might well work
-            # — but nothing in this repository has ever run against one, and claiming
-            # it works is the same kind of guess as claiming it does not.
-            inspect=Capability(UNVERIFIED,
-                               "Lance can open a remote URI directly, but this has "
-                               "never been exercised here and carries no guarantee."),
-            disk_split=Capability(UNSUPPORTED,
-                                  "The blob and metadata split comes from walking "
-                                  "the directory. There is nothing to walk."),
-            io_meter=Capability(UNVERIFIED,
-                                "Lance's IO counters are per handle and should still "
-                                "report, but the numbers have not been checked "
-                                "against a remote store."),
-            column_bytes=Capability(UNVERIFIED,
-                                    "Footers are read the same way here as on the "
-                                    "Hub, where this was measured, but no generic "
-                                    "remote store has been exercised."),
-        )
-    return RootCapabilities(
-        remote=False,
-        discover=Capability(AVAILABLE),
-        inspect=Capability(AVAILABLE),
-        disk_split=Capability(AVAILABLE),
-        io_meter=Capability(AVAILABLE),
-        column_bytes=Capability(AVAILABLE),
-    )
+    return sources.source_for(str(root)).capabilities(str(root))
 
 
 # ----------------------------------------------------------------- blob detection

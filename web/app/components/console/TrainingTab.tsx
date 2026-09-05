@@ -53,8 +53,13 @@ function Ready({ d, findings }: { d: TableDetail; findings: Findings | null }) {
   const warn = mine.filter((f) => f.severity === "warn").length;
   const note = mine.length - warn;
 
-  const { meta_bytes, blob_bytes } = d.on_disk;
-  const heavy = blob_bytes > 0;
+  // Unknown is not the same as zero. Where the split could not be walked — a bucket,
+  // a namespace — `on_disk` is null, and the tile `heavy` gates shows a byte total
+  // built from these two numbers. Treating null as "no blob bytes" would print that
+  // total as a measurement. The table may well still be heavy; `d.blob_columns` says
+  // so, and the panel simply declines to put a figure on it.
+  const { meta_bytes, blob_bytes } = d.on_disk ?? { meta_bytes: 0, blob_bytes: 0 };
+  const heavy = d.on_disk !== null && blob_bytes > 0;
   const frags = d.stats.num_fragments;
 
   // What the columns weigh. Fetched here rather than with the tab because it is the

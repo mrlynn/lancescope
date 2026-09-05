@@ -153,7 +153,8 @@ Where the root comes from, in order:
 | nothing | the console says so and points at settings |
 
 `LANCESCOPE_CONFIG` moves the settings file. Connections may be local directories,
-`hf://datasets/…` roots, or `s3://` / `db://` URIs.
+`hf://datasets/…` roots, object-store URIs (`s3://`, `gs://`, `az://`, `abfss://`),
+or `db://` for LanceDB Cloud.
 
 The **datasets LanceDB publishes** on Hugging Face open directly — the settings page
 offers five of them, so a fresh install has something to look at without building
@@ -167,9 +168,16 @@ hf://datasets/lance-format/openvid-lance/data
 24,568 bytes; browsing five rows costs about 73 KB and reads no video at all. The same
 claim this repo makes about its own corpus, checked against someone else's.
 
-`s3://` and `db://` are still saved unverified rather than falsely ticked: discovery
-there needs an adapter that does not exist yet, and the console says so instead of
-showing an empty database.
+`s3://`, `gs://`, `az://` and `abfss://` are browsed the same way, with credentials
+from the ordinary `AWS_*`, `GOOGLE_*` and `AZURE_*` environment names — listed through
+Lance's own object store, so a bucket that lists is a bucket that opens.
+`db://my-database` reads LanceDB Cloud with `LANCEDB_API_KEY` set.
+
+The byte figures for those are reported as **unverified** rather than claimed: the
+mechanism is the one that works locally and on the Hub, and nothing here has yet
+measured it against a live bucket. A scheme with no adapter at all is saved and said
+to be unbrowsable, rather than shown as an empty database — and adding one is an
+installable package, not a wait.
 
 ---
 
@@ -441,7 +449,8 @@ which is why it is not the default.
 ## How it fits together
 
 ```
-Next.js (:3000)  ──/api/*──>  FastAPI (:8000)  ──>  LanceDB on local disk, hf:// or s3://
+Next.js (:3000)  ──/api/*──>  FastAPI (:8000)  ──>  a source adapter  ──>  local disk,
+                                                      hf://, an object store, or db://
                                     │                        │
                               SigLIP (MPS)            MCP server (stdio)
 ```

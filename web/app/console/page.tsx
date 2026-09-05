@@ -363,9 +363,12 @@ export default function Console() {
                 {list.root}
               </p>
               <p className="text-[13px] text-[var(--haze)] leading-relaxed mt-4">
+                {/* Two ways out, and which one applies depends on the scheme rather
+                    than on anything this component can see — so both are offered and
+                    the reason above says which is the shorter road. */}
+                Install an adapter for this scheme, or{" "}
                 <Link href="/console/settings" className="underline"
-                      style={{ color: "var(--video)" }}>Switch to a local directory</Link>{" "}
-                to browse a database here.
+                      style={{ color: "var(--video)" }}>switch to another database</Link>.
               </p>
             </div>
           ) : (

@@ -73,25 +73,75 @@ does you get the reason rather than an empty database. And the on-disk byte spli
 number derived from the manifest instead would look the same on screen and mean
 something else.
 
-## Other remote URIs
+## Cloud object storage
 
-`s3://`, `gs://`, `az://` and `db://` connections can be saved. They cannot be
-browsed:
+`s3://`, `gs://`, `az://` and `abfss://` are browsed like any other root. Paste the
+prefix your tables sit under:
+
+```
+s3://my-bucket/lance
+gs://my-bucket/lance
+abfss://container@account.dfs.core.windows.net/lance
+```
+
+Credentials come from the environment — the ordinary `AWS_*`, `GOOGLE_*` and
+`AZURE_*` names — or from a `.cred` file beside the project root. See
+[Configuration](/docs/reference-configuration) for the full list. The same variable
+resolves the listing and the open, so a bucket that lists is a bucket that opens.
+
+Two things worth knowing:
+
+- **`az://` carries no storage account.** Either set `AZURE_STORAGE_ACCOUNT_NAME` or
+  write the root out in full as `abfss://<container>@<account>.dfs.core.windows.net/…`.
+  The console says which when it cannot work it out.
+- **S3-compatible stores need no scheme of their own.** MinIO, Cloudflare R2 and
+  Backblaze B2 are `s3://` with `AWS_ENDPOINT` pointed at them.
+
+The on-disk byte split is **unsupported** here, as it is for the Hub: it comes from
+walking the directory a table sits in, and a bucket is not one. The panel says so
+rather than showing zeros. Everything read from the table itself — schema, fragments,
+row costs — is unaffected.
+
+## LanceDB Cloud
+
+`db://my-database`, with `LANCEDB_API_KEY` set. `LANCEDB_REGION` if the database is
+not in `us-east-1`; `LANCEDB_HOST_OVERRIDE` replaces the endpoint entirely for
+LanceDB Enterprise.
+
+A table there opens as an ordinary Lance dataset — the service hands back a location
+and credentials, and the byte counters work as they do anywhere else. Without a key
+the connection still saves, and the listing says which variable to set rather than
+reporting an empty database.
+
+## A scheme nothing can list
+
+Anything else — a store no adapter serves — is saved and honestly labelled:
 
 > **Connected, and this cannot be browsed.**
-> This is a remote URI. Discovery walks a directory, so nothing here can list what a
-> bucket or a database endpoint holds — that needs an adapter which does not exist
-> yet.
+> No installed adapter serves this scheme, so nothing here can list what it holds.
 
-That is a limitation of this tool, not a fact about your data, and it is worded that
-way deliberately. Saving one is harmless; it is held as a preview until an adapter
-exists.
+That is a limitation of this build, not a fact about your data. The connection is
+held, a table under it may still open by its full URI, and support is an installable
+package rather than a wait — see
+[Write a source adapter](/docs/howto-write-a-source).
 
-Three states, not two: discovery and the on-disk byte split are **unsupported**
-(there is no adapter, and there is no directory to walk), while inspecting a named
-table and the IO meter are **unverified** — Lance can open a remote URI directly, so
-they may well work, and claiming they do not would be as much of a guess as claiming
-they do.
+Three states, not two. Discovery is **unsupported** and the on-disk split is too,
+while inspecting a named table and the IO meter are **unverified**: Lance can open a
+remote URI directly, so they may well work, and claiming they do not would be as much
+of a guess as claiming they do.
+
+## What each root can do
+
+| | local | `hf://` | object stores | `db://` |
+| --- | --- | --- | --- | --- |
+| list tables | ✅ | ✅ | ✅ | ✅ |
+| schema, versions, indices, rows | ✅ | ✅ | ⚠️ | ⚠️ |
+| byte cost of a read | ✅ | ✅ | ⚠️ | ⚠️ |
+| on-disk blob split | ✅ | ❌ | ❌ | ❌ |
+
+⚠️ means **unverified**, not broken: the mechanism is the same one that works locally
+and on the Hub, and nothing in this repository has yet measured it against a live
+bucket or service. It is reported that way until somebody has.
 
 ## A directory that will not open
 

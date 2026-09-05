@@ -103,22 +103,26 @@ def _arm_demo_if_present() -> None:
 def _inspect(uri: str) -> dict:
     """What is actually at this path, without opening a manifest.
 
-    Remote URIs are reported as unverified rather than guessed at: `discover()` walks
-    a local directory, and pretending to have checked an `s3://` bucket would be a
-    lie the settings page then shows as a green tick.
+    A root nothing can browse is reported as unverified rather than guessed at:
+    pretending to have checked a bucket no adapter serves would be a lie the settings
+    page then shows as a green tick.
+
+    The question asked here is the capability, not the shape of the string. It used
+    to be `"://" in uri`, which meant "remote", which meant "unbrowsable" — three
+    different things that were the same thing only for as long as the only remote
+    root was one nothing could list.
     """
     caps = capabilities_for(uri)
-    if "://" in uri and caps.discover.ok:
-        # A remote root with a real adapter behind it — today that means the
-        # HuggingFace datasets LanceDB publishes. This one is checked rather than
-        # labelled, because there is something to check with: the listing either
-        # comes back or says why it did not, and both are better than "unverified".
+    if caps.discover.ok and caps.remote:
+        # A remote root with an adapter behind it. Checked rather than labelled,
+        # because there is something to check with: the listing either comes back or
+        # says why it did not, and both are better than "unverified".
         found = Catalog(uri).discover_detail()
         return {"reachable": found.error is None, "tables": found.tables,
                 "note": found.error or ("" if found.tables else
-                                        "the repository holds no .lance tables"),
+                                        "nothing here holds .lance tables"),
                 "capabilities": caps.as_dict()}
-    if "://" in uri:
+    if caps.remote:
         # Saved, and honestly labelled. The console can hold this connection; it
         # cannot browse it, and a note saying "not verified" understated that —
         # activating one used to produce an empty database rather than an
