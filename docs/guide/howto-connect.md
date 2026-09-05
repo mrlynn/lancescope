@@ -85,9 +85,14 @@ abfss://container@account.dfs.core.windows.net/lance
 ```
 
 Credentials come from the environment — the ordinary `AWS_*`, `GOOGLE_*` and
-`AZURE_*` names — or from a `.cred` file beside the project root. See
+`AZURE_*` names — or from a `.cred` file. See
 [Configuration](/docs/reference-configuration) for the full list. The same variable
 resolves the listing and the open, so a bucket that lists is a bucket that opens.
+
+**From a checkout** that file is `.cred` in the project root. **In the app** there is
+no project root, so it is `.cred` beside `settings.json` — on macOS
+`~/.config/lancescope/.cred`. Give it mode 600; the server says so at startup if you
+have not.
 
 Two things worth knowing:
 

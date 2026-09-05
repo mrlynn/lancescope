@@ -27,7 +27,10 @@ Nothing here logs a value, and `source()` reports names only.
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
+
+from server.settings import settings_path
 
 CRED_FILE = "LANCESCOPE_CRED_FILE"
 
@@ -55,11 +58,61 @@ EXPORTED = (
 )
 
 
-def cred_path() -> Path:
+def cred_places() -> list[Path]:
+    """Where a `.cred` may be, best first.
+
+    Two, because the file had one home and a packaged app cannot reach it. The old
+    path was `.cred` beside this module's parent — the repository root, which is
+    right in a checkout and does not exist in an app bundle: frozen, `__file__` is
+    inside PyInstaller's unpacked `_MEIPASS`, and `packaging/lancescope.spec` puts
+    only the interface and `ingest/config.py` in there. So the only way to give the
+    shipped app a token was `LANCESCOPE_CRED_FILE`, which a double-clicked app never
+    has, and every `s3://`, `gs://`, `az://` and private Hub root was unreachable in
+    the DMG while working perfectly from a checkout.
+
+    The second home is beside `settings.json`, which is somewhere both arrangements
+    can read and write, and is already where this project keeps the other file it
+    owns. A checkout still prefers its own, because that is the one being edited and
+    the one `desktop/sign.sh` reads.
+    """
     env = os.environ.get(CRED_FILE)
     if env:
-        return Path(env).expanduser()
-    return Path(__file__).resolve().parent.parent / ".cred"
+        return [Path(env).expanduser()]
+    beside_settings = settings_path().parent / ".cred"
+    if getattr(sys, "frozen", False):
+        return [beside_settings]
+    return [Path(__file__).resolve().parent.parent / ".cred", beside_settings]
+
+
+def cred_path() -> Path:
+    """The file being read — or, when there is none, the one to create.
+
+    Falling back to the first candidate rather than to nothing is what lets the
+    startup line and the settings page name a path somebody can act on.
+    """
+    places = cred_places()
+    return next((p for p in places if p.exists()), places[0])
+
+
+def insecure() -> tuple[Path, int] | None:
+    """The credentials file and its mode, when anyone but its owner can read it.
+
+    `settings.py` writes `settings.json` at 0600 and says why: an API key may be in
+    it, so the mode is not incidental. Nothing has ever said that about `.cred`,
+    which is written by hand and holds the same class of secret — on the machine
+    this was found on it was 0644, carrying an Apple app-specific password and two
+    tokens.
+
+    Reported rather than repaired, and reported rather than refused. Changing the
+    mode of a file the operator wrote is a surprise, and declining to start over it
+    would turn a warning into an outage.
+    """
+    path = cred_path()
+    try:
+        mode = path.stat().st_mode & 0o777
+    except OSError:
+        return None
+    return (path, mode) if mode & 0o077 else None
 
 
 def _parse(text: str) -> dict[str, str]:
