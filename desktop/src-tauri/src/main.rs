@@ -27,6 +27,7 @@ use std::time::{Duration, Instant};
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
 mod menu;
+mod update;
 
 /// How long to wait for the server to announce its port.
 ///
@@ -368,6 +369,9 @@ fn boot(handle: tauri::AppHandle) {
                     // Quit — so there is never a moment without one.
                     handle.state::<Port>().0.lock().unwrap().replace(port);
                     let _ = menu::install(&handle);
+                    // Once the window exists, so there is somewhere to say it. Quiet
+                    // unless there is something to say, and at most once a day.
+                    update::check(handle.clone(), false);
                 }
             });
         }
@@ -436,6 +440,7 @@ fn main() {
         )
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(Server(Mutex::new(None)))
         .manage(Port(Mutex::new(None)))
         .setup(|app| {

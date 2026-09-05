@@ -246,6 +246,7 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
 
     let app_menu = SubmenuBuilder::new(app, "LanceScope")
         .item(&PredefinedMenuItem::about(app, None, None)?)
+        .item(&MenuItemBuilder::with_id("update", "Check for Updates…").build(app)?)
         .separator()
         .item(
             &MenuItemBuilder::with_id("settings", "Settings…")
@@ -273,6 +274,10 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
 pub fn on_event(app: &AppHandle, id: &str, port: u16) {
     match id {
         "settings" => go(app, "/console/settings"),
+        // Manual, so it skips the once-a-day throttle and reports being up to date.
+        // A menu item that does nothing visible is indistinguishable from a broken
+        // one, which is why the launch check stays quiet and this one does not.
+        "update" => crate::update::check(app.clone(), true),
         "bundle" => go(app, "/console/bundle"),
         "guide" => go(app, "/docs/index"),
         "reload" => {

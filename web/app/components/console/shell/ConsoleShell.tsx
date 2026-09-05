@@ -25,6 +25,7 @@ import ThemeToggle from "@/app/components/ThemeToggle";
 import DbSwitcher from "@/app/components/nav/DbSwitcher";
 import Inspector from "@/app/components/console/shell/Inspector";
 import Palette, { Shortcuts } from "@/app/components/console/shell/Palette";
+import UpdateNotice from "@/app/components/console/shell/UpdateNotice";
 import { listen, useShortcut } from "@/app/lib/keys";
 import TableRail from "@/app/components/console/TableRail";
 import { listTables } from "@/app/lib/catalog";
@@ -243,6 +244,8 @@ export default function ConsoleShell({ children }: { children: ReactNode }) {
         />
       )}
       <Shortcuts open={sheet} onClose={() => setSheet(false)} />
+      {/* Renders nothing until the desktop shell says something. */}
+      <UpdateNotice />
     </div>
   );
 }
