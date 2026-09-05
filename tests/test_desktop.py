@@ -129,3 +129,29 @@ def test_the_update_key_is_checked_by_using_it():
     probe = source.index('signer sign "$PROBE"')
     build = source.index("make sidecar")
     assert probe < build, "the key is used after the build starts, so a bad one costs a build"
+
+
+def test_the_frozen_app_is_told_where_its_certificates_are():
+    """Every `hf://` connection in the shipped 0.4.0 read "unreachable".
+
+    The cause was not the network and not a token: a PyInstaller bundle carries a
+    `certifi` CA file and OpenSSL falls back to a system path that does not resolve
+    inside it, so every HTTPS call Python made failed certificate verification.
+    Proved by running the shipped binary twice — the second time with `SSL_CERT_FILE`
+    pointed at the bundle already inside the app, which listed the dataset.
+
+    Only Python was affected. `s3://` goes through Lance's Rust reader, which carries
+    its own roots, so a bucket listed while every HuggingFace dataset beside it did
+    not — which is what made this look like a HuggingFace problem.
+    """
+    source = (ROOT / "server" / "standalone.py").read_text()
+    assert "def arm_certificates" in source
+    assert "SSL_CERT_FILE" in source
+    # Before the import that resolves the root, since an `hf://` root opens over
+    # HTTPS during it.
+    armed = source.rindex("arm_certificates()")
+    loading = source.index('progress.stage("loading"')
+    assert armed < loading
+
+    # And the bundle has to be a dependency rather than a passenger.
+    assert '"certifi"' in (ROOT / "pyproject.toml").read_text()

@@ -47,6 +47,42 @@ def bundle_dir() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
+def arm_certificates() -> str | None:
+    """Point Python at the certificate authorities carried inside the bundle.
+
+    Frozen, there is a `certifi` CA bundle in the app and nothing tells OpenSSL
+    where it is. It falls back to a system path that does not resolve inside a
+    PyInstaller bundle, so every HTTPS call Python makes fails with
+
+        [SSL: CERTIFICATE_VERIFY_FAILED] unable to get local issuer certificate
+
+    which in the console reads as every `hf://` connection being unreachable. It is
+    not a network problem and not a token problem, and the message the user sees says
+    "unreachable", so there is nothing to work it out from.
+
+    Only Python is affected. `s3://` and the other object stores go through Lance's
+    Rust reader, which carries its own roots — which is why a bucket listed while
+    every HuggingFace dataset in the same list did not, and why this looked like a
+    HuggingFace problem for longer than it should have.
+
+    Set rather than defaulted only when absent, so an operator who has pointed these
+    somewhere deliberately keeps their choice. Returns the path it used, for the
+    startup line, because a TLS trust store is worth being able to see.
+    """
+    if not getattr(sys, "frozen", False):
+        return None
+    try:
+        import certifi
+    except ImportError:                                   # pragma: no cover
+        return None
+    bundle = certifi.where()
+    if not os.path.exists(bundle):                        # pragma: no cover
+        return None
+    for name in ("SSL_CERT_FILE", "REQUESTS_CA_BUNDLE"):
+        os.environ.setdefault(name, bundle)
+    return bundle
+
+
 def ui_dir() -> Path | None:
     """The exported interface, wherever this build keeps it.
 
@@ -199,6 +235,12 @@ def main() -> int:
     # it is set by the desktop shell and by nothing else.
     if os.environ.get("LANCESCOPE_WATCH_PARENT") == "1":
         progress.arm()
+
+    # Before the import below, for the same reason credentials are armed before it:
+    # that import resolves the root and may open a dataset, and an `hf://` root is
+    # an HTTPS call.
+    if (bundle := arm_certificates()) is not None:
+        print(f"certificates: {bundle}", flush=True)
 
     # Said before the import below rather than after it, because that import *is* the
     # wait: it unpacks a frozen Python and pulls in Lance and PyArrow, and on a first

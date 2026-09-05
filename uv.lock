@@ -680,6 +680,7 @@ build = [
 ]
 console = [
     { name = "anthropic" },
+    { name = "certifi" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "mcp" },
@@ -742,6 +743,7 @@ requires-dist = [
 build = [{ name = "pyinstaller", specifier = ">=6.11" }]
 console = [
     { name = "anthropic", specifier = ">=1.2" },
+    { name = "certifi" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx", specifier = ">=0.28" },
     { name = "mcp", specifier = ">=2.1" },
