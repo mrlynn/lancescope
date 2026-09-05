@@ -107,6 +107,11 @@ jobs:
           # runner killed mid-staple. sign.sh treats unset as "wait forever", which
           # is what a laptop should do and a runner must not.
           NOTARY_TIMEOUT: "3600"
+          # The update signing key. Absent, sign.sh says so and builds the app and
+          # the disk image exactly as before — so a fork without the secret still
+          # gets a release, it just does not get one installed copies can update to.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           set -euo pipefail
           # No .cred file is written: sign.sh guards that read with `[ -f ]` and
@@ -129,6 +134,26 @@ jobs:
           shasum -a 256 "$DMG" | tee "$RUNNER_TEMP/SHA256SUMS.txt"
           echo "dmg=$DMG" >> "$GITHUB_OUTPUT"
 
+          # The update artifact, when there was a key to sign one with. Listed
+          # separately rather than globbed into the DMG's path, so a release that
+          # was supposed to carry an update and does not is visible here rather
+          # than discovered by an installed copy that never finds one.
+          MAC="desktop/src-tauri/target/release/bundle/macos"
+          if [ -f "$MAC/latest.json" ]; then
+            shasum -a 256 "$MAC/LanceScope.app.tar.gz" >> "$RUNNER_TEMP/SHA256SUMS.txt"
+            {
+              echo "update<<EOF"
+              echo "$MAC/LanceScope.app.tar.gz"
+              echo "$MAC/LanceScope.app.tar.gz.sig"
+              echo "$MAC/latest.json"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+            echo "update artifact: $(du -h "$MAC/LanceScope.app.tar.gz" | cut -f1)"
+          else
+            echo "no update artifact (no signing key); the DMG is the only download"
+            echo "update=" >> "$GITHUB_OUTPUT"
+          fi
+
       # Every run keeps the DMG, including a dry run on a branch. Without this the
       # only way to look at what the pipeline built was to tag a release, which is
       # the one thing a rehearsal is supposed to avoid — and "it compiled" is a much
@@ -139,6 +164,7 @@ jobs:
           name: lancescope-dmg-${{ github.sha }}
           path: |
             ${{ steps.artefact.outputs.dmg }}
+            ${{ steps.artefact.outputs.update }}
             ${{ runner.temp }}/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 14
@@ -154,6 +180,7 @@ jobs:
           generate_release_notes: true
           files: |
             ${{ steps.artefact.outputs.dmg }}
+            ${{ steps.artefact.outputs.update }}
             ${{ runner.temp }}/SHA256SUMS.txt
 
       - name: Remove the keychain

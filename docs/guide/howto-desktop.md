@@ -134,6 +134,49 @@ The script builds, signs with the hardened runtime, verifies the signature befor
 spending a notarisation round trip, submits the DMG, waits, and staples the ticket so
 the app opens offline on a machine that has never seen it.
 
+## Signing updates
+
+A release can also carry an artifact an installed copy would accept as an update.
+That needs a second key, unrelated to Apple's:
+
+```bash
+npx @tauri-apps/cli@2.11.4 signer generate -w ~/.lancescope-updater.key
+```
+
+The **public** half goes in `desktop/src-tauri/tauri.conf.json` under
+`plugins.updater.pubkey`. The **private** half never leaves your machine or the
+repository's secrets — put it in `TAURI_SIGNING_PRIVATE_KEY` and its password in
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, as GitHub Actions secrets for CI and as
+environment variables locally.
+
+```bash
+TAURI_SIGNING_PRIVATE_KEY=~/.lancescope-updater.key \
+TAURI_SIGNING_PRIVATE_KEY_PASSWORD=... \
+./desktop/sign.sh
+```
+
+Lose the private key and no copy anybody has installed can ever be updated again,
+because the public half they carry will not verify anything else. It belongs
+wherever the Apple credentials belong.
+
+Without it the build is exactly what it was: an app and a disk image, signed and
+notarised. `sign.sh` says which of the two it is doing rather than quietly producing
+less.
+
+### Why the tarball is built where it is
+
+`tauri.conf.json` does **not** set `createUpdaterArtifacts`, and should not. That
+option makes the bundler write the update tarball during the build — which is
+before the 108 Mach-O binaries inside are signed, before the entitlements are
+reapplied, before notarisation and before the ticket is stapled. It would ship an
+update Gatekeeper refuses on arrival, which is worse than shipping none.
+
+So `sign.sh` builds it by hand, immediately after `xcrun stapler staple`, for the
+same reason the disk image is rebuilt there. A tar taken at that point carries the
+ticket in its file tree: unpacked on a machine that has never seen the app and has
+no network, it still passes `stapler validate`, and `spctl --assess` reports
+`source=Notarized Developer ID`.
+
 ### What signing proves, and what it does not
 
 A signed build has been run and verified here: hardened runtime on
