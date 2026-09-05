@@ -19,7 +19,24 @@ import pytest
 from server import sources
 from server.catalog import Catalog
 from server.sources.base import AVAILABLE, UNSUPPORTED, UNVERIFIED
+from server.sources.namespace import (
+    can_open_namespace_tables,
+    namespace_available,
+)
 from server.sources.objectstore import SCHEMES, ObjectStoreSource, explain
+
+# CI runs this suite against eight major pylance versions, which do not all reach a
+# namespace the same way. Listing works as far back as the floor; opening a table
+# through a client needs `lance.dataset(namespace_client=…)`, which is newer — pylance
+# 3.0.0 lists happily and then raises TypeError. Tests are skipped on the capability
+# they actually need, and `test_an_old_reader_lists_but_cannot_open` covers the split.
+requires_namespace = pytest.mark.skipif(
+    not namespace_available(), reason="this pylance has no lance.namespace")
+
+requires_namespace_open = pytest.mark.skipif(
+    not (namespace_available() and can_open_namespace_tables()),
+    reason="this pylance cannot open a table through a namespace client")
+
 
 # ------------------------------------------------------------------- observed
 
@@ -70,6 +87,7 @@ def test_each_scheme_only_handles_its_own():
 
 # ------------------------------------------------------------------ capabilities
 
+@requires_namespace
 @pytest.mark.parametrize("scheme", SCHEMES)
 def test_listing_is_claimed_and_the_byte_figures_are_not(scheme):
     caps = ObjectStoreSource(scheme).capabilities(f"{scheme}://bucket/x")
@@ -84,6 +102,7 @@ def test_listing_is_claimed_and_the_byte_figures_are_not(scheme):
 
 # ---------------------------------------------------------------------- listing
 
+@requires_namespace
 def test_the_listing_path_works_against_a_real_directory(corpus):
     """The same code, the same namespace call, a store that needs no credentials.
 
@@ -96,12 +115,14 @@ def test_the_listing_path_works_against_a_real_directory(corpus):
     assert listed.tables == sorted(listed.tables)
 
 
+@requires_namespace
 def test_an_empty_store_is_not_a_failed_one(tmp_path):
     listed = ObjectStoreSource("s3").list_tables(str(tmp_path))
     assert listed.tables == []
     assert listed.error is None, "empty and unreachable must stay distinguishable"
 
 
+@requires_namespace
 def test_a_prefix_that_was_never_written_lists_nothing_rather_than_failing(tmp_path):
     """Where object storage and a directory genuinely differ, and the console has to
     follow the store rather than the metaphor.
@@ -179,6 +200,7 @@ def test_an_unrecognised_failure_is_still_shortened_to_a_sentence():
 
 # ------------------------------------------------------------------ end to end
 
+@requires_namespace
 def test_a_bucket_root_behaves_like_a_root_through_the_catalog(corpus):
     """`Catalog` should not know which store it is on.
 

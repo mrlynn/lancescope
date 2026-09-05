@@ -143,6 +143,12 @@ of a guess as claiming they do.
 and on the Hub, and nothing in this repository has yet measured it against a live
 bucket or service. It is reported that way until somebody has.
 
+On an older Lance reader the `db://` column narrows: listing works as far back as the
+supported floor, while opening a table through a catalog needs a newer `lance.dataset`.
+The console reports that as an unsupported read with the reason, rather than raising
+from inside the reader — and object stores are unaffected, because they only ever
+needed the listing.
+
 ## A directory that will not open
 
 A directory named `*.lance` that Lance cannot open — an interrupted write, a

@@ -20,6 +20,22 @@ from fastapi.testclient import TestClient
 from server import sources
 from server.catalog import Catalog, capabilities_for
 from server.sources.lancedb_cloud import API_KEY, HOST_OVERRIDE
+from server.sources.namespace import (
+    can_open_namespace_tables,
+    namespace_available,
+)
+
+# CI runs this suite against eight major pylance versions, which do not all reach a
+# namespace the same way. Listing works as far back as the floor; opening a table
+# through a client needs `lance.dataset(namespace_client=…)`, which is newer — pylance
+# 3.0.0 lists happily and then raises TypeError. Tests are skipped on the capability
+# they actually need, and `test_an_old_reader_lists_but_cannot_open` covers the split.
+requires_namespace = pytest.mark.skipif(
+    not namespace_available(), reason="this pylance has no lance.namespace")
+
+requires_namespace_open = pytest.mark.skipif(
+    not (namespace_available() and can_open_namespace_tables()),
+    reason="this pylance cannot open a table through a namespace client")
 
 
 @pytest.fixture
@@ -58,6 +74,7 @@ def cloud_client(cloud_root):
 
 # ------------------------------------------------------------- the on-disk split
 
+@requires_namespace_open
 def test_a_table_that_cannot_be_walked_reports_null_rather_than_zeros(cloud_client):
     """The bug this closes shipped: `disk_usage` is `Path.rglob`, a remote root has
     nothing to walk, and the route returned `{blob_bytes: 0, meta_bytes: 0,
@@ -77,6 +94,7 @@ def test_a_local_table_is_still_measured(api):
     assert body["on_disk_note"] is None
 
 
+@requires_namespace_open
 def test_the_byte_costs_are_unaffected_by_the_guard(cloud_client):
     """Only the directory walk is missing. Everything read from the table itself —
     which is the console's actual claim — still answers."""
@@ -88,6 +106,7 @@ def test_the_byte_costs_are_unaffected_by_the_guard(cloud_client):
 
 # ------------------------------------------------------------------- throttling
 
+@requires_namespace
 def test_a_typed_throttle_is_recognised():
     from lance_namespace.errors import ThrottlingError
 
@@ -122,6 +141,7 @@ def test_a_scheme_with_no_adapter_is_saved_and_labelled():
     assert "adapter" in got["note"]
 
 
+@requires_namespace
 def test_a_scheme_with_an_adapter_is_checked_rather_than_labelled(cloud_root):
     """The behaviour that used to be reserved for `hf://` because of a `"://"` test,
     and is now decided by whether anything can actually list the root."""

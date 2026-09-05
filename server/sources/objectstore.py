@@ -36,6 +36,7 @@ from server.sources.base import (
     RootCapabilities,
     Target,
 )
+from server.sources.namespace import NO_NAMESPACE_REASON, namespace_available
 
 # The schemes claimed here. Each gets its own instance, because a scheme has one
 # source and the registry is keyed by it — the class is shared, the registration is
@@ -92,6 +93,11 @@ class ObjectStoreSource:
         return str(root).startswith(f"{self.scheme}://")
 
     def capabilities(self, root: str) -> RootCapabilities:
+        if not namespace_available():
+            unusable = Capability(UNSUPPORTED, NO_NAMESPACE_REASON)
+            return RootCapabilities(
+                remote=True, discover=unusable, inspect=unusable,
+                disk_split=unusable, io_meter=unusable, column_bytes=unusable)
         return RootCapabilities(
             remote=True,
             discover=Capability(AVAILABLE, DISCOVER_REASON),
@@ -105,8 +111,8 @@ class ObjectStoreSource:
         try:
             from lance.namespace import DirectoryNamespace
             from lance_namespace import ListTablesRequest
-        except ImportError as e:  # pragma: no cover - pylance always brings it
-            return Discovery([], f"this build cannot list object storage: {e}")
+        except ImportError:
+            return Discovery([], NO_NAMESPACE_REASON)
         try:
             namespace = DirectoryNamespace(
                 root=str(root),

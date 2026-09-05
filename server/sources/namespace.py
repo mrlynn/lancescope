@@ -51,6 +51,54 @@ DISK_SPLIT_REASON = (
 )
 
 
+# This repository supports eight major pylance versions, and they do not all reach a
+# namespace the same way. Two separate capabilities, discovered rather than assumed —
+# the same posture `server/runtime.py` takes towards the reader generally:
+#
+#   listing  `lance.namespace` importable. Present as far back as the floor.
+#   opening  `lance.dataset(namespace_client=…)`, which is newer. Without it a table
+#            has to be opened by URI, and a namespace that vends a location per call
+#            has none to give in advance.
+#
+# Measured rather than guessed at: pylance 3.0.0 lists through a namespace happily
+# and raises `TypeError: dataset() got an unexpected keyword argument
+# 'namespace_client'` when asked to open one. Reporting both as one capability would
+# have cost every object store its listing on that reader, since object stores need
+# only the first.
+NO_NAMESPACE_REASON = (
+    "This build's Lance reader has no `lance.namespace`, so nothing here can ask a "
+    "catalog what it holds. Local directories and `hf://` are unaffected."
+)
+
+NO_NAMESPACE_OPEN_REASON = (
+    "This build's Lance reader can list a namespace but not open a table through "
+    "one: `lance.dataset(namespace_client=…)` arrived in a later pylance. The table "
+    "list below is real; opening one needs a newer reader."
+)
+
+
+def namespace_available() -> bool:
+    """Whether a catalog can be listed at all."""
+    from importlib.util import find_spec
+
+    try:
+        return find_spec("lance.namespace") is not None
+    except (ImportError, ValueError):  # pragma: no cover - a broken install
+        return False
+
+
+def can_open_namespace_tables() -> bool:
+    """Whether the reader can open a table from a client rather than a URI."""
+    import inspect
+
+    import lance
+
+    try:
+        return "namespace_client" in inspect.signature(lance.dataset).parameters
+    except (TypeError, ValueError):  # pragma: no cover - an unreadable signature
+        return False
+
+
 class NamespaceUnavailable(Exception):
     """The namespace could not be reached or built. Carried, never raised at a route."""
 
@@ -80,13 +128,24 @@ class NamespaceSource:
         return str(root).startswith(f"{self.scheme}://")
 
     def capabilities(self, root: str) -> RootCapabilities:
+        if not namespace_available():
+            unusable = Capability(UNSUPPORTED, NO_NAMESPACE_REASON)
+            return RootCapabilities(
+                remote=True, discover=unusable, inspect=unusable,
+                disk_split=unusable, io_meter=unusable, column_bytes=unusable)
+        # Listing and opening are separate on an older reader, and the split is
+        # exactly what the capability model is for: the table list is real even
+        # where nothing can be opened from it.
+        reads = (Capability(UNVERIFIED, self.unverified_reason())
+                 if can_open_namespace_tables()
+                 else Capability(UNSUPPORTED, NO_NAMESPACE_OPEN_REASON))
         return RootCapabilities(
             remote=True,
             discover=Capability(AVAILABLE, self.discover_reason()),
-            inspect=Capability(UNVERIFIED, self.unverified_reason()),
+            inspect=reads,
             disk_split=Capability(UNSUPPORTED, DISK_SPLIT_REASON),
-            io_meter=Capability(UNVERIFIED, self.unverified_reason()),
-            column_bytes=Capability(UNVERIFIED, self.unverified_reason()),
+            io_meter=reads,
+            column_bytes=reads,
         )
 
     def discover_reason(self) -> str:
@@ -100,8 +159,10 @@ class NamespaceSource:
                 "service, so the numbers carry no guarantee yet.")
 
     def list_tables(self, root: str) -> Discovery:
-        from lance_namespace import ListTablesRequest
-
+        try:
+            from lance_namespace import ListTablesRequest
+        except ImportError:
+            return Discovery([], NO_NAMESPACE_REASON)
         try:
             client = self.namespace(str(root))
         except NamespaceUnavailable as e:
@@ -121,6 +182,8 @@ class NamespaceSource:
         is the console's name for the table, which is what `h.uri` is read for, and
         the opening is done from the client beside it.
         """
+        if not can_open_namespace_tables():
+            raise FileNotFoundError(NO_NAMESPACE_OPEN_REASON)
         try:
             client = self.namespace(str(root))
         except NamespaceUnavailable as e:

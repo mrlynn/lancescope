@@ -19,8 +19,25 @@ from server import sources
 from server.catalog import Catalog, Handle
 from server.sources.base import AVAILABLE, UNSUPPORTED, UNVERIFIED, Target
 from server.sources.lancedb_cloud import API_KEY, HOST_OVERRIDE, REGION, CloudSource
-from server.sources.namespace import NamespaceSource, NamespaceUnavailable, explain
+from server.sources.namespace import (
+    NamespaceSource,
+    NamespaceUnavailable,
+    can_open_namespace_tables,
+    explain,
+    namespace_available,
+)
 
+# CI runs this suite against eight major pylance versions, which do not all reach a
+# namespace the same way. Listing works as far back as the floor; opening a table
+# through a client needs `lance.dataset(namespace_client=…)`, which is newer — pylance
+# 3.0.0 lists happily and then raises TypeError. Tests are skipped on the capability
+# they actually need, and `test_an_old_reader_lists_but_cannot_open` covers the split.
+requires_namespace = pytest.mark.skipif(
+    not namespace_available(), reason="this pylance has no lance.namespace")
+
+requires_namespace_open = pytest.mark.skipif(
+    not (namespace_available() and can_open_namespace_tables()),
+    reason="this pylance cannot open a table through a namespace client")
 
 @pytest.fixture
 def served(corpus):
@@ -48,6 +65,7 @@ def cloud(served, monkeypatch):
 
 # ------------------------------------------------------------------ end to end
 
+@requires_namespace
 def test_a_namespace_root_lists_its_tables(cloud):
     listed = sources.source_for(cloud).list_tables(cloud)
     assert listed.error is None
@@ -55,6 +73,7 @@ def test_a_namespace_root_lists_its_tables(cloud):
     assert listed.tables == sorted(listed.tables)
 
 
+@requires_namespace_open
 def test_a_namespace_table_opens_as_an_ordinary_dataset(cloud, corpus):
     """The whole claim of Phase 3: below `Handle` nothing knows it is remote."""
     cat = Catalog(cloud)
@@ -67,6 +86,7 @@ def test_a_namespace_table_opens_as_an_ordinary_dataset(cloud, corpus):
     assert delta.read_bytes > 0
 
 
+@requires_namespace_open
 def test_a_namespace_table_can_be_pinned_to_a_version(cloud):
     cat = Catalog(cloud)
     assert cat.open("versioned", scope="test").ds.version > 1
@@ -74,6 +94,7 @@ def test_a_namespace_table_can_be_pinned_to_a_version(cloud):
     assert pinned.ds.version == 1
 
 
+@requires_namespace_open
 def test_the_console_shows_a_name_for_a_table_with_no_path(cloud):
     """`uri` is read all over the interface. A namespace table has no location this
     process computed, so it carries the console's name for it instead."""
@@ -82,17 +103,20 @@ def test_the_console_shows_a_name_for_a_table_with_no_path(cloud):
     assert cat.open("ordinary", scope="test").uri == "db://fixture/ordinary"
 
 
+@requires_namespace_open
 def test_a_missing_table_is_a_missing_table(cloud):
     with pytest.raises(Exception, match="(?i)not found|nope"):
         Catalog(cloud).open("nope", scope="test")
 
 
+@requires_namespace
 def test_discovery_through_the_catalog(cloud):
     assert "ordinary" in Catalog(cloud).discover()
 
 
 # ------------------------------------------------------------------- the target
 
+@requires_namespace_open
 def test_a_namespace_target_carries_the_client_rather_than_a_location(cloud):
     target = sources.source_for(cloud).target_for(cloud, "ordinary")
     assert target.via_namespace
@@ -102,6 +126,7 @@ def test_a_namespace_target_carries_the_client_rather_than_a_location(cloud):
     assert "uri" not in args, "a resolved URI would freeze a credential that expires"
 
 
+@requires_namespace_open
 def test_a_nested_identifier_survives_the_round_trip(cloud):
     """Namespace ids are lists of segments; `$` is the client's own delimiter."""
     target = sources.source_for(cloud).target_for(cloud, "schema$table")
@@ -123,6 +148,7 @@ def test_a_handle_still_accepts_a_bare_uri(corpus):
 
 # ----------------------------------------------------------------- capabilities
 
+@requires_namespace_open
 def test_a_namespace_can_be_listed_but_not_weighed(cloud):
     caps = Catalog(cloud).capabilities
     assert caps.remote is True
@@ -133,6 +159,7 @@ def test_a_namespace_can_be_listed_but_not_weighed(cloud):
     assert "walking the directory" in caps.disk_split.reason
 
 
+@requires_namespace_open
 def test_the_byte_figures_stay_unverified_until_a_real_service_is_measured(cloud):
     """They demonstrably work against the local adapter. That is not the same claim
     as working against LanceDB Cloud, and the third state is what the difference is
@@ -216,6 +243,7 @@ def test_an_unmapped_failure_is_shortened_rather_than_dumped():
 
 # ------------------------------------------------------------------ reusability
 
+@requires_namespace
 def test_any_namespace_becomes_a_source_by_supplying_a_client(served):
     """The reason this is `NamespaceSource` and not a `db://` adapter.
 
@@ -238,6 +266,7 @@ def test_any_namespace_becomes_a_source_by_supplying_a_client(served):
 
 # ---------------------------------------------------------------- read-only
 
+@requires_namespace_open
 def test_browsing_through_a_namespace_changes_not_one_byte(frozen_corpus):
     """The namespace adapter *can* write, and is told not to.
 
@@ -294,3 +323,33 @@ def test_browsing_through_a_namespace_changes_not_one_byte(frozen_corpus):
         f"removed={sorted(set(before) - set(after))}")
     changed = {k: (before[k], after[k]) for k in before if before[k] != after[k]}
     assert not changed, f"browsing rewrote {len(changed)} file(s): {list(changed)[:5]}"
+
+
+def test_an_old_reader_lists_but_cannot_open(monkeypatch):
+    """The split pylance 3.0.0 actually has, and the reason it is two capabilities.
+
+    That reader lists a namespace happily and raises `TypeError` when asked to open a
+    table through one. Reporting the pair as a single capability would have cost every
+    object store its listing on it, since object stores need only the first.
+    """
+    from server.sources import namespace as ns
+
+    monkeypatch.setattr(ns, "can_open_namespace_tables", lambda: False)
+    caps = CloudSource().capabilities("db://sales")
+    assert caps.discover.state == AVAILABLE       # the table list is real
+    assert caps.inspect.state == UNSUPPORTED      # opening one is not
+    assert "later pylance" in caps.inspect.reason
+
+    # And it refuses at the point of opening rather than raising a TypeError from
+    # four frames down inside the reader.
+    with pytest.raises(FileNotFoundError, match="later pylance"):
+        CloudSource().target_for("db://sales", "orders")
+
+
+def test_a_reader_with_no_namespace_at_all_says_so(monkeypatch):
+    from server.sources import namespace as ns
+
+    monkeypatch.setattr(ns, "namespace_available", lambda: False)
+    caps = CloudSource().capabilities("db://sales")
+    assert caps.discover.state == UNSUPPORTED
+    assert "hf://" in caps.discover.reason
