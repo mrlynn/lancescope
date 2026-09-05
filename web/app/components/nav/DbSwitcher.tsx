@@ -36,7 +36,14 @@ export default function DbSwitcher({
   useEffect(() => {
     if (!open) return;
     const away = (e: PointerEvent) => {
-      if (!box.current?.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Element | null;
+      if (box.current?.contains(target as Node)) return;
+      // The menu itself is rendered into the document rather than inside `box`, so
+      // `contains` says a press on a connection is a press outside the switcher —
+      // and this closed the menu on pointerdown, before the click could land. The
+      // menu opened, looked right, and did nothing.
+      if (target?.closest?.("[data-popover]")) return;
+      setOpen(false);
     };
     const esc = (e: KeyboardEvent) => {
       if (e.key === "Escape") setOpen(false);
