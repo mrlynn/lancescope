@@ -1,21 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import Icon, { type IconName } from "@/app/components/Icon";
 import Mark from "@/app/components/Mark";
-import AppBar from "@/app/components/nav/AppBar";
-import DbSwitcher from "@/app/components/nav/DbSwitcher";
 import SampleDatasets from "@/app/components/samples/SampleDatasets";
-import { Copy, Cost, Empty } from "@/app/components/console/atoms";
-import TableRail from "@/app/components/console/TableRail";
+import { Copy, Empty } from "@/app/components/console/atoms";
 import {
   FragmentsTab, IndicesTab, SchemaTab, VersionsTab,
 } from "@/app/components/console/tabs";
 import {
-  type Findings, type Fragments, type Indices, type TableDetail,
-  type TableList, type Versions,
-  getFindings, getFragments, getIndices, getTable, getVersions, listTables,
+  type Findings,
+  getFindings, getFragments, getIndices, getTable, getVersions,
 } from "@/app/lib/catalog";
 import {
   InsightsTab, PanelFindings, PartialAnalysis,
@@ -24,11 +20,8 @@ import { CompareTab } from "@/app/components/console/CompareTab";
 import { DataTab } from "@/app/components/console/DataTab";
 import { TrainingTab, trainingFindings } from "@/app/components/console/TrainingTab";
 import { QueryTab } from "@/app/components/console/QueryTab";
-import { usePins, useRecents } from "@/app/lib/recents";
-import {
-  type Capabilities, type SettingsState, activateConnection, getCapabilities,
-  getSettings,
-} from "@/app/lib/settings";
+import { notePush, setParams, useValue } from "@/app/lib/url-state";
+import { recordCost, set as setWorkspace, useWorkspace } from "@/app/lib/workspace";
 
 // Each tab names what it reads, and carries the glyph for it — the row is
 // scannable as shapes before any of the words are read.
@@ -67,118 +60,57 @@ type Tab = "schema" | "versions" | "indices" | "fragments" | "query"
 const MERGED_TABS: Record<string, Tab> = { rows: "query" };
 
 export default function Console() {
-  const [list, setList] = useState<TableList | null>(null);
-  const [listError, setListError] = useState<string | null>(null);
-  const [picked, setPicked] = useState<string | null>(null);
-  const [tab, setTab] = useState<Tab>("schema");
-  const [railQuery, setRailQuery] = useState("");
+  // What was fetched lives in the store, because the shell shows some of it and a
+  // page that owned it would take it away on every navigation. Where you are lives
+  // in the URL, because every one of these should survive being pasted to somebody.
+  const w = useWorkspace();
+  const picked = useValue("table");
+  // `?tab=` may be absent, may name a tab that was merged into another, and may name
+  // one that never existed — an old link, or a typo. All three land on the schema
+  // rather than on a blank panel. `MERGED_TABS` is the existing redirect and keeps
+  // `?tab=rows` working, which five links in this repository still use.
+  const asked = useValue("tab");
+  const wanted = asked ? MERGED_TABS[asked] ?? asked : null;
+  const tab: Tab = (TABS.some((x) => x.id === wanted) ? wanted : "schema") as Tab;
 
-  const [detail, setDetail] = useState<TableDetail | null>(null);
-  const [versions, setVersions] = useState<Versions | null>(null);
-  const [indices, setIndices] = useState<Indices | null>(null);
-  const [fragments, setFragments] = useState<Fragments | null>(null);
-  // Fetched once per table rather than per tab: the same list is rendered inline
-  // under four panels and collected in Insights, and it is one cheap metadata read.
-  const [findings, setFindings] = useState<Findings | null>(null);
-
-  const [cost, setCost] = useState<{ bytes: number; iops: number } | null>(null);
-  const [settings, setSettings] = useState<SettingsState | null>(null);
-  // What the language layer can do right now, so the console offers it only when it
-  // is actually there — and stays exactly as useful when it is not.
-  const [ai, setAi] = useState<Capabilities | null>(null);
-  // Whether the demo corpus is under this root, on the same terms as `ai` above:
-  // the console links to the demo only where there is a demo to link to. The
-  // corpus is 2.5 GB and is not shipped, so in most builds there is not one, and
-  // an unconditional link there is a promise the next page cannot keep.
-  const [demoReady, setDemoReady] = useState(false);
-
-  // Pins and recents are scoped to the database, so they follow a connection
-  // switch rather than showing the last database's history against this one.
-  const root = list?.root ?? settings?.root.root ?? null;
-  const { recents, touch } = useRecents(root);
-  const { pins, toggle: togglePin } = usePins(root);
-
-  // Everything downstream of the selected table is cleared here rather than in an
-  // effect keyed on `picked`: an effect would re-render twice on every click, and
-  // the reset is a consequence of the click, not of the state having changed.
-  const selectTable = useCallback((name: string | null) => {
-    setPicked(name);
-    setDetail(null); setVersions(null); setIndices(null); setFragments(null);
-    setFindings(null);
-  }, []);
-
-  const loadTables = useCallback((want?: string | null, wantTab?: string | null) => {
-    listTables()
-      .then((d) => {
-        setList(d);
-        const has = (n: string | null | undefined) => !!n && d.tables.some((t) => t.name === n);
-        const picked = has(want) ? want! : null;
-        setPicked((p) => picked ?? (has(p) ? p : d.tables[0]?.name ?? null));
-        // `?tab=` opens the console on the question rather than the schema — "here
-        // are your 23 columns" is a strange first answer to "find my photos". Set
-        // here, alongside the table it belongs to, rather than in an effect of its
-        // own: a synchronous setState in an effect is a cascading render.
-        //
-        // `picked` is only set when `?table=` names a table that exists, but a bare
-        // `?tab=insights` is still a meaningful request: the console falls back to the
-        // first table, and the asked-for tab is the right one to open it on. Gating the
-        // tab on a named table made that link land on the schema instead, silently.
-        const asked = wantTab ? MERGED_TABS[wantTab] ?? wantTab : null;
-        if (asked && d.tables.length > 0 && TABS.some((x) => x.id === asked)) {
-          setTab(asked as Tab);
-        }
-      })
-      .catch((e) => setListError(e instanceof Error ? e.message : "unreachable"));
-  }, []);
-
-  /** `?table=` deep-links straight to one table — what the recent-table chips on the
-   *  home screen point at. Read from `location` rather than `useSearchParams` so this
-   *  page keeps prerendering without a Suspense boundary around the whole console. */
-  const wanted = () => {
-    if (typeof window === "undefined") return null;
-    return new URLSearchParams(window.location.search).get("table");
+  const pickTab = (id: Tab) => {
+    // Four views of one table's facts are a view change; a workspace is a place.
+    // The settings page draws this line first and in these words: "switching one is
+    // a view change rather than a navigation."
+    const place = id === "query" || id === "compare" || id === "training";
+    setParams({ tab: id }, place ? "push" : "replace");
+    if (place) notePush();
   };
 
-  const wantedTab = () => {
-    if (typeof window === "undefined") return null;
-    return new URLSearchParams(window.location.search).get("tab");
-  };
+  const { list, listError, detail, versions, indices, fragments, findings, ai,
+          demoReady } = w;
+  const root = list?.root ?? w.settings?.root.root ?? null;
 
+  // The table has to exist before it can be opened. `?table=` may name one that
+  // was renamed or belongs to a database this is no longer pointed at, and landing
+  // on the first table is a better answer than an empty panel with no explanation.
   useEffect(() => {
-    loadTables(wanted(), wantedTab());
-    getSettings().then(setSettings).catch(() => setSettings(null));
-    getCapabilities().then(setAi).catch(() => setAi(null));
-    fetch("/api/health", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setDemoReady(Boolean(d?.ok)))
-      .catch(() => setDemoReady(false));
-  }, [loadTables]);
-
-  // Switching connection repoints the catalog server-side, so everything below the
-  // rail is about a different database now. Clear it rather than leaving a schema
-  // from the old one on screen while the new list arrives.
-  const switchTo = useCallback(async (id: string) => {
-    try {
-      setSettings(await activateConnection(id));
-      selectTable(null);
-      setList(null);
-      setCost(null);
-      setRailQuery("");
-      loadTables();
-    } catch (e) {
-      setListError(e instanceof Error ? e.message : "could not switch connection");
+    if (!list) return;
+    const known = (n: string | null) => !!n && list.tables.some((x) => x.name === n);
+    if (!known(picked) && list.tables.length > 0) {
+      // Replace, not push: this is a correction to where you already are, and a
+      // back button that returns you to a table that does not exist is a trap.
+      setParams({ table: list.tables[0].name }, "replace");
     }
-  }, [loadTables, selectTable]);
+  }, [list, picked]);
 
+  // Once per table, not once per tab: the same list renders inline under four
+  // panels, is collected in the inspector, and is one cheap metadata read.
   useEffect(() => {
     if (!picked) return;
     let alive = true;
     getFindings(picked)
-      .then((d) => { if (alive) setFindings(d); })
-      .catch(() => { if (alive) setFindings(null); });
+      .then((d) => { if (alive) setWorkspace({ findings: d }); })
+      .catch(() => { if (alive) setWorkspace({ findings: null }); });
     return () => { alive = false; };
   }, [picked]);
 
+  // Only what the open tab needs, and only if it is not already held.
   useEffect(() => {
     if (!picked) return;
     let alive = true;
@@ -187,22 +119,28 @@ export default function Console() {
         if ((tab === "schema" || tab === "training") && !detail) {
           const d = await getTable(picked);
           if (!alive) return;
-          setDetail(d); setCost({ bytes: d.read_bytes, iops: d.read_iops });
+          setWorkspace({ detail: d });
+          recordCost(`schema · ${picked}`, d.read_bytes, d.read_iops);
         } else if (tab === "versions" && !versions) {
           const d = await getVersions(picked);
           if (!alive) return;
-          setVersions(d); setCost({ bytes: d.read_bytes, iops: d.read_iops });
+          setWorkspace({ versions: d });
+          recordCost(`versions · ${picked}`, d.read_bytes, d.read_iops);
         } else if (tab === "indices" && !indices) {
           const d = await getIndices(picked);
           if (!alive) return;
-          setIndices(d); setCost({ bytes: d.read_bytes, iops: d.read_iops });
+          setWorkspace({ indices: d });
+          recordCost(`indices · ${picked}`, d.read_bytes, d.read_iops);
         } else if (tab === "fragments" && !fragments) {
           const d = await getFragments(picked);
           if (!alive) return;
-          setFragments(d); setCost({ bytes: d.read_bytes, iops: d.read_iops });
+          setWorkspace({ fragments: d });
+          recordCost(`fragments · ${picked}`, d.read_bytes, d.read_iops);
         }
       } catch (e) {
-        if (alive) setListError(e instanceof Error ? e.message : "request failed");
+        if (alive) {
+          setWorkspace({ listError: e instanceof Error ? e.message : "request failed" });
+        }
       }
     };
     run();
@@ -284,43 +222,24 @@ export default function Console() {
   const current = list?.tables.find((t) => t.name === picked) ?? null;
 
   return (
-    <main className="relative z-10 min-h-screen px-[var(--stage-pad)] pt-7 pb-16">
-      <AppBar crumbs={[{ label: "Console" }]}>
-        {cost && <Cost bytes={cost.bytes} iops={cost.iops} />}
-        <Link href="/console/new" className="iconbtn" data-tip="Build one from files"
-              aria-label="Build a database from files">
-          <Icon name="plus" size={16} />
-        </Link>
-        {/* The receiving end of the bundle button. It lives up here rather than
-            beside the export, because the person who needs it arrived with a file
-            and no table selected — there is nothing on screen to hang it off. */}
-        <Link href="/console/bundle" className="iconbtn"
-              data-tip="Open a bundle somebody sent you"
-              aria-label="Open a diagnostic bundle">
-          <Icon name="external" size={16} />
-        </Link>
-        {demoReady && (
-          <Link href="/demo" className="iconbtn" data-tip="Ctrl-F for Video" aria-label="Open the demo">
-            <Icon name="play" size={16} />
-          </Link>
-        )}
-      </AppBar>
+    <>
+      {/* The table the centre is about, with its path. The rail says which table is
+          selected and the inspector says what version it is on; this is the one
+          thing neither of them carries, because a path is for pasting. */}
+      {current && (
+        <div className="flex items-center gap-2 mb-5">
+          <span className="mono text-[13px] text-[var(--bright)] truncate">{current.name}</span>
+          <Copy size={13} className="!w-7 !h-7" what="table path" title={current.uri}
+                value={current.uri} />
+          {demoReady && (
+            <Link href="/demo" className="iconbtn !w-7 !h-7 ml-auto" data-tip="Ctrl-F for Video"
+                  aria-label="Open the demo">
+              <Icon name="play" size={14} />
+            </Link>
+          )}
+        </div>
+      )}
 
-      <div className="flex items-center gap-3 mb-7 flex-wrap">
-        <DbSwitcher
-          settings={settings}
-          root={list?.root ?? null}
-          tableCount={list?.tables.length}
-          onSwitch={switchTo}
-        />
-        {current && (
-          <>
-            <span className="text-[var(--dim)]" aria-hidden><Icon name="chevronRight" size={13} /></span>
-            <span className="mono text-[13px] text-[var(--bright)]">{current.name}</span>
-            <Copy size={13} className="!w-7 !h-7" what="table path" title={current.uri} value={current.uri} />
-          </>
-        )}
-      </div>
 
       {listError && (
         <div className="mono flex items-center gap-2.5 text-[12px] px-3.5 py-3 rounded-sm mb-6"
@@ -414,21 +333,8 @@ export default function Console() {
           )}
         </div>
       ) : (
-        <div className="flex flex-col lg:flex-row gap-6 items-stretch lg:items-start">
-          <TableRail
-            tables={list?.tables ?? null}
-            picked={picked}
-            query={railQuery}
-            onQuery={setRailQuery}
-            onPick={(n) => { selectTable(n); touch(n); }}
-            pins={pins}
-            onTogglePin={togglePin}
-            recents={recents}
-            listBytes={list?.read_bytes ?? null}
-          />
-
-          {/* ---------------------------------------------------------- detail */}
-          <section className="flex-1 min-w-0">
+        <div className="min-w-0">
+          <section className="min-w-0">
             <div className="tabstrip mb-6" data-more-left={more.left} data-more-right={more.right}>
               <button
                 className="tabstrip-arrow" data-side="left" tabIndex={-1} aria-hidden={!more.left}
@@ -442,7 +348,7 @@ export default function Console() {
                     {group.map((t) => (
                       <button
                         key={t.id}
-                        onClick={() => setTab(t.id as Tab)}
+                        onClick={() => pickTab(t.id as Tab)}
                         data-on={tab === t.id}
                         // The label is the accessible name while it is on screen and
                         // the tooltip once it is not, so a glyph-only strip still
@@ -500,7 +406,7 @@ export default function Console() {
           </section>
         </div>
       )}
-    </main>
+    </>
   );
 }
 

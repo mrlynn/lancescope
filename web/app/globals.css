@@ -64,6 +64,13 @@
   --scrollbar: #ded4cc;
 
   --stage-pad: 34px;
+  /* The panes have their own gutter, and a smaller one. `--stage-pad` is what a
+     centred page keeps at its edges, and a three-pane workspace has no page edge to
+     keep — but `/`, `/demo`, `/docs` and the settings page all still mean it, so it
+     is a second token rather than a changed one. */
+  --pane-pad: 20px;
+  --rail-w: 262px;
+  --insp-w: 340px;
 
   /* The easter egg's sprite palette. Fixed art colours rather than semantic tokens: these
      are pictures, and a picture whose colours move with the theme stops being the same
@@ -90,7 +97,7 @@
    34px on a phone it spends 18% of a 375px screen on empty margin, which is the
    difference between a reference table showing two columns and showing one. */
 @media (max-width: 640px) {
-  :root { --stage-pad: 18px; }
+  :root { --stage-pad: 18px; --pane-pad: 14px; }
 }
 
 /* Dark — the warm near-black, on an explicit choice only.
@@ -147,6 +154,104 @@ html, body {
   color: var(--body);
   font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
   overscroll-behavior: none;
+}
+
+/* A column, so a viewport-locked child can be told to take what is left rather than
+   the whole window.
+
+   The kiosk banner renders above every page from the root layout. A workspace at
+   `height: 100dvh` under a 33px banner overflows the window by exactly 33px, and
+   the bottom of the inspector becomes unreachable — on the public demo, which is
+   the deployment that meets the most strangers. `flex: 1` on the shell plus this
+   means the banner, and anything the root layout gains later, is subtracted rather
+   than fought.
+
+   `100dvh` and not `100vh`: mobile browser chrome moves, and the kiosk is public. */
+body {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+}
+
+/* ---------------------------------------------------------------------------
+   The workspace: a toolbar over three panes, each owning its own scroll.
+
+   `min-height: 0` on every one of these is the line that makes it work. A grid or
+   flex child defaults to `min-height: auto`, which refuses to be shorter than its
+   content — so a nested scroller silently grows the grid instead of scrolling and
+   the page gains a scrollbar the design does not have. It has to be said at every
+   level, not only the outermost.
+   --------------------------------------------------------------------------- */
+.console-shell {
+  flex: 1;
+  min-height: 0;
+  /* Grid and flex children default to `min-width: auto` as well as `min-height`,
+     and the width half bites harder: without this the toolbar's row of controls
+     sets the shell's width, the shell sets the body's, and a 375px viewport gets a
+     layout 600px wide with everything to the right of the fold unreachable. The
+     AppBar this replaces hit exactly that and solved it by wrapping; a fixed-height
+     toolbar cannot wrap, so it shrinks instead. */
+  min-width: 0;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  position: relative;
+  z-index: 10;
+}
+
+.console-body {
+  min-height: 0;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: var(--rail-w) minmax(0, 1fr) var(--insp-w);
+}
+
+/* One scroller per pane. `contain` so a wheel at the bottom of the inspector does
+   not chain out to the page behind it — `overscroll-behavior: none` on the body
+   stops the rubber band, not the chain. */
+.console-pane {
+  min-height: 0;
+  min-width: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--pane-pad);
+}
+
+.console-rail { border-right: 1px solid var(--rule); }
+.console-inspector { border-left: 1px solid var(--rule); }
+
+/* Above the panes and outside their scroll, so it does not move with the centre. */
+.console-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 0 var(--pane-pad);
+  height: 46px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--ink);
+}
+
+/* Below this width the three panes stop being three panes: the rail and the
+   inspector become disclosures the toolbar opens, and the centre is the page —
+   which is what a narrow window can show one of at a time anyway. The kiosk demo
+   is public, so this has to work rather than merely not break. */
+/* The toolbar gives things up before the layout does. Everything hidden here is
+   reachable another way — the guide and settings from the console's own links, the
+   theme from `T` — and none of it is worth a control the window cannot fit. */
+@media (max-width: 767.98px) {
+  .console-toolbar [data-optional] { display: none; }
+}
+
+@media (max-width: 1023.98px) {
+  .console-body { grid-template-columns: minmax(0, 1fr); }
+  .console-rail, .console-inspector { display: none; border: 0; }
+  .console-body[data-pane="rail"] .console-rail,
+  .console-body[data-pane="inspector"] .console-inspector {
+    display: block;
+    grid-column: 1;
+  }
+  .console-body[data-pane="rail"] .console-centre,
+  .console-body[data-pane="inspector"] .console-centre { display: none; }
 }
 
 /* Ambient dot field, as on lancedb.com. Fixed so it reads as a backdrop the

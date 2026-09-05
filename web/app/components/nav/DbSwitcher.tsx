@@ -54,10 +54,14 @@ export default function DbSwitcher({
   const source = settings ? ROOT_SOURCE[settings.root.source] : "";
 
   return (
-    <div className="relative" ref={box}>
+    // `min-w-0` so the `truncate` two lines down can actually fire. A flex child
+    // will not shrink below its content without it, so the label had a truncate
+    // class that never did anything and the button simply overlapped whatever was
+    // beside it in a narrow toolbar.
+    <div className="relative min-w-0" ref={box}>
       <button
         onClick={() => setOpen((o) => !o)}
-        className={`btn max-w-[280px] ${open ? "btn-on" : ""}`}
+        className={`btn max-w-[280px] min-w-0 ${open ? "btn-on" : ""}`}
         aria-haspopup="menu"
         aria-expanded={open}
         title={uri ? `${uri}${source ? ` — ${source}` : ""}` : "no database configured"}
