@@ -167,6 +167,48 @@ else
   echo "    (the app will run here and be refused on other machines)"
 fi
 
+# The update signing key, checked here for the same reason the notary credentials
+# are: it is used at the very end, and a wrong password discovered after forty
+# minutes of building and notarising is forty minutes spent learning something that
+# could have been said in a second.
+#
+# Optional. Without it the build produces an app and a disk image exactly as before;
+# it just cannot also produce something an installed copy would accept as an update.
+# `tauri signer sign` reads the password from the environment, and prompts when it
+# is absent — which in CI is a hang rather than a failure, so it is required
+# alongside the key rather than left to be discovered.
+UPDATER=0
+if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+  echo "==> checking the update signing key"
+  : "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD?set it too — tauri signer prompts without \
+it, and a prompt in CI is a hang rather than a failure}"
+  # The key is either a path or the key itself; both are what the signer accepts.
+  if [ -f "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+    echo "    key file $TAURI_SIGNING_PRIVATE_KEY"
+  else
+    echo "    key supplied inline"
+  fi
+  PUBKEY=$(python3 - <<'EOF'
+import json, pathlib, sys
+cfg = json.loads(pathlib.Path("desktop/src-tauri/tauri.conf.json").read_text())
+print((cfg.get("plugins", {}).get("updater", {}) or {}).get("pubkey", ""))
+EOF
+)
+  if [ -z "$PUBKEY" ]; then
+    echo
+    echo "There is a signing key but no public key in tauri.conf.json, so nothing"
+    echo "installed would be able to check what this signs. Put the public half"
+    echo "from \`tauri signer generate\` into plugins.updater.pubkey."
+    echo
+    echo "Nothing was built."
+    exit 1
+  fi
+  UPDATER=1
+else
+  echo "==> no update signing key; building the app and disk image only"
+  echo "    (set TAURI_SIGNING_PRIVATE_KEY to also produce an update artifact)"
+fi
+
 echo "==> building the server"
 make sidecar
 
@@ -446,6 +488,59 @@ if [ -n "${APPLE_ID:-}${NOTARY_PROFILE:-}" ]; then
   notarise "$ZIP" || { echo; echo "Nothing was stapled."; exit 1; }
   xcrun stapler staple "$APP"
 
+  # The update artifact, made HERE and nowhere earlier.
+  #
+  # Tauri's `createUpdaterArtifacts` writes this during the bundle — which is
+  # `build.sh`, above, before the 108-binary signing loop, before the entitlements
+  # re-sign, before notarisation and before the staple. That tarball would carry the
+  # ad-hoc copy, and an update that installs an app Gatekeeper refuses is worse than
+  # no update at all. So the option stays off and this does it in the right order,
+  # for the same reason the disk image is rebuilt a few lines down.
+  #
+  # Measured rather than assumed: a tar of a stapled app, unpacked somewhere else,
+  # still passes `stapler validate` and `spctl --assess` reports
+  # "source=Notarized Developer ID". The ticket travels in the file tree, so a copy
+  # made after this line is one a machine with no network will accept.
+  if [ "$UPDATER" = 1 ]; then
+    echo "==> building and signing the update artifact"
+    TARBALL="$PWD/desktop/src-tauri/target/release/bundle/macos/LanceScope.app.tar.gz"
+    rm -f "$TARBALL" "$TARBALL.sig"
+    # From the parent, so the archive holds `LanceScope.app/...` — the updater strips
+    # exactly one leading component when it unpacks.
+    ( cd "$(dirname "$APP")" && tar -czf "$TARBALL" "$(basename "$APP")" )
+    npx --yes @tauri-apps/cli@2.11.4 signer sign -f "$TAURI_SIGNING_PRIVATE_KEY" \
+      "$TARBALL" >/dev/null \
+      || { echo "the update artifact could not be signed"; exit 1; }
+    [ -f "$TARBALL.sig" ] || { echo "signer produced no .sig beside the tarball"; exit 1; }
+    echo "    $(basename "$TARBALL") and its signature"
+
+    # The manifest an installed copy polls. Written here because it carries the
+    # signature, which does not exist until the line above.
+    #
+    # `darwin-aarch64` is the only platform, because the bundle targets are `app`
+    # and `dmg` and there is no other. A manifest naming platforms this project does
+    # not build would be an offer it cannot keep.
+    MANIFEST="$PWD/desktop/src-tauri/target/release/bundle/macos/latest.json"
+    python3 - "$TARBALL.sig" "$MANIFEST" <<'EOF'
+import datetime, json, pathlib, sys
+
+sig = pathlib.Path(sys.argv[1]).read_text().strip()
+version = json.loads(
+    pathlib.Path("desktop/src-tauri/tauri.conf.json").read_text()
+)["version"]
+# The download the release publishes. `latest/download` rather than the tag, so a
+# copy installed today still resolves after the next release moves the pointer.
+url = ("https://github.com/mrlynn/lancescope/releases/download/"
+       f"v{version}/LanceScope.app.tar.gz")
+pathlib.Path(sys.argv[2]).write_text(json.dumps({
+    "version": version,
+    "pub_date": datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds"),
+    "platforms": {"darwin-aarch64": {"signature": sig, "url": url}},
+}, indent=2) + "\n")
+EOF
+    echo "    latest.json for v$(python3 -c "import json,pathlib;print(json.loads(pathlib.Path('desktop/src-tauri/tauri.conf.json').read_text())['version'])")"
+  fi
+
   # The disk image was assembled around an app with no ticket, so it has to be made
   # again around the stapled one. A DMG whose contents were notarised after it was
   # built is how an app gets refused on a machine with no network.
@@ -463,6 +558,25 @@ if [ -n "${APPLE_ID:-}${NOTARY_PROFILE:-}" ]; then
   # Layout matches bundle.macOS.dmg in tauri.conf.json — change both together.
   echo "==> rebuilding the disk image around the stapled app"
   DMG_DIR="desktop/src-tauri/target/release/bundle/dmg"
+
+  # Read rather than repeated. The comment above used to say "change both together"
+  # and there were three: this script said 660x400 with icons at y=205, the config
+  # said 660x348 with icons at y=188, and `dmg_background.py` drew the picture at
+  # 660x348. So a locally built image and the signed release did not look the same,
+  # and the background was painted for neither of them. `dmg_background.py` reads the
+  # config too, which leaves the geometry written down once.
+  eval "$(python3 - <<'EOF'
+import json, pathlib
+d = json.loads(pathlib.Path("desktop/src-tauri/tauri.conf.json").read_text())
+dmg = d["bundle"]["macOS"]["dmg"]
+print(f'DMG_W={dmg["windowSize"]["width"]}')
+print(f'DMG_H={dmg["windowSize"]["height"]}')
+print(f'APP_X={dmg["appPosition"]["x"]}')
+print(f'APP_Y={dmg["appPosition"]["y"]}')
+print(f'LINK_X={dmg["applicationFolderPosition"]["x"]}')
+print(f'LINK_Y={dmg["applicationFolderPosition"]["y"]}')
+EOF
+)"
   # Absolute, because the image is built from inside DMG_DIR. Carried as an array
   # rather than an interpolated string: `${BG:+--background "$BG"}` collapses to one
   # argument in some shells and word-splits on any space in the path in others, and
@@ -475,9 +589,9 @@ if [ -n "${APPLE_ID:-}${NOTARY_PROFILE:-}" ]; then
   rm -f "$DMG"
   ( cd "$DMG_DIR" && ./bundle_dmg.sh \
       --volname "LanceScope" \
-      --icon "LanceScope.app" 170 205 \
-      --app-drop-link 490 205 \
-      --window-size 660 400 \
+      --icon "LanceScope.app" "$APP_X" "$APP_Y" \
+      --app-drop-link "$LINK_X" "$LINK_Y" \
+      --window-size "$DMG_W" "$DMG_H" \
       --hide-extension "LanceScope.app" \
       "${BG_ARGS[@]}" \
       --codesign "$APPLE_SIGNING_IDENTITY" \

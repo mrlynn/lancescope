@@ -14,11 +14,20 @@ only antialiasing available.
 
 from __future__ import annotations
 
+import json
 import pathlib
 
 from PIL import Image, ImageDraw, ImageFont
 
-W, H = 660, 348          # must match bundle.macOS.dmg.windowSize
+# The window this picture is painted for, read from the file that decides it rather
+# than repeated here. It was repeated in three places and two of them disagreed —
+# this drew for a 660x348 window while `sign.sh` built a 660x400 one, so the arrow
+# in the release image pointed somewhere slightly wrong and nothing said so.
+_CONF = json.loads(
+    (pathlib.Path(__file__).parent / "src-tauri" / "tauri.conf.json").read_text()
+)["bundle"]["macOS"]["dmg"]
+
+W, H = _CONF["windowSize"]["width"], _CONF["windowSize"]["height"]
 SS = 3                   # supersample factor
 
 INK = (23, 21, 19)       # --ink
@@ -27,10 +36,11 @@ BRIGHT = (244, 235, 232)  # --bright
 HAZE = (132, 119, 112)   # --haze
 CORAL = (255, 115, 74)   # --video, LanceDB coral
 
-# Icon centres, in window points. These MUST match appPosition and
-# applicationFolderPosition in tauri.conf.json or the arrow will point at nothing.
-APP = (170, 188)
-APPLICATIONS = (490, 188)
+# Icon centres, in window points, from the same block. An arrow drawn between two
+# points the disk image does not put its icons at is worse than no arrow.
+APP = (_CONF["appPosition"]["x"], _CONF["appPosition"]["y"])
+APPLICATIONS = (_CONF["applicationFolderPosition"]["x"],
+                _CONF["applicationFolderPosition"]["y"])
 
 FONTS = ["/System/Library/Fonts/SFNS.ttf", "/System/Library/Fonts/Helvetica.ttc"]
 
