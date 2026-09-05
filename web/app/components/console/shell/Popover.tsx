@@ -93,6 +93,11 @@ export default function Popover({ anchorRef, open, children, minHeight = 120, st
         box.current = node;
         if (node) place();
       }}
+      // Marked, because a panel rendered into the document is no longer inside the
+      // element that owns it — so a menu that dismisses itself on a press "outside"
+      // will treat a press on its own items as outside and close before the click
+      // lands. Anything with that kind of dismissal checks for this attribute.
+      data-popover=""
       // Above the row drawer's scrim, which is the only thing in this app that
       // deliberately covers the workspace.
       className="fixed z-[70]"

@@ -73,7 +73,14 @@ export default function ConsoleShell({ children }: { children: ReactNode }) {
     setParams({ table: null }, "push");
     notePush();
     activateConnection(id)
-      .then(() => listTables())
+      // The new settings, kept rather than dropped. `activateConnection` answers
+      // with them because the active connection has just changed, and throwing that
+      // away left the switcher naming the database you had left while every other
+      // pane showed the one you had arrived at.
+      .then((s) => {
+        set({ settings: s });
+        return listTables();
+      })
       .then((d) => {
         set({ list: d });
         recordCost("list tables", d.read_bytes, d.read_iops);
