@@ -26,6 +26,8 @@ use std::time::{Duration, Instant};
 
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
+mod menu;
+
 /// How long to wait for the server to announce its port.
 ///
 /// Cold, this is a frozen Python unpacking and importing Lance and PyArrow; on a
@@ -61,6 +63,11 @@ const STAGE: tauri::window::Color = tauri::window::Color(0xfa, 0xf7, 0xf5, 0xff)
 /// The child, kept so it can be killed. Tauri hands `AppHandle` around freely and
 /// the exit hook needs to reach this from a different thread than started it.
 struct Server(Mutex<Option<Child>>);
+
+/// The port the server chose, once it has. `None` until then — which is exactly the
+/// window in which there is no menu to press either, since the menu is built from
+/// this.
+struct Port(Mutex<Option<u16>>);
 
 /// The last few lines the server said, for the page that has to explain itself.
 type Tail = Arc<Mutex<VecDeque<String>>>;
@@ -338,6 +345,12 @@ fn boot(handle: tauri::AppHandle) {
                     if let Some(splash) = handle.get_webview_window("splash") {
                         let _ = splash.close();
                     }
+                    // Now rather than in `setup()`: half the menu is Open Recent,
+                    // and every item in it needs a port to activate through. Until
+                    // this point macOS shows Tauri's default menu, which carries
+                    // Quit — so there is never a moment without one.
+                    handle.state::<Port>().0.lock().unwrap().replace(port);
+                    let _ = menu::install(&handle);
                 }
             });
         }
@@ -403,7 +416,9 @@ fn main() {
                 .build(),
         )
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(Server(Mutex::new(None)))
+        .manage(Port(Mutex::new(None)))
         .setup(|app| {
             let handle = app.handle().clone();
 
@@ -425,7 +440,23 @@ fn main() {
             std::thread::spawn(move || boot(handle));
             Ok(())
         })
+        .on_menu_event(|app, event| {
+            let port = *app.state::<Port>().0.lock().unwrap();
+            if let Some(port) = port {
+                menu::on_event(app, event.id().0.as_str(), port);
+            }
+        })
         .on_window_event(|window, event| {
+            // The ordinary way to gain a connection is to add it on the settings
+            // page and then reach for the menu, so the menu is rebuilt when the
+            // window comes forward rather than only at launch. It is one read of a
+            // two-kilobyte file.
+            if let tauri::WindowEvent::Focused(true) = event {
+                let app = window.app_handle();
+                if app.state::<Port>().0.lock().unwrap().is_some() {
+                    let _ = menu::install(app);
+                }
+            }
             if let tauri::WindowEvent::Destroyed = event {
                 // Closing the window is quitting, on a single-window app. Without
                 // this the process lingers with no way to reach it but Activity
