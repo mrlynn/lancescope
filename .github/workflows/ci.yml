@@ -87,6 +87,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: desktop/src-tauri
+      # `tauri-build` checks that every path in `bundle.resources` exists, and the
+      # sidecar is PyInstaller output — gitignored, and minutes to build. Nothing
+      # below reads it; they compile Rust. An empty directory gets past the check.
+      - run: mkdir -p packaging/dist/lancescope-server
+        working-directory: .
       - run: cargo fmt --check
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test

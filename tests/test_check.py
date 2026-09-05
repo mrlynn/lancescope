@@ -59,6 +59,16 @@ def test_every_ci_job_is_either_in_check_or_excused():
         "tests": ["python -m pytest"],
         "web": ["npx tsc --noEmit"],
         "image": ["build -f docker/Dockerfile", "scripts/check_image.py"],
+        # Four commands and all four matter. `fmt` and `clippy` are the two CI
+        # rejects a tree over, and `check --release` is a different profile from
+        # `test`: the development server path is `cfg`'d out of release, so the code
+        # that ships is not the code the debug build compiled.
+        "desktop": [
+            "fmt --check",
+            "clippy --all-targets -- -D warnings",
+            "test -q",
+            "check --release",
+        ],
     }
     # ...and the ones that are not local, with the reason, because an omission
     # nobody wrote down is indistinguishable from an omission nobody noticed.
