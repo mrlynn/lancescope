@@ -156,6 +156,21 @@ html, body {
   overscroll-behavior: none;
 }
 
+/* The workspace locks the window; every other page scrolls normally.
+   
+   `min-height: 100dvh` alone was not enough and shipped as though it were: a body
+   with a minimum and no maximum grows to fit its content, so `flex: 1` on the shell
+   grew with it and the *document* scrolled while each pane sat at its full height.
+   The panes were never locked, and `overflow-y: auto` on them never fired.
+   
+   Set by the shell on mount rather than globally, because `/`, `/demo`, `/docs` and
+   the settings page are documents and want the scroll they have. `RowPanel` already
+   reaches for the body this way and for the same kind of reason. */
+html.app-locked, html.app-locked body {
+  height: 100dvh;
+  overflow: hidden;
+}
+
 /* A column, so a viewport-locked child can be told to take what is left rather than
    the whole window.
 

@@ -22,6 +22,8 @@
  */
 
 import { useMemo, useRef, useState } from "react";
+
+import Popover from "@/app/components/console/shell/Popover";
 import type { CompletionColumn } from "@/app/lib/catalog";
 
 /** Where the caret is, in terms of what would help. */
@@ -252,10 +254,10 @@ export function FilterInput({
         onBlur={() => setTimeout(() => setOpen(false), 120)}
       />
 
-      {open && items.length > 0 && (
+      <Popover anchorRef={ref} open={open && items.length > 0}>
         <ul
-          className="absolute z-30 left-0 right-0 top-full mt-1 max-h-[260px] overflow-y-auto
-                     rounded-sm border border-[var(--rule)] bg-[var(--ink-2)] shadow-lg py-1"
+          className="h-full max-h-[260px] overflow-y-auto rounded-sm border
+                     border-[var(--rule)] bg-[var(--ink-2)] shadow-lg py-1"
           role="listbox"
         >
           {items.map((s, i) => (
@@ -278,7 +280,7 @@ export function FilterInput({
             </li>
           ))}
         </ul>
-      )}
+      </Popover>
     </div>
   );
 }

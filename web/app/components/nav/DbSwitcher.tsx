@@ -11,6 +11,8 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+
+import Popover from "@/app/components/console/shell/Popover";
 import Icon from "@/app/components/Icon";
 import { ROOT_SOURCE, dbName, dbParent } from "@/app/lib/dbname";
 import type { SettingsState } from "@/app/lib/settings";
@@ -76,10 +78,10 @@ export default function DbSwitcher({
         <Icon name="chevronDown" size={13} className={open ? "rotate-180 transition-transform" : "transition-transform"} />
       </button>
 
-      {open && (
+      <Popover anchorRef={box} open={open} stretch={false}>
         <div
           role="menu"
-          className="panel absolute left-0 top-[calc(100%+6px)] z-50 w-[340px] p-1.5 shadow-2xl"
+          className="panel w-[340px] p-1.5 shadow-2xl h-full overflow-y-auto"
           style={{ boxShadow: "0 18px 40px rgb(0 0 0 / 0.35)" }}
         >
           <div className="eyebrow px-2.5 py-2">
@@ -154,7 +156,7 @@ export default function DbSwitcher({
             Add or manage connections
           </Link>
         </div>
-      )}
+      </Popover>
     </div>
   );
 }

@@ -16,6 +16,8 @@
  *  rows already read, which is the only honest thing a client-side grid can say. */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+import Popover from "@/app/components/console/shell/Popover";
 import Icon from "@/app/components/Icon";
 import { CellView } from "@/app/components/console/cell";
 import { cellText } from "@/app/lib/export";
@@ -122,6 +124,9 @@ export function DataGrid({
   const [sort, setSort] = useState<Sort>(null);
   const [sel, setSel] = useState<number | null>(null);
   const [pickCols, setPickCols] = useState(false);
+  // What the column panel hangs off. It is portalled out of the grid, so it needs a
+  // handle on the button rather than a positioned ancestor.
+  const colsBtn = useRef<HTMLButtonElement>(null);
   const [dragging, setDragging] = useState<
     { col: string; startX: number; startW: number } | null>(null);
 
@@ -221,6 +226,7 @@ export function DataGrid({
         <div className="relative">
           <button
             className={`btn mono !h-[26px] !px-2.5 text-[10px] tracking-[0.14em] uppercase ${hidden.length ? "btn-on" : ""}`}
+            ref={colsBtn}
             onClick={() => setPickCols((v) => !v)}
             title="Choose which columns the grid shows"
           >
@@ -229,10 +235,11 @@ export function DataGrid({
             {hidden.length > 0 && <span>· {shown.length}/{columns.length}</span>}
           </button>
           {pickCols && (
-            <>
-              <div className="fixed inset-0 z-30" onClick={() => setPickCols(false)} />
-              <div className="panel absolute left-0 top-[30px] z-40 p-2 w-[240px]
-                              max-h-[320px] overflow-y-auto shadow-lg">
+            <div className="fixed inset-0 z-[60]" onClick={() => setPickCols(false)} />
+          )}
+          <Popover anchorRef={colsBtn} open={pickCols} stretch={false}>
+              <div className="panel p-2 w-[240px] h-full max-h-[320px] overflow-y-auto
+                              shadow-lg">
                 <div className="flex items-center justify-between px-1.5 pb-1.5 mb-1"
                      style={{ borderBottom: "1px solid var(--rule)" }}>
                   <span className="eyebrow">shown in grid</span>
@@ -260,8 +267,7 @@ export function DataGrid({
                   the row panel still shows it.
                 </p>
               </div>
-            </>
-          )}
+          </Popover>
         </div>
 
         {sort && (
