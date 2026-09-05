@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useSyncExternalStore } from "react";
+import { useCallback, useSyncExternalStore } from "react";
+
+import { useShortcut } from "@/app/lib/keys";
 import Icon, { type IconName } from "@/app/components/Icon";
 
 /** Three states, not two. An absent `data-theme` attribute is the third one, and
@@ -60,22 +62,13 @@ export function applyTheme(c: Choice) {
 export default function ThemeToggle() {
   const choice = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      // `key` is required of a real keystroke and missing from plenty of synthetic
-      // ones — a password manager filling a field, an automation harness, an
-      // extension replaying input. Reading it unguarded throws on those and takes
-      // the whole page down over a shortcut nobody pressed.
-      if (!e.key) return;
-      if (e.key.toLowerCase() !== "t" || e.metaKey || e.ctrlKey || e.altKey) return;
-      const el = document.activeElement;
-      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return;
-      const i = OPTIONS.findIndex((o) => o.id === getSnapshot());
-      applyTheme(OPTIONS[(i + 1) % OPTIONS.length].id);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  // `T`, through the one listener. The guard this used to carry alone — a synthetic
+  // keystroke with no `key` throwing and taking the page down — now lives in the
+  // registry, where every binding inherits it.
+  useShortcut("theme", useCallback(() => {
+    const i = OPTIONS.findIndex((o) => o.id === getSnapshot());
+    applyTheme(OPTIONS[(i + 1) % OPTIONS.length].id);
+  }, []));
 
   return (
     <div className="seg" role="group" aria-label="Colour theme">

@@ -17,13 +17,15 @@
  */
 
 import Link from "next/link";
-import { type ReactNode, useCallback, useEffect, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 
 import Icon from "@/app/components/Icon";
 import Mark from "@/app/components/Mark";
 import ThemeToggle from "@/app/components/ThemeToggle";
 import DbSwitcher from "@/app/components/nav/DbSwitcher";
 import Inspector from "@/app/components/console/shell/Inspector";
+import Palette, { Shortcuts } from "@/app/components/console/shell/Palette";
+import { listen, useShortcut } from "@/app/lib/keys";
 import TableRail from "@/app/components/console/TableRail";
 import { listTables } from "@/app/lib/catalog";
 import { usePins, useRecents } from "@/app/lib/recents";
@@ -40,12 +42,15 @@ type Narrow = "centre" | "rail" | "inspector";
 export default function ConsoleShell({ children }: { children: ReactNode }) {
   const w = useWorkspace();
   const [narrow, setNarrow] = useState<Narrow>("centre");
+  const [palette, setPalette] = useState(false);
+  const [sheet, setSheet] = useState(false);
   const history = useHistoryDepth();
 
   // The shell owns the selection, because the rail that changes it and the
   // inspector that describes it both live here and the page in the middle is only
   // one of the things that reads it.
   const table = useValue("table");
+  const railFilter = useRef<HTMLInputElement>(null);
   const [railQuery, setRailQuery] = useState("");
   const root = w.list?.root ?? w.settings?.root.root ?? null;
   const { recents, touch } = useRecents(root);
@@ -75,6 +80,22 @@ export default function ConsoleShell({ children }: { children: ReactNode }) {
       .catch((e) => set({ listError: e instanceof Error ? e.message : "unreachable" }));
   }, []);
 
+  const goScreen = useCallback((tab: string, name?: string) => {
+    // Everything below the rail is about the table it was read from, so changing
+    // table has to drop it — the same reset the rail does on a click. Without this
+    // the palette left the last table's schema on screen under the new one's name,
+    // and the fetch would not replace it, because the effect only reads what it does
+    // not already hold.
+    if (name && name !== table) {
+      clearTable();
+      touch(name);
+    }
+    setParams(name ? { tab, table: name } : { tab }, "push");
+    notePush();
+  }, [table, touch]);
+
+  const goRoute = useCallback((href: string) => window.location.assign(href), []);
+
   // A finding names the panel its evidence is on. Clicking one goes there, which is
   // the whole reason the index is worth having apart from the cards.
   const onGoToPanel = useCallback((panel: string) => {
@@ -87,6 +108,18 @@ export default function ConsoleShell({ children }: { children: ReactNode }) {
   // browser tab. These are buttons for the mouse, not a second set of shortcuts.
   const back = useCallback(() => window.history.back(), []);
   const forward = useCallback(() => window.history.forward(), []);
+
+  // One listener, installed here and nowhere else.
+  useEffect(listen, []);
+
+  useShortcut("palette", useCallback(() => setPalette(true), []));
+  useShortcut("shortcuts", useCallback(() => setSheet(true), []));
+  // `/` is the demo's own shortcut for the same idea, moved to the console where the
+  // list it filters actually lives.
+  useShortcut("focus-tables", useCallback(() => {
+    railFilter.current?.focus();
+    railFilter.current?.select();
+  }, []));
 
   // The window is the workspace's, for as long as the workspace is on screen. Taken
   // off again on unmount, because `/console/settings` and `/console/bundle` are
@@ -189,6 +222,7 @@ export default function ConsoleShell({ children }: { children: ReactNode }) {
             picked={table}
             query={railQuery}
             onQuery={setRailQuery}
+            filterRef={railFilter}
             onPick={pick}
             pins={pins}
             onTogglePin={togglePin}
@@ -199,6 +233,16 @@ export default function ConsoleShell({ children }: { children: ReactNode }) {
         <section className="console-pane console-centre">{children}</section>
         <Inspector w={w} table={table} onGoToPanel={onGoToPanel} />
       </div>
+
+      {/* Mounted only while open, so it opens empty every time rather than
+          remembering the last thing somebody looked for. */}
+      {palette && (
+        <Palette
+          w={w} open onClose={() => setPalette(false)} root={root}
+          onGo={goRoute} onScreen={goScreen} onSwitch={onSwitch} onGoToPanel={onGoToPanel}
+        />
+      )}
+      <Shortcuts open={sheet} onClose={() => setSheet(false)} />
     </div>
   );
 }

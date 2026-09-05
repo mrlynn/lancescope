@@ -35,6 +35,7 @@ export default function TableRail({
   picked,
   query,
   onQuery,
+  filterRef,
   onPick,
   pins,
   onTogglePin,
@@ -45,6 +46,8 @@ export default function TableRail({
   picked: string | null;
   query: string;
   onQuery: (q: string) => void;
+  /** So `/` can put the caret here from anywhere in the workspace. */
+  filterRef?: React.Ref<HTMLInputElement>;
   onPick: (name: string) => void;
   pins: string[];
   onTogglePin: (name: string) => void;
@@ -99,6 +102,7 @@ export default function TableRail({
           <Icon name="search" size={14} />
         </span>
         <input
+          ref={filterRef}
           value={query}
           onChange={(e) => onQuery(e.target.value)}
           placeholder="Filter tables"
