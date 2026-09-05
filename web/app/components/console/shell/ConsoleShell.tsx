@@ -88,6 +88,15 @@ export default function ConsoleShell({ children }: { children: ReactNode }) {
   const back = useCallback(() => window.history.back(), []);
   const forward = useCallback(() => window.history.forward(), []);
 
+  // The window is the workspace's, for as long as the workspace is on screen. Taken
+  // off again on unmount, because `/console/settings` and `/console/bundle` are
+  // documents and a document that cannot scroll is a document with a bottom half
+  // nobody can read.
+  useEffect(() => {
+    document.documentElement.classList.add("app-locked");
+    return () => document.documentElement.classList.remove("app-locked");
+  }, []);
+
   // Coming back to a wide window with a pane still selected would leave the centre
   // hidden on a layout that has room for all three.
   useEffect(() => {
