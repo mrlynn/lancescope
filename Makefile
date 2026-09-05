@@ -211,7 +211,7 @@ ui:
 # shell gets to interfere with. Unsigned — see desktop/sign.sh for the rest.
 app: sidecar
 	./desktop/build.sh
-	@# Tauri signs the app; it does not sign the 108 Mach-O files inside it, and
+	@# Tauri signs the app; it does not sign the Mach-O files inside it, and
 	@# PyInstaller leaves its own ad-hoc. That bundle runs here and Apple refuses it,
 	@# which is a fine trade for a local build and a bad thing to discover by
 	@# submitting one: a notarisation came back with 215 validation errors and no

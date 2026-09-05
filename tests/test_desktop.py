@@ -114,3 +114,18 @@ def test_the_public_key_is_committed_and_the_private_one_is_not():
     decoded = base64.b64decode(pubkey).decode("utf-8", "replace")
     assert "public key" in decoded, f"that does not look like a public key: {decoded[:60]}"
     assert "secret key" not in decoded
+
+
+def test_the_update_key_is_checked_by_using_it():
+    """A preflight that reads a variable is not a preflight.
+
+    The first version checked that a key and a password were *set* and called that
+    checking them, which is the exact failure the block exists to prevent. It cost a
+    real run to find out: 151 binaries signed, a notarisation accepted, the ticket
+    stapled, and then "Wrong password for that key" at the last step. Signing a
+    throwaway file answers the same question in two seconds.
+    """
+    source = SIGN.read_text()
+    probe = source.index('signer sign "$PROBE"')
+    build = source.index("make sidecar")
+    assert probe < build, "the key is used after the build starts, so a bad one costs a build"
