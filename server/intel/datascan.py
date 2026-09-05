@@ -681,8 +681,31 @@ def _needs(kind: str, what: str):
 
 
 def _content_capability(s: Survey, columns: list[str]) -> Capability:
+    """Anything cheap to look at, and a blob asked from its descriptor — not both
+    ends of that.
+
+    A Blob V2 column projects to a position and a size, so asking whether the payload
+    is there costs kilobytes. An ordinary `binary` column has no descriptor: the only
+    way to find out whether a cell is empty is to fetch the cell, and a null count
+    over a thumbnail column would move every thumbnail to answer a question about
+    nulls. The quote would say so and somebody could consent to it, but consenting to
+    a bad trade is not the same as it being a good one — and this is the one check
+    people will run without thinking about which columns are in it.
+    """
     if not columns:
         return Capability(UNSUPPORTED, "This table has no readable columns.")
+    for name in columns:
+        col = s.by_name(name)
+        if col is None:
+            return Capability(UNSUPPORTED, f"This table has no column {name!r}.")
+        if not col.scalar and not col.blob:
+            return Capability(
+                UNSUPPORTED,
+                f"{name!r} is a {col.type}, which has no descriptor to ask. Counting "
+                f"nulls in it would fetch every value — the whole column, to answer a "
+                f"question about which rows are empty. A Blob V2 column can be asked "
+                f"from its descriptor; this cannot."
+                + (" Use vector-health for a vector column." if col.vector_dim else ""))
     return Capability(AVAILABLE)
 
 

@@ -498,3 +498,35 @@ def test_a_clean_table_and_a_holed_one_do_not_read_the_same(catalog):
 
     assert [f.id for f in clean.findings] == ["content-complete"]
     assert {f.id for f in holed.findings} == {"nulls-label", "blob-empty-payload"}
+
+
+def test_missing_content_refuses_a_column_it_would_have_to_materialise(catalog):
+    """The one check people will run without reading which columns are in it.
+
+    `thumbnails` holds pictures in an ordinary `binary` column. There is no descriptor
+    to ask, so counting nulls in it means fetching every thumbnail — the whole column,
+    to answer a question about which rows are empty. A Blob V2 column is a different
+    proposition and stays allowed.
+    """
+    heavy = run(catalog, "thumbnails", "missing-content", ["thumb"])
+
+    assert heavy.state == "unsupported"
+    assert "no descriptor to ask" in heavy.detail
+    assert heavy.read_bytes == 0
+
+
+def test_a_blob_column_is_still_asked_because_it_has_a_descriptor(catalog):
+    ok = run(catalog, "holes", "missing-content", ["payload"])
+
+    assert ok.state == "done"
+
+
+def test_a_heavy_column_never_reaches_the_defaults(catalog):
+    """Naming one is refused; the defaults must not name one in the first place."""
+    plan = datascan.plan(catalog.open("thumbnails", scope="test"))
+    content = next(c for c in plan["checks"] if c["check"] == "missing-content")
+    survey = datascan.survey(catalog.open("thumbnails", scope="test"))
+    heavy = {c.name for c in survey.columns if not c.scalar and not c.blob}
+
+    assert content["capability"]["state"] == "available"
+    assert not heavy & set(content["columns"])
