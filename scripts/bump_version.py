@@ -27,10 +27,20 @@ ROOT = Path(__file__).resolve().parent.parent
 TOML_VERSION = re.compile(r'^(version\s*=\s*")([^"]+)(")', re.M)
 JSON_VERSION = re.compile(r'^(\s*"version"\s*:\s*")([^"]+)(")', re.M)
 
+# `Cargo.lock` pins the crate's own version alongside its dependencies', so a bump
+# that touches only `Cargo.toml` leaves the lock claiming the old one until the next
+# cargo invocation rewrites it — which is a stray diff in whatever commit happens to
+# run cargo next. That happened once and needed a commit of its own to undo; the
+# regex is anchored to this crate's block so nothing else in the file can match.
+LOCK_VERSION = re.compile(
+    r'(\[\[package\]\]\nname = "lancescope"\nversion = ")([^"]+)(")'
+)
+
 TARGETS = [
     (ROOT / "pyproject.toml", TOML_VERSION),
     (ROOT / "desktop/src-tauri/Cargo.toml", TOML_VERSION),
     (ROOT / "desktop/src-tauri/tauri.conf.json", JSON_VERSION),
+    (ROOT / "desktop/src-tauri/Cargo.lock", LOCK_VERSION),
 ]
 
 SEMVER = re.compile(r"^\d+\.\d+\.\d+([-+].+)?$")
