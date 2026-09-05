@@ -128,27 +128,29 @@ def serve(*, port: int | None = None, open_browser: bool = False,
     return main()
 
 
-def main() -> int:
-    import uvicorn
+def api_app(*, kiosk_mode: bool):
+    """The API a second time, to be mounted at `/api`.
 
-    # Frozen, stdout is a pipe and therefore block buffered, so everything this
-    # prints arrives when the process ends. The parent reads this stream to learn
-    # the port and to show startup progress; both want it a line at a time.
-    sys.stdout.reconfigure(line_buffering=True)
-
-    # The interface, exported as static files at build time and carried inside the
-    # bundle. Absent until something has exported it, which is fine: until then the
-    # browser talks to the Next.js dev server instead.
-    ui = ui_dir()
-
+    Its own function so a test can hold it beside the app it mirrors without
+    starting a server or mounting anything onto the module-level one.
+    """
     from fastapi import FastAPI
 
+    from server.main import mount_routers
+
+    api = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+    mount_routers(api, kiosk_mode=kiosk_mode)
+    return api
+
+
+def build_app(ui: Path | None):
+    """The application this process serves: the API, the API again under `/api`,
+    and the exported interface under everything.
+
+    Split out of `main()` so it can be built without being run.
+    """
     from server import kiosk
-    from server.main import app, upstream_throttled
-    from server.routes import catalog as catalog_routes
-    from server.routes import demo
-    from server.routes import intel as intel_routes
-    from server.routes import settings as settings_routes
+    from server.main import app
 
     # The same routes again under `/api`.
     #
@@ -162,23 +164,18 @@ def main() -> int:
     # main app's lifespan sets up are shared, and `app.routes` stays exactly as the
     # documentation generator reads it.
     #
-    # The kiosk decision has to be repeated here rather than inherited. The mount is
-    # a second app with its own router list, so a router the main app declined to
-    # mount would still be reachable through `/api/…` — which is the only path the
-    # exported interface ever uses, making this the copy that matters. It was found
-    # by checking, not by reasoning: `/intel/*` was correctly absent from the API and
-    # present under `/api/intel/*` in the same process.
-    api = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
-    routers = [demo.router, catalog_routes.router, settings_routes.router]
-    if not kiosk.enabled():
-        routers.append(intel_routes.router)
-    for router in routers:
-        api.include_router(router)
-    # And the same handler, for the same reason: an exception raised inside a mounted
-    # sub-application is handled by that sub-application, not by its parent.
-    for failure in (OSError, ValueError):
-        api.add_exception_handler(failure, upstream_throttled)
-    app.mount("/api", api)
+    # `mount_routers` rather than a list written out again. This mount is the only
+    # path the exported interface ever uses, so it is the copy that matters, and it
+    # spent two releases disagreeing with the app it mirrors. The hand-written list
+    # here was missing `/ingest/*`, so `/console/new` answered 404 in every packaged
+    # build while working perfectly under `make dev` — and when `/scan/*` was added
+    # it was missed too, the same day, which is the argument: a list maintained by
+    # remembering to maintain it will drift again.
+    #
+    # The kiosk decision still has to be *passed* — a mounted sub-application has its
+    # own router list and inherits nothing — but deciding it twice is what went
+    # wrong, so it is decided once here and handed over.
+    app.mount("/api", api_app(kiosk_mode=kiosk.enabled()))
 
     if ui is not None:
         # Mounted last, at the root, so every API route above still wins.
@@ -186,6 +183,22 @@ def main() -> int:
     else:
         print("no exported interface found — API only. Build one with `make ui`.",
               flush=True)
+
+    return app
+
+
+def main() -> int:
+    import uvicorn
+
+    # Frozen, stdout is a pipe and therefore block buffered, so everything this
+    # prints arrives when the process ends. The parent reads this stream to learn
+    # the port and to show startup progress; both want it a line at a time.
+    sys.stdout.reconfigure(line_buffering=True)
+
+    # The interface, exported as static files at build time and carried inside the
+    # bundle. Absent until something has exported it, which is fine: until then the
+    # browser talks to the Next.js dev server instead.
+    app = build_app(ui_dir())
 
     port = int(os.environ.get("LANCESCOPE_PORT") or free_port())
 

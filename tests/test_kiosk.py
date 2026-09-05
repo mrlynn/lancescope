@@ -9,8 +9,6 @@ for whoever finds it.
 
 from __future__ import annotations
 
-import pathlib
-
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -44,6 +42,40 @@ def paths(client: TestClient) -> set[str]:
                 yield from walk(orig.routes)
 
     return set(walk(client.app.routes))
+
+
+def paths_of(app: FastAPI) -> set[str]:
+    """The same walk, over an app rather than a client.
+
+    `include_router` does not flatten into `app.routes` on this FastAPI — it leaves
+    an `_IncludedRouter` holding the original — so reading `route.path` off the top
+    level finds the four documentation routes and nothing else. Anything asserting
+    on a route set has to descend, and a probe that does not will report an app with
+    sixty-one routes as having four.
+    """
+    from fastapi.routing import APIRoute
+
+    def walk(routes):
+        for route in routes:
+            if isinstance(route, APIRoute):
+                yield route.path
+            elif (orig := getattr(route, "original_router", None)) is not None:
+                yield from walk(orig.routes)
+
+    return set(walk(app.routes))
+
+
+def mount_routers_into(app: FastAPI, catalog, *, kiosk_mode: bool) -> None:
+    """`build()` above without the client, for a test that only reads the routes."""
+    from server.main import mount_routers
+    from server.routes import catalog as catalog_routes
+    from server.routes import ingest as ingest_routes
+    from server.routes import settings as settings_routes
+
+    catalog_routes.bind(catalog)
+    settings_routes.bind(catalog)
+    ingest_routes.bind(catalog)
+    mount_routers(app, kiosk_mode=kiosk_mode)
 
 
 # ------------------------------------------------------------------------ mounting
@@ -236,16 +268,35 @@ def test_the_shared_limit_is_not_per_address(catalog, settings_file, monkeypatch
     kiosk.SHARED.reset()
 
 
-def test_the_api_mount_respects_kiosk(catalog, settings_file, monkeypatch):
-    """The exported interface only ever calls `/api/…`, so that mount is the one
-    that matters — and it builds its own router list rather than inheriting the
-    app's. A kiosk that hid `/intel/*` and served `/api/intel/*` would be no kiosk
-    at all, which is exactly what the first version of this did.
+@pytest.mark.parametrize("kiosk_mode", [False, True])
+def test_the_api_mount_carries_what_the_app_carries(catalog, kiosk_mode):
+    """The exported interface only ever calls `/api/…`, so that mount is the copy
+    that matters — and it is a second application with its own router list, which
+    inherits nothing.
+
+    This used to be asserted on the text of `standalone.py`, because building the
+    app was thought to need an exported `web/out`. It does not, and the string it
+    matched was the hand-written list that had already drifted: `/api` was missing
+    `/ingest/*` for a release, and missed `/scan/*` the day that router landed.
+    Fifteen routes the packaged app served under one name and not the other.
+
+    So the claim is the whole set, both ways round. Extra routes matter as much as
+    missing ones: a kiosk that hid `/intel/*` and served `/api/intel/*` would be no
+    kiosk at all.
     """
-    monkeypatch.setenv("LANCESCOPE_KIOSK", "1")
-    source = (pathlib.Path(__file__).resolve().parent.parent
-              / "server" / "standalone.py").read_text()
-    # Asserted on the source because building it needs an exported `web/out`, which
-    # CI does not have. The claim is that the list is conditional at all.
-    assert "if not kiosk.enabled():" in source
-    assert "routers.append(intel_routes.router)" in source
+    from server.standalone import api_app
+
+    root = FastAPI()
+    mount_routers_into(root, catalog, kiosk_mode=kiosk_mode)
+
+    assert paths_of(api_app(kiosk_mode=kiosk_mode)) == paths_of(root)
+
+
+def test_a_kiosk_hides_the_writers_under_api_too(catalog):
+    """The half of the claim above that a passing parity check cannot make: both
+    sets being equal says nothing about what is in them."""
+    from server.standalone import api_app
+
+    served = paths_of(api_app(kiosk_mode=True))
+    assert not [p for p in served if p.startswith(("/ingest", "/intel", "/scan"))]
+    assert "/catalog/tables" in served
