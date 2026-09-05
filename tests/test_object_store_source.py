@@ -23,7 +23,12 @@ from server.sources.namespace import (
     can_open_namespace_tables,
     namespace_available,
 )
-from server.sources.objectstore import SCHEMES, ObjectStoreSource, explain
+from server.sources.objectstore import (
+    SCHEMES,
+    VERIFIED,
+    ObjectStoreSource,
+    explain,
+)
 
 # CI runs this suite against eight major pylance versions, which do not all reach a
 # namespace the same way. Listing works as far back as the floor; opening a table
@@ -89,15 +94,35 @@ def test_each_scheme_only_handles_its_own():
 
 @requires_namespace
 @pytest.mark.parametrize("scheme", SCHEMES)
-def test_listing_is_claimed_and_the_byte_figures_are_not(scheme):
+def test_every_scheme_can_be_listed_and_none_can_be_walked(scheme):
     caps = ObjectStoreSource(scheme).capabilities(f"{scheme}://bucket/x")
     assert caps.discover.state == AVAILABLE
-    assert caps.inspect.state == UNVERIFIED
-    assert caps.io_meter.state == UNVERIFIED
-    assert caps.column_bytes.state == UNVERIFIED
     assert caps.disk_split.state == UNSUPPORTED
-    # Every non-available state carries the sentence a reader needs.
-    assert caps.inspect.reason and caps.disk_split.reason
+    assert caps.disk_split.reason
+
+
+@requires_namespace
+@pytest.mark.parametrize("scheme", sorted(SCHEMES))
+def test_the_byte_figures_are_claimed_only_where_they_were_measured(scheme):
+    """Sharing a code path is an argument; it is not a measurement.
+
+    Every scheme here runs the same lines below `handles()` — the same namespace, the
+    same object store — and that is exactly the reasoning the three-state model exists
+    to refuse. S3 was pointed at a live bucket and the numbers written down; the rest
+    say so until somebody does the same for them.
+    """
+    caps = ObjectStoreSource(scheme).capabilities(f"{scheme}://bucket/x")
+    expected = AVAILABLE if scheme in VERIFIED else UNVERIFIED
+    for got in (caps.inspect, caps.io_meter, caps.column_bytes):
+        assert got.state == expected, scheme
+        assert got.reason, "a claim and a refusal both need a sentence"
+
+
+def test_the_measured_reason_carries_the_numbers_it_was_measured_from():
+    """A promotion with no measurement in it is indistinguishable from a guess."""
+    said = ObjectStoreSource("s3").capabilities("s3://b/x").inspect.reason
+    for number in ("1,226", "8,192", "pylance 11.0.0", "2026-09-05"):
+        assert number in said, number
 
 
 # ---------------------------------------------------------------------- listing

@@ -179,18 +179,24 @@ S3-compatible stores — MinIO, R2, B2 — need no scheme: `s3://` with `AWS_END
 
 ## Capabilities
 
-| | local | `hf://` | `s3` `gs` `az` `abfss` | `db://` |
-| --- | --- | --- | --- | --- |
-| `discover` | ✅ | ✅ | ✅ | ✅ |
-| `inspect` | ✅ | ✅ | ⚠️ | ⚠️ |
-| `io_meter` | ✅ | ✅ | ⚠️ | ⚠️ |
-| `column_bytes` | ✅ | ✅ | ⚠️ | ⚠️ |
-| `disk_split` | ✅ | ❌ | ❌ | ❌ |
+| | local | `hf://` | `s3` | `gs` `az` `abfss` | `db://` |
+| --- | --- | --- | --- | --- | --- |
+| `discover` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `inspect` | ✅ | ✅ | ✅ | ⚠️ | ⚠️ |
+| `io_meter` | ✅ | ✅ | ✅ | ⚠️ | ⚠️ |
+| `column_bytes` | ✅ | ✅ | ✅ | ⚠️ | ⚠️ |
+| `disk_split` | ✅ | ❌ | ❌ | ❌ | ❌ |
 
-⚠️ is `UNVERIFIED` and stays that way until Phase 5 measures it against a live store,
-with the number written into the reason string — as `hf.py` records OpenVid's 24,568
-bytes. Claiming `AVAILABLE` before measuring is the guess in the convenient direction
-that the three-state model was written to forbid.
+**`s3://` was promoted on 2026-09-05** against a real bucket, and the numbers are in
+the reason string: a table opens for 1,226 bytes in 2 IOs *identically to disk*, at
+433 ms against 0; twenty rows cost 445,824 bytes in 24 IOs remote against 387,224 in
+25 local — close rather than equal, because the object store reads ahead differently;
+one footer is 8,192 bytes both ways, 407 ms against 0.49 ms.
+
+The promotion is **per scheme, not per module**. `gs`, `az` and `abfss` run the same
+lines below `handles()` and stay ⚠️, because sharing a code path is an argument and
+the three-state model exists to refuse exactly that argument. Claiming `AVAILABLE`
+before measuring is the guess in the convenient direction it was written to forbid.
 
 `disk_split` is impossible everywhere remote: it is `Path.rglob`, and the manifest's
 `total_files_size` is off by four orders of magnitude on a blob table.
@@ -248,7 +254,7 @@ only while the sole remote root was one nothing could list.
 | 2 | `ObjectStoreSource`, credentials, error mapping | ✅ |
 | 3 | `NamespaceSource` and `db://` | ✅ offline `RestAdapter` fixture |
 | 4 | The `disk_usage` guard, throttling, the frontend | ✅ |
-| 5 | Promote ⚠️ → ✅ against real stores | **not started — needs credentials** |
+| 5 | Promote ⚠️ → ✅ against real stores | **`s3://` done. `gs` `az` `abfss` `db://` still need a live store.** |
 
 ---
 

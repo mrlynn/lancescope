@@ -66,9 +66,13 @@ def test_an_object_store_can_be_listed_but_not_weighed(uri):
     caps = capabilities_for(uri)
     assert caps.remote is True
     assert caps.discover.state == AVAILABLE
-    assert caps.inspect.state == UNVERIFIED
-    assert caps.io_meter.state == UNVERIFIED
-    assert caps.column_bytes.state == UNVERIFIED
+    # `s3://` has been measured against a live bucket and the rest have not, so the
+    # read states differ by scheme. What holds for all of them is that the claim is
+    # never silent: available or not, there is a sentence saying which and why.
+    assert caps.inspect.state in (AVAILABLE, UNVERIFIED)
+    assert caps.inspect.reason
+    assert caps.io_meter.state == caps.inspect.state
+    assert caps.column_bytes.state == caps.inspect.state
     assert caps.disk_split.state == UNSUPPORTED
     assert caps.disk_split.reason
 
