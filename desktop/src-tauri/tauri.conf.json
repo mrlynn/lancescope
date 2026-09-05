@@ -48,5 +48,13 @@
         }
       }
     }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDFDRTcwOENENkYyOTY2REMKUldUY1ppbHZ6UWpuSE5ybUZISk5CSW50KzdLK3ZKUE9Td2NyWHlUTTV2ZERKcTA0OGRzOEhOcHIK",
+      "endpoints": [
+        "https://github.com/mrlynn/lancescope/releases/latest/download/latest.json"
+      ]
+    }
   }
 }
