@@ -14,7 +14,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Icon from "@/app/components/Icon";
 import { AskForFilter } from "@/app/components/console/AskForFilter";
-import { Cost, Empty, Eyebrow } from "@/app/components/console/atoms";
+import { Copy, Cost, Empty, Eyebrow } from "@/app/components/console/atoms";
 import { DataGrid } from "@/app/components/console/DataGrid";
 import { FilterInput } from "@/app/components/console/FilterInput";
 import {
@@ -26,6 +26,7 @@ import {
 import { fmtBytes } from "@/app/lib/api";
 import BundleButton from "@/app/components/console/BundleButton";
 import { download, toCsv, toJson } from "@/app/lib/export";
+import { useShortcut } from "@/app/lib/keys";
 import {
   type TextSearchCapability, embedQuery, getTextSearchCapability,
 } from "@/app/lib/ingest";
@@ -301,6 +302,21 @@ export function QueryTab({ table, root, ai }: {
    *  question, and running it is still the reader's decision — especially since the
    *  cost recorded beside it describes a past run against a version that may have
    *  moved. */
+  // What ⌘↵ means on this screen. Registered rather than lifted: `run` is deep in
+  // state that belongs here, and a central switch reaching in for it would be the
+  // wrong way round.
+  useShortcut("primary", useCallback(() => { void run(); }, [run]));
+
+  // The shortest thing that reproduces what is on screen. The server already writes
+  // it — a runnable snippet against the reader's own copy — and it was rendered
+  // behind a toggle with no way to take it.
+  useShortcut("copy-diagnostic", useCallback(() => {
+    if (!result?.reproduction) return;
+    navigator.clipboard.writeText(result.reproduction).catch(() => {
+      // Refused, and the value is on screen behind the python toggle.
+    });
+  }, [result]));
+
   const load = useCallback((q: StoredQuery) => {
     setMode(q.spec.mode);
     setFilter(q.spec.filter ?? "");
@@ -602,12 +618,20 @@ export function QueryTab({ table, root, ai }: {
           )}
 
           {showRepro && (
-            <pre className="mono text-[10px] leading-relaxed p-4 rounded-sm mb-4
-                            overflow-x-auto whitespace-pre"
-                 style={{ background: "var(--ink-3)", border: "1px solid var(--rule)",
-                          color: "var(--body)" }}>
-              {result.reproduction}
-            </pre>
+            <div className="relative mb-4">
+              <pre className="mono text-[10px] leading-relaxed p-4 rounded-sm
+                              overflow-x-auto whitespace-pre"
+                   style={{ background: "var(--ink-3)", border: "1px solid var(--rule)",
+                            color: "var(--body)" }}>
+                {result.reproduction}
+              </pre>
+              {/* The `Copy` atom's own comment names this as one of the three things
+                  it exists for — "a table path, a run config, a reproduction" — and
+                  this was the one that never got one. ⌘⇧C does the same thing. */}
+              <span className="absolute top-2 right-2">
+                <Copy value={result.reproduction} what="reproduction" size={13} />
+              </span>
+            </div>
           )}
 
           {result.returned === 0 ? (

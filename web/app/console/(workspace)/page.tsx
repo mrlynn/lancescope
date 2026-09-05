@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 import Icon, { type IconName } from "@/app/components/Icon";
 import Mark from "@/app/components/Mark";
 import SampleDatasets from "@/app/components/samples/SampleDatasets";
@@ -18,6 +18,7 @@ import { CompareTab } from "@/app/components/console/CompareTab";
 import { DataTab } from "@/app/components/console/DataTab";
 import { TrainingTab, trainingFindings } from "@/app/components/console/TrainingTab";
 import { QueryTab } from "@/app/components/console/QueryTab";
+import { useShortcut } from "@/app/lib/keys";
 import { notePush, setParams, useValue } from "@/app/lib/url-state";
 import { recordCost, set as setWorkspace, useWorkspace } from "@/app/lib/workspace";
 
@@ -87,14 +88,28 @@ export default function Console() {
   const tab: Tab = (TABS.includes(wanted as Tab) ? wanted : "schema") as Tab;
   const screen = screenOf(tab);
 
-  const pickTab = (id: Tab) => {
+  const pickTab = useCallback((id: Tab) => {
     // Changing screen is going somewhere; changing section is looking at another
     // part of what you are already on. The settings page drew this line first and in
     // these words: "switching one is a view change rather than a navigation."
     const place = screenOf(id) !== screenOf(tab);
     setParams({ tab: id }, place ? "push" : "replace");
     if (place) notePush();
-  };
+  }, [tab]);
+
+  // ⌘1..⌘5, in the order the strip reads. Registered by the page rather than the
+  // shell, because the screens are the page's vocabulary and the shell should not
+  // have to know how many there are.
+  const goScreen = useCallback((n: number) => {
+    const s = SCREENS[n];
+    if (s) pickTab(s.id === "table" ? "schema" : (s.id as Tab));
+  }, [pickTab]);
+  useShortcut("screen-1", useCallback(() => goScreen(0), [goScreen]));
+  useShortcut("screen-2", useCallback(() => goScreen(1), [goScreen]));
+  useShortcut("screen-3", useCallback(() => goScreen(2), [goScreen]));
+  useShortcut("screen-4", useCallback(() => goScreen(3), [goScreen]));
+  useShortcut("screen-5", useCallback(() => goScreen(4), [goScreen]));
+
 
   const { list, listError, detail, versions, indices, fragments, findings, ai,
           demoReady } = w;
