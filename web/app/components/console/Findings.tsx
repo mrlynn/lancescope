@@ -214,7 +214,7 @@ function IntelLink({ children }: { children: ReactNode }) {
  *  Not fetched on render. It costs a model call the first time, and a panel that
  *  spends money because somebody clicked a tab is a panel that spends money nobody
  *  asked to spend. After that it is a file read, and says so. */
-function Summary({ table, ai, partial, onSpend }: {
+export function Summary({ table, ai, partial, onSpend }: {
   table: string;
   ai: Capabilities | null;
   partial: boolean;

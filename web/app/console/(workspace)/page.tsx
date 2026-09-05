@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect } from "react";
 import Icon, { type IconName } from "@/app/components/Icon";
 import Mark from "@/app/components/Mark";
 import SampleDatasets from "@/app/components/samples/SampleDatasets";
@@ -10,12 +10,10 @@ import {
   FragmentsTab, IndicesTab, SchemaTab, VersionsTab,
 } from "@/app/components/console/tabs";
 import {
-  type Findings,
+  type Finding, type Findings,
   getFindings, getFragments, getIndices, getTable, getVersions,
 } from "@/app/lib/catalog";
-import {
-  InsightsTab, PanelFindings, PartialAnalysis,
-} from "@/app/components/console/Findings";
+import { PanelFindings, PartialAnalysis } from "@/app/components/console/Findings";
 import { CompareTab } from "@/app/components/console/CompareTab";
 import { DataTab } from "@/app/components/console/DataTab";
 import { TrainingTab, trainingFindings } from "@/app/components/console/TrainingTab";
@@ -23,41 +21,56 @@ import { QueryTab } from "@/app/components/console/QueryTab";
 import { notePush, setParams, useValue } from "@/app/lib/url-state";
 import { recordCost, set as setWorkspace, useWorkspace } from "@/app/lib/workspace";
 
-// Each tab names what it reads, and carries the glyph for it — the row is
-// scannable as shapes before any of the words are read.
+// Five screens, and one of them has sections.
 //
-// Two groups, because the tabs are two kinds of thing: the first five read the
-// table's own metadata, the last four ask something of it. The gap between the
-// groups is the seam, and it is the only one — the strip stays a single row at
-// every width and scrolls when nine tabs no longer fit, rather than wrapping the
-// second group onto a line of its own and moving the nav under the reader.
-const TAB_GROUPS: { id: string; icon: IconName }[][] = [
-  [
-    { id: "schema", icon: "schema" },
-    { id: "versions", icon: "history" },
-    { id: "indices", icon: "index" },
-    { id: "fragments", icon: "fragments" },
-  ],
-  [
-    { id: "query", icon: "search" },
-    { id: "compare", icon: "history" },
-    { id: "training", icon: "play" },
-    { id: "insights", icon: "spark" },
-    // Last in the group that asks something of the table, and last on purpose: it is
-    // the only tab that reads columns, and the only one that spends more than
-    // kilobytes. Nothing on it runs until somebody presses a button.
-    { id: "data", icon: "rows" },
-  ],
+// The old strip was nine peers in one row, and it took a `ResizeObserver`, a
+// hysteresis band, two fade masks and a pair of nudge arrows to keep them there.
+// They were never nine of the same thing. Four of them read the table's own
+// metadata — its shape, its history, its indices, its layout — and are four views
+// of one document. The rest each ask the table something, and cost something
+// different to ask.
+//
+// So the four become sections of a Table screen, which is the case the strip was
+// always fine for: tightly related facts about one thing. The others become places.
+const SECTIONS: { id: Section; icon: IconName }[] = [
+  { id: "schema", icon: "schema" },
+  { id: "versions", icon: "history" },
+  { id: "indices", icon: "index" },
+  { id: "fragments", icon: "fragments" },
 ];
-const TABS = TAB_GROUPS.flat();
-type Tab = "schema" | "versions" | "indices" | "fragments" | "query"
-  | "compare" | "training" | "insights" | "data";
 
-// Rows was a second query panel: a plain filter box beside one that completed
-// columns, an English box the other did not have, and the same grid under both.
-// It is one panel now, and this keeps every link that pointed at the old one
-// landing on the panel that absorbed it rather than on the schema.
-const MERGED_TABS: Record<string, Tab> = { rows: "query" };
+const SCREENS: { id: Screen; icon: IconName }[] = [
+  { id: "table", icon: "table" },
+  { id: "query", icon: "search" },
+  { id: "compare", icon: "history" },
+  { id: "training", icon: "play" },
+  // Last, and last on purpose: it is the only screen that reads columns, and the
+  // only one that spends more than kilobytes. Nothing on it runs until somebody
+  // presses a button.
+  { id: "data", icon: "rows" },
+];
+
+type Section = "schema" | "versions" | "indices" | "fragments";
+type Screen = "table" | "query" | "compare" | "training" | "data";
+type Tab = Section | "query" | "compare" | "training" | "data";
+
+const TABS: Tab[] = ["schema", "versions", "indices", "fragments",
+                     "query", "compare", "training", "data"];
+
+/** Which screen a view belongs to. The URL still names the view, not the screen —
+ *  see `MERGED_TABS`. */
+function screenOf(tab: Tab): Screen {
+  return SECTIONS.some((s) => s.id === tab) ? "table" : (tab as Screen);
+}
+
+// Every `?tab=` this console has ever answered to still lands somewhere real.
+//
+// `rows` was a second query panel and was folded into the one that completes column
+// names. `insights` was the collected findings list; it is the inspector now, which
+// is open beside whatever you are looking at — so the link opens the table it was
+// about and the findings are already on screen. Five links in this repository point
+// at one or the other.
+const MERGED_TABS: Record<string, Tab> = { rows: "query", insights: "schema" };
 
 export default function Console() {
   // What was fetched lives in the store, because the shell shows some of it and a
@@ -71,13 +84,14 @@ export default function Console() {
   // `?tab=rows` working, which five links in this repository still use.
   const asked = useValue("tab");
   const wanted = asked ? MERGED_TABS[asked] ?? asked : null;
-  const tab: Tab = (TABS.some((x) => x.id === wanted) ? wanted : "schema") as Tab;
+  const tab: Tab = (TABS.includes(wanted as Tab) ? wanted : "schema") as Tab;
+  const screen = screenOf(tab);
 
   const pickTab = (id: Tab) => {
-    // Four views of one table's facts are a view change; a workspace is a place.
-    // The settings page draws this line first and in these words: "switching one is
-    // a view change rather than a navigation."
-    const place = id === "query" || id === "compare" || id === "training";
+    // Changing screen is going somewhere; changing section is looking at another
+    // part of what you are already on. The settings page drew this line first and in
+    // these words: "switching one is a view change rather than a navigation."
+    const place = screenOf(id) !== screenOf(tab);
     setParams({ tab: id }, place ? "push" : "replace");
     if (place) notePush();
   };
@@ -146,78 +160,6 @@ export default function Console() {
     run();
     return () => { alive = false; };
   }, [picked, tab, detail, versions, indices, fragments]);
-
-  // Nine tabs against a narrow window, in the order the strip gives things up.
-  //
-  // Full labels while they fit. When they stop fitting the labels go and the
-  // glyphs stay — every tab already carries one, and nine icon buttons fit a
-  // phone with room over, so the whole nav stays on screen and nothing is cut.
-  // Only if even that overflows does the strip scroll, and then it says so: the
-  // overflowing edge fades and grows an arrow to push it with. A strip that
-  // scrolls with no edge to grab is a nav that hides half of itself and does not
-  // admit it, which is what the wrapping row was replaced with the first time.
-  const tabbar = useRef<HTMLDivElement>(null);
-  const [compact, setCompact] = useState(false);
-  const [more, setMore] = useState({ left: false, right: false });
-  // What the labelled strip measured last time it was labelled. Kept because the
-  // question on the way back up — would the labels fit again? — cannot be asked of
-  // a strip that is currently wearing none. Badges change it, so a table's
-  // findings clear it rather than answer for the next table.
-  const labelledWidth = useRef(0);
-  useLayoutEffect(() => { labelledWidth.current = 0; }, [findings]);
-
-  useLayoutEffect(() => {
-    const bar = tabbar.current;
-    if (!bar) return;
-    const fit = () => {
-      const room = bar.clientWidth;
-      if (!compact) {
-        labelledWidth.current = bar.scrollWidth;
-        if (bar.scrollWidth > room + 1) setCompact(true);
-      } else if (!labelledWidth.current || room >= labelledWidth.current + 8) {
-        // Back to labels either because they now fit, or because a new table's
-        // badges changed what "fit" means and the only way to measure a labelled
-        // strip is to be one. Both happen inside a layout effect, so the widened
-        // strip is measured and re-compacted, if it has to be, before it is painted.
-        //
-        // 8px of hysteresis: a threshold the strip lands exactly on would flip back
-        // and forth on every pixel of a drag.
-        setCompact(false);
-      }
-      setMore({
-        left: bar.scrollLeft > 1,
-        right: bar.scrollLeft + room < bar.scrollWidth - 1,
-      });
-    };
-    fit();
-    const ro = new ResizeObserver(fit);
-    ro.observe(bar);
-    bar.addEventListener("scroll", fit, { passive: true });
-    return () => { ro.disconnect(); bar.removeEventListener("scroll", fit); };
-  }, [compact, findings, tab]);
-
-  // The open tab can still sit past the edge on a strip that scrolls — a nav that
-  // does not show where you are. Nudge it back when it is out of view, and only
-  // along the strip: scrolling the page under someone who just pressed a button is
-  // a worse surprise than the one this is fixing.
-  useEffect(() => {
-    const bar = tabbar.current;
-    const on = bar?.querySelector<HTMLElement>('button[data-on="true"]');
-    if (!bar || !on) return;
-    const b = bar.getBoundingClientRect();
-    const o = on.getBoundingClientRect();
-    if (o.left >= b.left && o.right <= b.right) return;
-    bar.scrollTo({
-      left: Math.max(0, bar.scrollLeft + (o.left - b.left) - (b.width - o.width) / 2),
-      behavior: "smooth",
-    });
-  }, [tab, compact]);
-
-  const nudge = (dir: -1 | 1) => {
-    const bar = tabbar.current;
-    if (!bar) return;
-    bar.scrollBy({ left: dir * bar.clientWidth * 0.6, behavior: "smooth" });
-  };
 
   const current = list?.tables.find((t) => t.name === picked) ?? null;
 
@@ -335,50 +277,50 @@ export default function Console() {
       ) : (
         <div className="min-w-0">
           <section className="min-w-0">
-            <div className="tabstrip mb-6" data-more-left={more.left} data-more-right={more.right}>
-              <button
-                className="tabstrip-arrow" data-side="left" tabIndex={-1} aria-hidden={!more.left}
-                onClick={() => nudge(-1)} aria-label="Scroll the tabs left"
-              >
-                <Icon name="chevronLeft" size={14} />
-              </button>
-              <div className="tabbar" ref={tabbar} data-compact={compact}>
-                {TAB_GROUPS.map((group) => (
-                  <div key={group[0].id} className="seg">
-                    {group.map((t) => (
-                      <button
-                        key={t.id}
-                        onClick={() => pickTab(t.id as Tab)}
-                        data-on={tab === t.id}
-                        // The label is the accessible name while it is on screen and
-                        // the tooltip once it is not, so a glyph-only strip still
-                        // says what each button reads.
-                        aria-label={t.id}
-                        title={compact ? t.id : undefined}
-                        className="mono !px-3 text-[10px] tracking-[0.14em] uppercase"
-                      >
-                        <Icon name={t.icon} size={14} />
-                        <span className="tab-label">{t.id}</span>
-                        <TabBadge
-                          findings={findings}
-                          panel={t.id === "insights" ? null : t.id}
-                          facet={t.id === "training" ? "training" : undefined}
-                        />
-                      </button>
-                    ))}
-                  </div>
-                ))}
-              </div>
-              <button
-                className="tabstrip-arrow" data-side="right" tabIndex={-1} aria-hidden={!more.right}
-                onClick={() => nudge(1)} aria-label="Scroll the tabs right"
-              >
-                <Icon name="chevronRight" size={14} />
-              </button>
+            {/* Screens, then — on the one that has them — its sections. Two rows
+                of at most five, which cannot overflow at any width this supports,
+                so the whole scroll-and-fade apparatus the nine-tab strip needed is
+                gone with it. */}
+            <div className="seg mb-3" role="tablist" aria-label="Screen">
+              {SCREENS.map((s) => (
+                <button
+                  key={s.id}
+                  role="tab"
+                  aria-selected={screen === s.id}
+                  data-on={screen === s.id}
+                  // A screen is entered at its first section; a section is only
+                  // meaningful inside the table screen.
+                  onClick={() => pickTab(s.id === "table" ? "schema" : (s.id as Tab))}
+                  className="mono !px-3 text-[10px] tracking-[0.14em] uppercase"
+                >
+                  <Icon name={s.icon} size={14} />
+                  <span>{s.id}</span>
+                  <ScreenBadge findings={findings} screen={s.id} />
+                </button>
+              ))}
             </div>
 
+            {screen === "table" && (
+              <div className="seg mb-6" role="tablist" aria-label="Section">
+                {SECTIONS.map((s) => (
+                  <button
+                    key={s.id}
+                    role="tab"
+                    aria-selected={tab === s.id}
+                    data-on={tab === s.id}
+                    onClick={() => pickTab(s.id)}
+                    className="mono !px-3 text-[10px] tracking-[0.14em] uppercase"
+                  >
+                    <Icon name={s.icon} size={14} />
+                    <span>{s.id}</span>
+                    <TabBadge findings={findings} panel={s.id} />
+                  </button>
+                ))}
+              </div>
+            )}
+
             <div className="panel p-6 min-h-[380px]">
-              {tab !== "insights" && <PartialAnalysis d={findings} />}
+              <PartialAnalysis d={findings} />
               {tab === "schema" && (detail
                 ? <><SchemaTab d={detail} /><PanelFindings d={findings} panel="schema" /></>
                 : <Empty>reading schema…</Empty>)}
@@ -398,7 +340,6 @@ export default function Console() {
               {tab === "compare" && (picked
                 ? <CompareTab key={picked} table={picked} />
                 : <Empty>pick a table to compare</Empty>)}
-              {tab === "insights" && <InsightsTab d={findings} table={picked} ai={ai} />}
               {tab === "data" && (picked
                 ? <DataTab key={picked} table={picked} />
                 : <Empty>pick a table to check</Empty>)}
@@ -410,22 +351,43 @@ export default function Console() {
   );
 }
 
+/** How many findings a whole screen has.
+ *
+ *  The table screen carries whatever its four sections carry, because a count that
+ *  vanished when you left the section holding it would be a count nobody could act
+ *  on. Training carries its facet rather than a panel — the same rules narrowed to
+ *  what a training run pays for. Query, compare and data carry nothing: no rule
+ *  fires about them, and a badge that is always absent is not a badge.
+ */
+function ScreenBadge({ findings, screen }: { findings: Findings | null; screen: Screen }) {
+  if (screen === "training") return <TabBadge findings={findings} panel={null} facet="training" />;
+  if (screen !== "table") return null;
+  const sections = new Set<string>(SECTIONS.map((s) => s.id));
+  return <TabBadge findings={findings} panel={null} only={(f) => sections.has(f.panel)} />;
+}
+
 /** How many findings a panel has, when it has any. Zero renders nothing rather than
  *  a zero — a badge that is always there stops being a signal — and the colour is
  *  that panel's own worst severity, not the table's, so a tab holding two notes does
  *  not borrow the alarm from a warning three tabs away. */
-function TabBadge({ findings, panel, facet }: {
-  findings: Findings | null; panel: string | null; facet?: "training";
+function TabBadge({ findings, panel, facet, only }: {
+  findings: Findings | null;
+  panel: string | null;
+  facet?: "training";
+  /** A predicate instead of one panel, for a screen that gathers several. */
+  only?: (f: Finding) => boolean;
 }) {
   const mine = facet
     ? trainingFindings(findings)
-    : (findings?.findings ?? []).filter((f) => panel === null || f.panel === panel);
+    : (findings?.findings ?? []).filter(
+        (f) => (only ? only(f) : panel === null || f.panel === panel),
+      );
   const n = mine.length;
   const warn = mine.some((f) => f.severity === "warn");
   if (!n) return null;
   return (
     <span
-      className="tab-badge mono text-[9px] leading-none px-1.5 py-0.5 rounded-full ml-0.5"
+      className="mono text-[9px] leading-none px-1.5 py-0.5 rounded-full ml-0.5"
       // An opaque ground rather than a tint. The badge sits on the active tab,
       // which is already a 0.12 wash of the same accent, and tints compose: a
       // 0.18 pill over a 0.12 tab put 9px text on an effective 0.28 of its own
