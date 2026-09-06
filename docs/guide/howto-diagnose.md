@@ -37,6 +37,28 @@ one that only tidies the output.
 Press **+ plan** for the raw plan. Lance owns that format, so the console shows what
 it recognised beside the real thing rather than pretending to parse all of it.
 
+## Modes this table cannot answer
+
+Not every table can be asked every question, and the strip says which before you pick
+one. A mode with nothing to search — no inverted index, no vector column — is dimmed
+and refuses the click, and the line under the strip says why:
+
+> **full text** — no full-text index on this table — moment_id, predicted_talk,
+> actual_talk could carry one
+
+That sentence is about whichever mode you are pointing at, so the reason for a mode
+you cannot select arrives without selecting it. It names the columns that *could*
+carry the index, which is the next thing you would want to know, and **Operations**
+will plan the build.
+
+Hovering a mode you *can* use answers the other question — what it will cost:
+
+> **vector** — no ANN index — vector is searched by scanning every row, which is
+> exact and gets slower with the table
+
+Both come from `GET /query/capabilities`, which reads the schema and the index list
+and no data at all.
+
 ## An index that exists and is not used
 
 If a vector column has an index and the plan still says `brute-force vector scan`, the

@@ -63,6 +63,11 @@ export function QueryTab({ table, root, ai }: {
   table: string; root: string | null; ai: Capabilities | null;
 }) {
   const [caps, setCaps] = useState<QueryCapabilities | null>(null);
+  // Whether the capability probe has answered at all. Not the same question as
+  // `caps === null`, which is also what "still asking" looks like — and now that an
+  // unavailable mode is painted as unavailable, the difference is a round trip's
+  // worth of four dead buttons that are not dead. No claim until there is one.
+  const [capsProbed, setCapsProbed] = useState(false);
   const [mode, setMode] = useState<QuerySpec["mode"]>("scan");
   const [filter, setFilter] = useState("");
   const [text, setText] = useState("");
@@ -139,7 +144,8 @@ export function QueryTab({ table, root, ai }: {
         const vector = c.capabilities.find((x) => x.mode === "vector");
         setVectorColumn(vector?.columns[0] ?? "");
       })
-      .catch(() => setCaps(null));
+      .catch(() => setCaps(null))
+      .finally(() => setCapsProbed(true));
     // Asked before the box is drawn, so a table whose vectors came from a model this
     // console cannot reproduce says so rather than offering an input that will
     // refuse whatever is typed into it.
@@ -342,7 +348,19 @@ export function QueryTab({ table, root, ai }: {
       : {}),
   });
 
-  const active = capFor(mode);
+  // Which mode the pointer or the keyboard is asking about. The strip explains one
+  // mode at a time and the selected one is the default subject — but the mode most
+  // in need of explaining is the one that cannot be selected, and a genuinely
+  // `disabled` button takes no hover, no focus and no tooltip, so that sentence had
+  // no route to the screen at all. The buttons are `aria-disabled` instead; this is
+  // what being pointed at means.
+  //
+  // Mouse events rather than pointer events, for the sticky hover a phone gives a
+  // synthesised `mouseenter`: on touch, `pointerleave` fires the instant the finger
+  // lifts, so a tap on an unavailable mode would flash its reason and take it away.
+  const [peek, setPeek] = useState<QuerySpec["mode"] | null>(null);
+  const subject = peek && peek !== mode ? peek : null;
+  const shown = capFor(subject ?? mode);
 
   return (
     <>
@@ -359,16 +377,22 @@ export function QueryTab({ table, root, ai }: {
         />
       )}
 
-      <div className="seg mb-4 flex-wrap">
+      {/* No `flex-wrap`: `.seg` is a 30px box that clips its own second row, so the
+          only thing wrapping ever did here was hide a mode. The group scrolls. */}
+      <div className="seg mb-4">
         {MODES.map((m) => {
           const c = capFor(m);
+          const off = capsProbed && !c?.available;
           return (
             <button
               key={m}
-              onClick={() => c?.available && setMode(m)}
+              onClick={() => !off && setMode(m)}
+              onMouseEnter={() => setPeek(m)}
+              onMouseLeave={() => setPeek((p) => (p === m ? null : p))}
+              onFocus={() => setPeek(m)}
+              onBlur={() => setPeek((p) => (p === m ? null : p))}
               data-on={mode === m}
-              disabled={!c?.available}
-              title={c?.reason}
+              aria-disabled={off}
               className="mono !px-3.5 text-[10px] tracking-[0.14em] uppercase"
             >
               {MODE_LABEL[m]}
@@ -378,12 +402,25 @@ export function QueryTab({ table, root, ai }: {
       </div>
 
       {/* Why a mode is unavailable, or what it will cost when it is. Never a
-          disabled control with no explanation. */}
-      {active && (
-        <p className="text-[12px] text-[var(--haze)] leading-relaxed mb-4 max-w-[70ch]">
-          {active.reason}
-        </p>
-      )}
+          disabled control with no explanation — and the explanation is about
+          whichever mode is being pointed at, named when that is not the selected
+          one, because otherwise a sentence about `full text` reads as a sentence
+          about `filter`.
+
+          Two lines are reserved whether or not both are used, and from the first
+          paint rather than from whenever the probe lands. These reasons run to one
+          line or two depending on the table, and the whole form below should not
+          jump because the cursor crossed the strip. */}
+      <p className="text-[12px] leading-relaxed mb-4 max-w-[70ch] min-h-[3.25em]"
+         style={{ color: subject ? "var(--body)" : "var(--haze)" }}>
+        {subject && shown && (
+          <span className="mono text-[10px] tracking-[0.14em] uppercase mr-1.5"
+                style={{ color: shown.available ? "var(--index)" : "var(--video)" }}>
+            {MODE_LABEL[subject]}
+          </span>
+        )}
+        {shown?.reason}
+      </p>
 
       <div className="flex flex-wrap items-end gap-2 mb-4">
         {(mode === "fts" || mode === "hybrid") && (

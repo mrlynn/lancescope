@@ -32,12 +32,30 @@ DOCKER := $(shell command -v docker 2>/dev/null || \
   done)
 
 # ...and put its directory on the PATH rather than calling it by absolute path.
-# The binary is not self-contained: `docker-credential-desktop` sits beside it and
-# is what a `FROM python:3.12-slim` reaches for, so an absolute-path invocation gets
-# as far as resolving image metadata and then fails with a credential helper "not
-# found in $$PATH" — which is true, and nothing to do with the Dockerfile. The CLI
-# plugins that back `buildx` and `compose` are found the same way.
+# The binary is not self-contained: `docker-credential-desktop` is what a
+# `FROM python:3.12-slim` reaches for, so an absolute-path invocation gets as far as
+# resolving image metadata and then fails with a credential helper "not found in
+# $$PATH" — which is true, and nothing to do with the Dockerfile. The CLI plugins
+# that back `buildx` and `compose` are found the same way.
 DOCKER_BIN := $(patsubst %/,%,$(dir $(DOCKER)))
+
+# The helper is its own search, because it is not always beside the CLI. Homebrew
+# ships a `docker` formula of its own, and on a machine that has both, `command -v`
+# finds /opt/homebrew/bin/docker — a real client, with no helpers next to it. `make
+# check` then failed at the first `FROM` with exactly the error above, on a machine
+# with Docker Desktop running and logged in. Assuming the two live together is what
+# was wrong; looking for the helper where Docker Desktop puts it is the fix.
+DOCKER_HELPERS := $(shell \
+  for d in "$$HOME/.docker/bin" \
+           /Applications/Docker.app/Contents/Resources/bin \
+           /usr/local/bin \
+           "$$HOME/.rd/bin"; do \
+    [ -x "$$d/docker-credential-desktop" ] && echo "$$d" && break; \
+  done)
+
+# One value, so an absent helper cannot leave an empty PATH element — which means
+# the working directory, and is a worse thing to ship than a failed build.
+DOCKER_PATH := $(DOCKER_BIN)$(if $(DOCKER_HELPERS),:$(DOCKER_HELPERS))
 
 help:
 	@echo "make setup             install python deps + web deps"
@@ -155,11 +173,11 @@ check:
 	fi
 	@if [ -n "$(DOCKER)" ] && $(DOCKER) info >/dev/null 2>&1; then \
 		echo "==> docker image"; \
-		PATH="$(DOCKER_BIN):$$PATH" \
+		PATH="$(DOCKER_PATH):$$PATH" \
 		docker build -f docker/Dockerfile --build-arg PYLANCE_VERSION=11.0.0 \
 			-t lancescope:check . || exit 1; \
 		echo "==> docker serves"; \
-		PATH="$(DOCKER_BIN):$$PATH" $(PY) scripts/check_image.py lancescope:check 11.0.0 \
+		PATH="$(DOCKER_PATH):$$PATH" $(PY) scripts/check_image.py lancescope:check 11.0.0 \
 			|| exit 1; \
 	elif [ -n "$(DOCKER)" ]; then \
 		echo "==> docker image  SKIPPED — $(DOCKER) is installed but its daemon"; \

@@ -50,9 +50,17 @@ small-file counts that would be misleading to act on, tombstone debt, a fragment
 too coarse to feed a loader's workers — each carrying the numbers it was derived from.
 No model is involved in any of them.
 
+**Says what should be done, as something to read rather than something to run.**
+Every operation worth considering — an index, a compaction, a cleanup, a restore, a
+migration — comes out as a plan: what must be true first, which fragments and bytes it
+touches, whether it can be undone and how, how to prove afterwards that it worked, and
+the command. The console does not run any of it.
+
 **Adds language, optionally.** With a local model or an API key it will translate a
-question into a filter and describe a table in a few sentences. Every response reports
-the tokens and dollars it spent beside the bytes it read.
+question into a filter, describe a table in a few sentences, and — given the same read
+surface an agent gets — go and look for the answer itself, listing every tool it
+called and the arguments it called them with. Every response reports the tokens and
+dollars it spent beside the bytes it read.
 
 ## What it does not do
 
@@ -75,8 +83,8 @@ Four kinds of page, because four different questions bring people here.
 
 - **Start here** — one path from nothing to a real answer.
 - **How to** — a specific job, done. Connecting a database wherever it lives,
-  diagnosing a query, enabling the language layer, pointing an agent at it, teaching
-  it a store it does not ship support for.
+  diagnosing a query, deciding what to do about a table, enabling the language layer,
+  pointing an agent at it, teaching it a store it does not ship support for.
 - **Reference** — precise and complete. Every route, every rule, every setting.
   These pages are **generated from the code**, so they cannot drift from it.
 - **Why it works this way** — the reasoning. Read these when a decision looks odd;
