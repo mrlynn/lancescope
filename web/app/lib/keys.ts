@@ -33,7 +33,7 @@ export type Action =
   | "copy-diagnostic"
   | "focus-tables"
   | "screen-1" | "screen-2" | "screen-3" | "screen-4" | "screen-5"
-  | "screen-6" | "screen-7"
+  | "screen-6"
   | "theme"
   | "shortcuts";
 
@@ -61,8 +61,7 @@ export const BINDINGS: Binding[] = [
   { action: "screen-3", keys: "⌘3", says: "Compare", mod: true, key: "3" },
   { action: "screen-4", keys: "⌘4", says: "Training", mod: true, key: "4" },
   { action: "screen-5", keys: "⌘5", says: "Data", mod: true, key: "5" },
-  { action: "screen-6", keys: "⌘6", says: "Assistant", mod: true, key: "6" },
-  { action: "screen-7", keys: "⌘7", says: "Operations", mod: true, key: "7" },
+  { action: "screen-6", keys: "⌘6", says: "Operations", mod: true, key: "6" },
   { action: "theme", keys: "T", says: "Cycle the theme", key: "t" },
   { action: "shortcuts", keys: "?", says: "This list", shift: true, key: "?" },
 ];
