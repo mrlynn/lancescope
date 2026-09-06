@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect } from "react";
-import Icon, { type IconName } from "@/app/components/Icon";
+import Icon from "@/app/components/Icon";
 import Mark from "@/app/components/Mark";
 import SampleDatasets from "@/app/components/samples/SampleDatasets";
 import { Copy, Empty } from "@/app/components/console/atoms";
@@ -21,85 +21,13 @@ import { DataTab } from "@/app/components/console/DataTab";
 import { TrainingTab, trainingFindings } from "@/app/components/console/TrainingTab";
 import { QueryTab } from "@/app/components/console/QueryTab";
 import { useShortcut } from "@/app/lib/keys";
+import { activeDbName } from "@/app/lib/dbname";
+import {
+  SECTIONS, SCREENS, TABS, type Screen, type Tab,
+  entryOf, screenOf,
+} from "@/app/lib/screens";
 import { notePush, setParams, useValue } from "@/app/lib/url-state";
 import { recordCost, set as setWorkspace, useWorkspace } from "@/app/lib/workspace";
-
-// Six screens, and two of them have sections.
-//
-// The old strip was nine peers in one row, and it took a `ResizeObserver`, a
-// hysteresis band, two fade masks and a pair of nudge arrows to keep them there.
-// They were never nine of the same thing. Four of them read the table's own
-// metadata — its shape, its history, its indices, its layout — and are four views
-// of one document. The rest each ask the table something, and cost something
-// different to ask.
-//
-// So the four become sections of a Table screen, which is the case the strip was
-// always fine for: tightly related facts about one thing. The others become places.
-//
-// Operations is the second screen with sections, by the same test rather than to
-// save a button. Its two are one workflow seen from either end: `plans` is what the
-// console worked out should be done, and `ask` is where you say it in words — and
-// what the asking produces *is* a plan, rendered by the section next to it. They
-// were briefly two screens, which put the answer one navigation away from the
-// question that made it.
-//
-// `plans` comes first because it needs no model. The planners are arithmetic over
-// metadata, so a console with nothing configured opens this screen on something that
-// works rather than on a panel asking for a key.
-const SECTIONS: Partial<Record<Screen, { id: Section; icon: IconName }[]>> = {
-  table: [
-    { id: "schema", icon: "schema" },
-    { id: "versions", icon: "history" },
-    { id: "indices", icon: "index" },
-    { id: "fragments", icon: "fragments" },
-  ],
-  operations: [
-    { id: "plans", icon: "check" },
-    { id: "ask", icon: "spark" },
-  ],
-};
-
-/** Which screen a section belongs to. Derived from `SECTIONS` so the two cannot
- *  disagree — a section added above and forgotten here would be a tab that renders
- *  and cannot be navigated to. */
-const SCREEN_OF = Object.fromEntries(
-  Object.entries(SECTIONS).flatMap(
-    ([screen, sections]) => (sections ?? []).map((s) => [s.id, screen as Screen]),
-  ),
-) as Record<Section, Screen>;
-
-const SCREENS: { id: Screen; icon: IconName }[] = [
-  { id: "table", icon: "table" },
-  { id: "query", icon: "search" },
-  { id: "compare", icon: "history" },
-  { id: "training", icon: "play" },
-  // Last but one, and on purpose: it is the only screen that reads columns, and the
-  // only one that spends more than kilobytes. Nothing on it runs until somebody
-  // presses a button.
-  { id: "data", icon: "rows" },
-  // And then the only screen about changing the table, which it does by handing over
-  // a document and a command rather than by running one.
-  { id: "operations", icon: "settings" },
-];
-
-type Section = "schema" | "versions" | "indices" | "fragments" | "plans" | "ask";
-type Screen = "table" | "query" | "compare" | "training" | "data" | "operations";
-type Tab = Section | "query" | "compare" | "training" | "data";
-
-const TABS: Tab[] = ["schema", "versions", "indices", "fragments", "plans", "ask",
-                     "query", "compare", "training", "data"];
-
-/** Which screen a view belongs to. The URL still names the view, not the screen —
- *  see `MERGED_TABS`. */
-function screenOf(tab: Tab): Screen {
-  return SCREEN_OF[tab as Section] ?? (tab as Screen);
-}
-
-/** Where a screen opens. A screen with sections opens at its first one; a screen
- *  without them is the view itself. */
-function entryOf(screen: Screen): Tab {
-  return SECTIONS[screen]?.[0]?.id ?? (screen as Tab);
-}
 
 // Every `?tab=` this console has ever answered to still lands somewhere real.
 //
@@ -225,12 +153,29 @@ export default function Console() {
 
   return (
     <>
-      {/* The table the centre is about, with its path. The rail says which table is
-          selected and the inspector says what version it is on; this is the one
-          thing neither of them carries, because a path is for pasting. */}
+      {/* Where you are, and the path for pasting.
+          
+          The database was in the toolbar and the table was here, which meant the two
+          halves of "which table am I looking at" were forty pixels apart with a
+          logo between them. `AppBar` already had the idiom for saying it in one
+          line — a chevron in `--dim`, the trailing crumb in `--bright` — and the
+          workspace dropped it when the shell absorbed the header. This is that
+          idiom at the pane's scale rather than the page's.
+
+          `activeDbName` rather than a second copy of the switcher's expression: the
+          two have to agree about what the database is called. */}
       {current && (
-        <div className="flex items-center gap-2 mb-5">
-          <span className="mono text-[13px] text-[var(--bright)] truncate">{current.name}</span>
+        <nav aria-label="Breadcrumb" className="flex items-center gap-2 mb-4">
+          <span className="mono text-[13px] text-[var(--haze)] truncate shrink-0">
+            {activeDbName(w.settings, root)}
+          </span>
+          <span className="text-[var(--dim)] shrink-0" aria-hidden>
+            <Icon name="chevronRight" size={13} />
+          </span>
+          <span className="mono text-[13px] text-[var(--bright)] truncate"
+                aria-current="page">
+            {current.name}
+          </span>
           <Copy size={13} className="!w-7 !h-7" what="table path" title={current.uri}
                 value={current.uri} />
           {demoReady && (
@@ -239,7 +184,7 @@ export default function Console() {
               <Icon name="play" size={14} />
             </Link>
           )}
-        </div>
+        </nav>
       )}
 
 
@@ -338,54 +283,41 @@ export default function Console() {
         <div className="min-w-0">
           <section className="min-w-0">
             {/* Screens, then — on the screens that have them — their sections.
-                Wrapped in a container so the labels can be measured against the room
-                the strip actually has rather than against the window, which is not
-                the same question: the panes either side collapse below `lg`, so a
-                712px window gives the centre more width than a 1024px one does. See
-                `.seg-fit` in globals.css. */}
-            <div className="seg-fit min-w-0">
-              <div className="seg mb-3" role="tablist" aria-label="Screen">
-                {SCREENS.map((s) => (
-                  <button
-                    key={s.id}
-                    role="tab"
-                    aria-selected={screen === s.id}
-                    data-on={screen === s.id}
-                    // Carried by a tooltip as well as a label, because below the
-                    // container's threshold the label is not there to read.
-                    data-tip={s.id}
-                    aria-label={s.id}
-                    onClick={() => pickTab(entryOf(s.id))}
-                    className="mono !px-3 text-[10px] tracking-[0.14em] uppercase"
-                  >
-                    <Icon name={s.icon} size={14} />
-                    <span className="seg-label">{s.id}</span>
-                    <ScreenBadge findings={findings} screen={s.id} />
-                  </button>
-                ))}
-              </div>
+                No icons and no tooltips: the word is on screen, so a tooltip
+                repeating it is noise and an `aria-label` duplicating it is a
+                mismatch waiting to be introduced. The row wraps rather than
+                scrolls, so there is no width at which a destination is hidden. */}
+            <div className="tabs mb-4" role="tablist" aria-label="Screen">
+              {SCREENS.map((s) => (
+                <button
+                  key={s.id}
+                  role="tab"
+                  aria-selected={screen === s.id}
+                  onClick={() => pickTab(entryOf(s.id))}
+                  className="mono text-[11px] tracking-[0.10em] uppercase"
+                >
+                  {s.id}
+                  <ScreenBadge findings={findings} screen={s.id} />
+                </button>
+              ))}
+            </div>
 
             {SECTIONS[screen] && (
-              <div className="seg mb-6" role="tablist" aria-label="Section">
+              <div className="subtabs mb-6" role="tablist" aria-label="Section">
                 {SECTIONS[screen]!.map((s) => (
                   <button
                     key={s.id}
                     role="tab"
                     aria-selected={tab === s.id}
-                    data-on={tab === s.id}
-                    data-tip={s.id}
-                    aria-label={s.id}
                     onClick={() => pickTab(s.id)}
-                    className="mono !px-3 text-[10px] tracking-[0.14em] uppercase"
+                    className="mono text-[10px] tracking-[0.12em] uppercase"
                   >
-                    <Icon name={s.icon} size={14} />
-                    <span className="seg-label">{s.id}</span>
+                    {s.id}
                     <TabBadge findings={findings} panel={s.id} />
                   </button>
                 ))}
               </div>
             )}
-            </div>
 
             <div className="panel p-6 min-h-[380px]">
               <PartialAnalysis d={findings} />

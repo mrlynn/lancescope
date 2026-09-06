@@ -52,3 +52,23 @@ export const ROOT_SOURCE: Record<string, string> = {
   default: "the demo corpus, as a first-run fallback",
   none: "nothing configured",
 };
+
+/** The name to show for the database the console is pointed at.
+ *
+ *  One line, and it was written twice the moment a second place needed it: the
+ *  switcher in the toolbar and the breadcrumb over the centre pane have to agree
+ *  about what the database is called, and two copies of `label ?? dbName(uri)` agree
+ *  only until somebody changes one. It lives here because this is the module about
+ *  naming a database, and it takes the two objects rather than a resolved string so
+ *  that the precedence — a label the user chose beats a name derived from a path —
+ *  is stated in one place too.
+ */
+export function activeDbName(
+  settings: { connections: { active: boolean; label?: string | null }[];
+              root?: { root?: string | null } } | null | undefined,
+  root?: string | null,
+): string {
+  const active = settings?.connections.find((c) => c.active) ?? null;
+  const uri = root ?? settings?.root?.root ?? null;
+  return active?.label || dbName(uri) || "no database";
+}

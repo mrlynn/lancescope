@@ -14,7 +14,7 @@ import { useEffect, useRef, useState } from "react";
 
 import Popover from "@/app/components/console/shell/Popover";
 import Icon from "@/app/components/Icon";
-import { ROOT_SOURCE, dbName, dbParent } from "@/app/lib/dbname";
+import { ROOT_SOURCE, activeDbName, dbParent } from "@/app/lib/dbname";
 import type { SettingsState } from "@/app/lib/settings";
 
 export default function DbSwitcher({
@@ -56,9 +56,10 @@ export default function DbSwitcher({
     };
   }, [open]);
 
-  const active = settings?.connections.find((c) => c.active) ?? null;
   const uri = root ?? settings?.root.root ?? null;
-  const name = active?.label ?? dbName(uri) ?? "no database";
+  // Shared with the workspace breadcrumb, which has to call the database the
+  // same thing this button does. See `lib/dbname.ts`.
+  const name = activeDbName(settings, root);
   const locked = settings?.env_locked ?? false;
   const source = settings ? ROOT_SOURCE[settings.root.source] : "";
 

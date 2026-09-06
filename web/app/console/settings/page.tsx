@@ -119,10 +119,11 @@ export default function SettingsPage() {
       {error && <Banner tone="video">{error}</Banner>}
 
       <div className="max-w-[1100px]">
-        {/* Full width and even thirds on a phone, where three words at this
-            tracking do not fit beside their glyphs; the glyphs go first. */}
-        <div className="seg mb-3 w-full sm:w-auto" role="tablist"
-             aria-label="Settings sections">
+        {/* Navigation between three views of a page, so `.tabs` rather than `.seg`
+            — the controls section of globals.css draws that line. It wraps at any
+            width, so the phone case that used to need even thirds and a dropped
+            glyph now needs neither. */}
+        <div className="tabs mb-3" role="tablist" aria-label="Settings sections">
           {TABS.map((t) => (
             <button
               key={t.id}
@@ -131,11 +132,8 @@ export default function SettingsPage() {
               aria-selected={tab === t.id}
               aria-controls={`settings-panel-${t.id}`}
               onClick={() => pick(t.id)}
-              data-on={tab === t.id}
-              className="mono flex-1 sm:flex-none !px-2 sm:!px-3.5
-                         text-[10px] tracking-[0.14em] uppercase"
+              className="mono text-[11px] tracking-[0.10em] uppercase"
             >
-              <span className="hidden sm:inline-flex"><Icon name={t.icon} size={14} /></span>
               {t.label}
             </button>
           ))}
