@@ -14,7 +14,9 @@ import {
   getFindings, getFragments, getIndices, getTable, getVersions,
 } from "@/app/lib/catalog";
 import { PanelFindings, PartialAnalysis } from "@/app/components/console/Findings";
+import { Assistant } from "@/app/components/console/Assistant";
 import { CompareTab } from "@/app/components/console/CompareTab";
+import { Operations } from "@/app/components/console/Operations";
 import { DataTab } from "@/app/components/console/DataTab";
 import { TrainingTab, trainingFindings } from "@/app/components/console/TrainingTab";
 import { QueryTab } from "@/app/components/console/QueryTab";
@@ -49,14 +51,23 @@ const SCREENS: { id: Screen; icon: IconName }[] = [
   // only one that spends more than kilobytes. Nothing on it runs until somebody
   // presses a button.
   { id: "data", icon: "rows" },
+  // The two that came last and belong last. The assistant is the only screen where
+  // the model decides what to read rather than answering something the console
+  // composed, and Operations is the only one about changing the table — which it
+  // does by handing over a document and a command, never by running one.
+  { id: "assistant", icon: "spark" },
+  { id: "operations", icon: "settings" },
 ];
 
 type Section = "schema" | "versions" | "indices" | "fragments";
-type Screen = "table" | "query" | "compare" | "training" | "data";
-type Tab = Section | "query" | "compare" | "training" | "data";
+type Screen = "table" | "query" | "compare" | "training" | "data"
+            | "assistant" | "operations";
+type Tab = Section | "query" | "compare" | "training" | "data"
+         | "assistant" | "operations";
 
 const TABS: Tab[] = ["schema", "versions", "indices", "fragments",
-                     "query", "compare", "training", "data"];
+                     "query", "compare", "training", "data",
+                     "assistant", "operations"];
 
 /** Which screen a view belongs to. The URL still names the view, not the screen —
  *  see `MERGED_TABS`. */
@@ -109,6 +120,8 @@ export default function Console() {
   useShortcut("screen-3", useCallback(() => goScreen(2), [goScreen]));
   useShortcut("screen-4", useCallback(() => goScreen(3), [goScreen]));
   useShortcut("screen-5", useCallback(() => goScreen(4), [goScreen]));
+  useShortcut("screen-6", useCallback(() => goScreen(5), [goScreen]));
+  useShortcut("screen-7", useCallback(() => goScreen(6), [goScreen]));
 
 
   const { list, listError, detail, versions, indices, fragments, findings, ai,
@@ -358,6 +371,10 @@ export default function Console() {
               {tab === "data" && (picked
                 ? <DataTab key={picked} table={picked} />
                 : <Empty>pick a table to check</Empty>)}
+              {tab === "assistant" && <Assistant key={picked} table={picked} ai={ai} />}
+              {tab === "operations" && (picked
+                ? <Operations key={picked} table={picked} />
+                : <Empty>pick a table to plan against</Empty>)}
             </div>
           </section>
         </div>

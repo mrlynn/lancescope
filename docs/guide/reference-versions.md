@@ -22,19 +22,19 @@ stats, the versions, the indices, and the byte meter — and the server never im
 `lancedb` at all; a test enforces that, because `lancedb` is absent from the
 packaged app's dependency group. So the version that matters is the reader's.
 
-| pylance | opens a table | cost accounting | sees a Blob V2 column | opens one | indices |
-| --- | --- | --- | --- | --- | --- |
-| 11.0.0 | yes | yes | yes | yes | yes |
-| 10.0.0 | yes | yes | yes | yes | yes |
-| 9.0.1 | yes | yes | yes | yes | yes |
-| 8.0.1 | yes | yes | yes | yes | yes |
-| 7.1.0 | yes | yes | yes | yes | yes |
-| 6.0.1 | yes | yes | yes | yes | yes |
-| 4.0.2 | yes | yes | yes | yes | yes |
-| 3.0.0 | yes | yes | yes | yes | yes |
-| 2.0.1 | yes | yes | yes | **no** | yes |
-| 1.0.4 | yes | yes | **no** | — | yes |
-| 0.38.0 | yes | **no** | **no** | — | yes |
+| pylance | opens a table | cost accounting | sees a Blob V2 column | opens one | indices | quotes a cleanup |
+| --- | --- | --- | --- | --- | --- | --- |
+| 11.0.0 | yes | yes | yes | yes | yes | yes |
+| 10.0.0 | yes | yes | yes | yes | yes | yes |
+| 9.0.1 | yes | yes | yes | yes | yes | yes |
+| 8.0.1 | yes | yes | yes | yes | yes | **no** |
+| 7.1.0 | yes | yes | yes | yes | yes | **no** |
+| 6.0.1 | yes | yes | yes | yes | yes | **no** |
+| 4.0.2 | yes | yes | yes | yes | yes | **no** |
+| 3.0.0 | yes | yes | yes | yes | yes | **no** |
+| 2.0.1 | yes | yes | yes | **no** | yes | **no** |
+| 1.0.4 | yes | yes | **no** | — | yes | **no** |
+| 0.38.0 | yes | **no** | **no** | — | yes | **no** |
 
 Measured against a 2.65 GB table with a Blob V2 `video_blob` column, storage format
 2.2, on Python 3.12 and pyarrow 25.0.1.
@@ -53,6 +53,18 @@ Three things go wrong below 3.0.0, in this order as you go back:
 The last one is worth stating plainly: `pylance>=0.38` was this project's declared
 floor for a long time, and 0.38 cannot do the thing the project exists to do. It was
 a number nobody had checked. It is now `pylance>=3`.
+
+The last column is the one difference *above* the floor, and it does not move it.
+`explain_cleanup_old_versions` arrived in 9, so below that the console cannot say
+what deleting old versions would remove — and the operations panel refuses to plan
+one rather than modelling the figure, because history cleanup is the only operation
+it offers that nothing undoes. Everything else on this table works back to 3.0.0,
+including performing a cleanup; it is the quote that is missing, not the ability.
+
+That column is deliberately absent from `server/runtime.py`'s feature list, which is
+what the next section describes. The features there are a *gate* — CI fails a pylance
+row when any of them is missing, and the images refuse to publish — so putting one
+optional operation plan in it would have moved this whole table's floor from 3 to 9.
 
 ## What a version that falls short actually does
 

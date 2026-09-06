@@ -115,6 +115,23 @@ class Handle:
         return f"<Handle {self.scope}:{self.name}{at}{' pinned' if self.pinned else ''}>"
 
 
+def is_missing_dataset(error: BaseException) -> bool:
+    """Whether this failure is "there is no table there" rather than a real fault.
+
+    Lance has no typed error for it — `lance.dataset()` raises a bare `ValueError`
+    whose message carries the Rust source path — so the string is the only signal
+    available, the same situation `server/hf.py::is_throttled` documents for a
+    throttled Hub and for the same reason.
+
+    Deliberately narrow. A permission failure, a corrupt manifest and an unreachable
+    bucket are all real problems that a 404 would hide, and hiding them is worse than
+    the 500 this exists to prevent: "no such table" sends somebody to check their
+    spelling, and they would check it forever.
+    """
+    text = str(error).lower()
+    return "was not found" in text or "not found:" in text
+
+
 class Catalog:
     """Opens and caches dataset handles under one root."""
 
@@ -218,6 +235,14 @@ class Catalog:
         Raises `FileNotFoundError` if there is no such table. Callers decide what
         that means for them — the server turns it into a 404 or a 503, and startup
         turns it into a warning rather than an exit.
+
+        That promise used to hold for local roots only. The `is_dir()` check below
+        cannot be made against a bucket, so on an `hf://` or `s3://` root the miss
+        surfaced from `lance.dataset()` instead, as a `ValueError` — which
+        `server/main.py` has registered a handler for, which re-raises anything that
+        is not a throttle, which made a mistyped table name a 500 with a Rust
+        traceback. Every caller trusting this docstring was wrong in the same way on
+        remote roots, so the fix belongs here rather than in each of them.
         """
         key = (scope, name, version)
         if key in self._pinned:
@@ -237,8 +262,27 @@ class Catalog:
         if not sources.scheme_of(target.uri) and not Path(target.uri).is_dir():
             raise FileNotFoundError(target.uri)
 
-        handle = Handle(name=name, target=target, scope=scope, pinned=pin,
-                        version=version)
+        try:
+            handle = Handle(name=name, target=target, scope=scope, pinned=pin,
+                            version=version)
+        except (OSError, ValueError) as e:
+            # Throttling first: a store refusing us is not a missing table, and it
+            # has a handler of its own that says so and asks for a retry. Reporting
+            # it as 404 would tell somebody their table is gone when it is there.
+            if sources.is_throttled(e) or not is_missing_dataset(e):
+                raise
+            # And only when no version was asked for. Lance says "was not found" the
+            # same way for a table that is absent and for version 99 of a table that
+            # is present — the messages differ only in whether the path ends
+            # `/_versions` or `/_versions/99.manifest`, which is far too fine a thread
+            # to hang a status code on. The caller's own argument is the reliable
+            # discriminator: a request that named a version already has a handler that
+            # tells the two apart by exception type, and turning this into
+            # `FileNotFoundError` took a 400 about a version and made it a 404 about a
+            # table that was sitting right there.
+            if version is not None:
+                raise
+            raise FileNotFoundError(target.uri) from None
         if pin:
             self._pinned[key] = handle
             return handle

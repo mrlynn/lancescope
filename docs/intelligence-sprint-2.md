@@ -263,12 +263,26 @@ not over HTTP. The `rows` tool never projects a heavy or blob column. Ships with
 **Done when:** Claude Code, pointed at a Lance directory, answers questions about it
 with no LanceScope key configured at all.
 
-### I8 — `/intel/ask`
-A tool-runner loop over the same tool set as I7, streaming, returning the answer plus
-both meters. Capped turns, capped tokens, and a hard rule that its rows tool cannot
-project a heavy column.
-**Done when:** "why is search on this table slow?" returns the unindexed-vector
-finding, with the byte and token cost of having asked.
+### I8 — `/intel/ask`  ✅ landed
+A tool-runner loop over the same tool set as I7 — literally the same, from
+`server/intel/toolset.py`, which both front ends now register from. Returns the answer,
+the full tool trace with its arguments, and both meters.
+
+Four caps rather than the two this ticket asked for, because there turned out to be
+four ways for a loop to be expensive and they are not substitutes: turns, dollars per
+question, wall clock, and **bytes** — the last one being the cost this product exists
+to make visible and the one it would have been most embarrassing to hide here. Each is
+checked before the step it governs, and hitting one ends the run in a named state that
+travels with the answer.
+
+Not streamed. The loop is three to five turns against a hosted model and the trace
+arrives with the answer; streaming is worth adding when a local model makes the wait
+long enough to need it.
+
+**Done:** "why would a similarity search on this table be slow?" against `moments`
+returns the unindexed-vector finding *and* the reason not to act on it — 1,114 rows is
+below the 5,000-row floor where an approximate index stops being an improvement —
+having read 34,681 bytes to find out, against the 3.4 MB one such search would read.
 
 ### I9 — Docs  ✅ landed
 A README section on enabling intelligence, leading with the two paths: `ollama pull`

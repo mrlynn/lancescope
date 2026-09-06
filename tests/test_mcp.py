@@ -51,9 +51,29 @@ async def test_the_tool_set_is_narrow_and_read_shaped(mcp):
         "estimate_scan", "table_versions", "table_indices", "table_fragments",
         "table_bundle", "data_scan_estimate",
         "read_rows",
+        # A plan is a read. It is computed from the same metadata the findings are,
+        # it returns a document, and it carries no way to apply itself — the tool
+        # withholds the script and says to open the console for it, on this surface
+        # exactly as in the console's own loop. Offering it here was a decision, and
+        # this list is where it had to be made rather than assumed.
+        "propose_operation",
     }
     # Deliberately absent: anything that spends money, and anything that writes.
     assert not any("summar" in n or "ask" in n or "query" in n for n in names)
+
+
+async def test_no_tool_hands_out_something_runnable(mcp):
+    """The plan tool is the one that could, and the line it does not cross.
+
+    A plan carries the script that would perform the operation, because that is what
+    makes it reviewable. An agent is given everything else about it — the affected
+    set, the estimate, the preconditions, whether it can be undone — and told to send
+    the person to the console for the command. The console is where somebody who owns
+    the data reads it and decides."""
+    body = await mcp.propose_operation("vectors", kind="index", column="vector")
+    assert body["script"] == "held by the console — ask the person to open the plan"
+    assert body["executed"] is False
+    assert body["affected"], "the useful half was withheld too"
 
 
 async def test_listing_answers_and_reports_its_cost(mcp):

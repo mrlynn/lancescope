@@ -49,9 +49,12 @@ a wrong answer from a right one, so the unconfigured state has to be unmistakabl
 
 ## What it can and cannot do
 
-Seven read tools, listed in [the reference](/docs/reference-mcp). Every one is
-declared read-only, and every one is the HTTP route called in process rather than a
+Twelve tools, listed in [the reference](/docs/reference-mcp). Every one is declared
+read-only, and every one is the HTTP route called in process rather than a
 reimplementation — so the two surfaces cannot drift, and the guarantees hold in both.
+They live in `server/intel/toolset.py`, which is also where the console's own
+assistant gets them, because two declarations of `read_rows` would be two chances to
+get it wrong.
 
 **It cannot materialise a blob column.** `read_rows` has no expand parameter at all:
 the underlying route would refuse it, and not offering the argument means an agent
@@ -60,6 +63,15 @@ of video costs kilobytes, however many times something asks.
 
 **It cannot write.** Nothing under the console's routes writes, so nothing here does
 either.
+
+**It can ask what *should* be done, and cannot do it.** `propose_operation` returns an
+operation plan — what must be true before it runs, which fragments and bytes it
+touches, what it would read and write, whether it can be undone and how, and how to
+prove afterwards that it worked. All of it computed from metadata, none of it written
+by a model. There is no companion tool that applies one, and the plan's script is
+withheld from the tool result: an agent is told to send you to the console for the
+command, because the decision belongs to whoever owns the data.
+`tests/test_write_quarantine.py` asserts the absence by name.
 
 **It cannot spend your API budget.** No summarise tool, no ask tool. The narrow set is
 deliberate.

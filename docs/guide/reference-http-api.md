@@ -47,6 +47,7 @@ Optional. Every route answers with nothing configured, and says what is missing.
 
 | method | path | what it does |
 | --- | --- | --- |
+| `POST` | `/intel/ask` | A tool loop over the read surface, capped on four axes and traced. |
 | `DELETE` | `/intel/cache` | Forget cached answers. |
 | `GET` | `/intel/capabilities` | What the language layer is right now, and why it is that. |
 | `GET` | `/intel/meter` | Tokens and dollars spent by this process, beside the bytes it read. |
@@ -73,6 +74,30 @@ The only routes that write anything, and what they write is the settings file.
 | `GET` | `/settings/intelligence/probe` | What is actually available on this machine right now. |
 | `GET` | `/settings/samples` | Public Lance datasets worth opening, for a console with nothing in it yet. |
 | `POST` | `/settings/samples/open` | Save a sample as a connection and point the console at it. |
+
+## Checks that read the data
+
+Everything under `/catalog` reads manifests and costs kilobytes; everything here reads columns and costs whatever the column weighs. Every check is quoted before it runs, and a running scan can actually be cancelled.
+
+| method | path | what it does |
+| --- | --- | --- |
+| `GET` | `/scan/jobs` | Every scan this process knows about, newest first. |
+| `DELETE` | `/scan/jobs/{job_id}` | Drop a finished job's record. |
+| `GET` | `/scan/jobs/{job_id}` | One scan. |
+| `POST` | `/scan/jobs/{job_id}/cancel` | Stop it. |
+| `POST` | `/scan/tables/{name:path}` | Start a scan of the checks named, at the version they are quoted against. |
+| `POST` | `/scan/tables/{name:path}/plan` | What each check would read, before any of it is read. |
+
+## Operation plans
+
+What an operation would do, computed and not performed. Every route here reads: it returns the affected set, the estimate, the rollback posture and the script that would do it. The console runs none of them.
+
+| method | path | what it does |
+| --- | --- | --- |
+| `GET` | `/ops/kinds` | What this console can plan, and what it will not do with any of it. |
+| `GET` | `/ops/plans/{plan_id}` | One plan by id, with a note if the table has moved under it. |
+| `POST` | `/ops/tables/{name:path}/plan` | Compute one operation plan. |
+| `GET` | `/ops/tables/{name:path}/proposals` | What is worth doing to this table, and why — derived from its findings. |
 
 ## Creating a database
 
@@ -104,12 +129,6 @@ The demo's own routes. They return 503 when the corpus is absent.
 | `POST` | `/meter/reset` | — |
 | `GET` | `/meter/stream` | — |
 | `GET` | `/sample` | A spread of moments from across the corpus, for the opening screen. |
-| `GET` | `/scan/jobs` | Every scan this process knows about, newest first. |
-| `DELETE` | `/scan/jobs/{job_id}` | Drop a finished job's record. |
-| `GET` | `/scan/jobs/{job_id}` | One scan. |
-| `POST` | `/scan/jobs/{job_id}/cancel` | Stop it. |
-| `POST` | `/scan/tables/{name:path}` | Start a scan of the checks named, at the version they are quoted against. |
-| `POST` | `/scan/tables/{name:path}/plan` | What each check would read, before any of it is read. |
 | `GET` | `/schema` | The actual tables, read off disk — the Act 3 slide, live. |
 | `POST` | `/search` | — |
 | `GET` | `/tracks` | — |

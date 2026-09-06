@@ -108,15 +108,47 @@ def test_no_read_module_imports_the_ingest_package():
         f"{sorted(WRITE_SURFACE)} may.")
 
 
-def test_the_mcp_surface_reaches_only_the_read_routes():
+# Every module that hands tools to a model. `toolset.py` holds the bodies and the
+# descriptions; `mcp_server.py` announces them over stdio and `intel/agent.py` runs a
+# loop over them inside the console. The narrowness has to follow the code: moving the
+# tools out of the MCP module would otherwise have quietly moved them out of this
+# test, which is the failure mode a refactor is most likely to introduce.
+AGENT_SURFACE = ["mcp_server.py", "intel/toolset.py", "intel/agent.py"]
+
+
+@pytest.mark.parametrize("module", AGENT_SURFACE)
+def test_the_agent_surface_reaches_only_the_read_routes(module):
     """The agent surface is narrow because it calls the read routes in process. An
     agent that could create tables on someone's disk is a different product with a
     different consent story, so the import list is the place to keep that true."""
-    tree = ast.parse((SERVER / "mcp_server.py").read_text())
+    path = SERVER / module
+    if not path.exists():                     # a stage not landed yet
+        pytest.skip(f"{module} does not exist")
+    tree = ast.parse(path.read_text())
     reached = {n.module for n in ast.walk(tree)
                if isinstance(n, ast.ImportFrom) and n.module and "server" in n.module}
     assert "server.routes.ingest" not in reached
     assert not any("ingest" in m for m in reached), reached
+
+
+def test_the_agent_surface_offers_no_tool_that_runs_an_operation():
+    """An operation plan is a document. The agent may ask for one and may read it; it
+    has no tool that runs one, which is how "never let model output become an executed
+    action" stays a mechanism rather than a paragraph in a roadmap.
+
+    Named here rather than in the ops tests because this is the quarantine's business:
+    the day somebody adds `run_operation` to the tool set, this is the test that should
+    make them say so out loud.
+    """
+    from server.intel import toolset
+
+    forbidden = {"run_operation", "execute_operation", "apply_plan", "run_plan",
+                 "optimize_table", "compact_table", "create_index", "restore_version",
+                 "cleanup_versions", "migrate_table"}
+    offenders = sorted(set(toolset.names()) & forbidden)
+    assert not offenders, (
+        f"the agent tool set offers {offenders}. Proposing an operation is a tool; "
+        f"running one is a button in the console.")
 
 
 # ---------------------------------------------------------------- route surface
@@ -167,6 +199,12 @@ MUTATING_ROUTES: dict[tuple[str, str], tuple[bool, str]] = {
     ("PUT", "/settings/intelligence"): (READS, "saves the settings file"),
     ("POST", "/settings/samples/open"): (READS, "saves a connection; downloads nothing"),
     ("POST", "/intel/selftest"): (READS, "one round trip to the language provider"),
+    ("POST", "/intel/ask"):
+        (READS, "a tool loop over the read routes; its tool set contains nothing "
+                "that writes and no way to run a plan"),
+    ("POST", "/ops/tables/{name:path}/plan"):
+        (READS, "computes what an operation would do and returns it as a document "
+                "with the script that would do it — the console runs neither"),
     ("POST", "/intel/tables/{name:path}/filter"): (READS, "turns a sentence into a filter string"),
     ("POST", "/intel/tables/{name:path}/summary"): (READS, "reads rows and describes them"),
     ("DELETE", "/intel/cache"): (READS, "clears the answer cache, outside any dataset"),

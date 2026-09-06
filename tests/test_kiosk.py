@@ -85,6 +85,7 @@ def test_writers_are_mounted_normally(catalog, settings_file):
     have = paths(build(catalog, kiosk_mode=False))
     assert any(p.startswith("/ingest") for p in have)
     assert any(p.startswith("/intel") for p in have)
+    assert any(p.startswith("/ops") for p in have)
 
 
 def test_kiosk_does_not_mount_ingest_or_intelligence(catalog, settings_file):
@@ -94,6 +95,23 @@ def test_kiosk_does_not_mount_ingest_or_intelligence(catalog, settings_file):
     # The console must still be there, or there is nothing to demonstrate.
     assert "/catalog/tables" in have
     assert "/settings" in have
+
+
+def test_kiosk_does_not_mount_operation_plans(catalog, settings_file):
+    """A plan names a database root, its fragment layout and a runnable command, and
+    the public demo is pointed at a dataset the visitor does not own. Nothing under
+    /ops writes, and it is still not a thing to hand a stranger."""
+    have = paths(build(catalog, kiosk_mode=True))
+    assert not any(p.startswith("/ops") for p in have)
+
+
+def test_kiosk_does_not_mount_the_agent_loop(catalog, settings_file):
+    """It is under /intel, so this is already covered — asserted by name anyway,
+    because it is the route that would bill whoever deployed the demo for every
+    visitor's turn, and a regression that moved it elsewhere should fail here."""
+    have = paths(build(catalog, kiosk_mode=True))
+    assert "/intel/ask" not in have
+    assert "/intel/ask" in paths(build(catalog, kiosk_mode=False))
 
 
 def test_kiosk_ingest_scan_is_absent(catalog, settings_file, monkeypatch):

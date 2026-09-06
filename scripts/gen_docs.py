@@ -99,20 +99,27 @@ def http_api() -> str:
             elif (original := getattr(route, "original_router", None)) is not None:
                 yield from walk(original.routes)
 
-    groups: dict[str, list] = {"catalog": [], "intelligence": [], "settings": [],
-                               "ingest": [], "demo": []}
+    # Prefix to section, in one table rather than a chain of `elif`. The chain ended
+    # in `else: demo`, which quietly filed every `/scan/*` route under "Ctrl-F for
+    # Video" — a published API reference describing the most expensive routes in the
+    # product as part of a demo. A mapping cannot do that: an unknown prefix lands in
+    # `other` and says so, which is a bug somebody notices.
+    SECTIONS = {"/catalog": "catalog", "/intel": "intelligence",
+                "/settings": "settings", "/ingest": "ingest",
+                "/scan": "datascan", "/ops": "ops"}
+    # Everything the demo serves is mounted at the root, so it is the residue rather
+    # than a prefix — but the residue is now named, not assumed.
+    DEMO = {"/search", "/video", "/meter", "/health", "/sample", "/tracks", "/schema"}
+
+    groups: dict[str, list] = {k: [] for k in
+                               ("catalog", "intelligence", "settings", "datascan",
+                                "ops", "ingest", "demo", "other")}
     for route in walk(app.routes):
         path = route.path
-        if path.startswith("/catalog"):
-            key = "catalog"
-        elif path.startswith("/intel"):
-            key = "intelligence"
-        elif path.startswith("/settings"):
-            key = "settings"
-        elif path.startswith("/ingest"):
-            key = "ingest"
-        else:
-            key = "demo"
+        key = next((v for prefix, v in SECTIONS.items() if path.startswith(prefix)),
+                   None)
+        if key is None:
+            key = "demo" if any(path.startswith(d) for d in DEMO) else "other"
         groups[key].append(route)
 
     titles = {
@@ -122,11 +129,21 @@ def http_api() -> str:
                          "nothing configured, and says what is missing."),
         "settings": ("Configuration", "The only routes that write anything, and what "
                      "they write is the settings file."),
+        "datascan": ("Checks that read the data", "Everything under `/catalog` reads "
+                     "manifests and costs kilobytes; everything here reads columns "
+                     "and costs whatever the column weighs. Every check is quoted "
+                     "before it runs, and a running scan can actually be cancelled."),
+        "ops": ("Operation plans", "What an operation would do, computed and not "
+                "performed. Every route here reads: it returns the affected set, the "
+                "estimate, the rollback posture and the script that would do it. The "
+                "console runs none of them."),
         "ingest": ("Creating a database", "The only routes permitted to write a "
                    "dataset, and the only ones that may create a table. They may "
                    "never modify one that already exists."),
         "demo": ("Ctrl-F for Video", "The demo's own routes. They return 503 when the "
                  "corpus is absent."),
+        "other": ("Unfiled", "Routes this generator does not recognise. If anything "
+                  "appears here, give it a section above rather than leaving it."),
     }
 
     out = [BANNER, "# HTTP API", "",

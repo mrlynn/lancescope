@@ -18,7 +18,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from server import settings as cfg
-from server.intel import cache, registry, tasks
+from server.intel import agent as intel_agent
+from server.intel import cache, registry, tasks, toolset
 from server.intel import catalog as intel_catalog
 from server.intel import config as intel_config
 from server.intel import findings as intel_findings
@@ -30,22 +31,10 @@ from server.routes import catalog as catalog_routes
 router = APIRouter(prefix="/intel")
 
 
-def spend(provider, task: str, **kwargs):
-    """Make a provider call, having checked the ceiling and recorded what it cost.
-
-    Every call in this module goes through here. A second path that called a
-    provider directly would spend money the meter never saw, and the meter would be
-    worse than useless — it would be reassuring.
-
-    `task` is required rather than defaulted, because it is what the spend panel
-    breaks the bill down by: an optional label is a label that goes missing on the
-    call somebody adds next year, and "other: $4.12" answers nothing.
-    """
-    intel_meter.METER.check_ceiling()
-    out = provider.complete(**kwargs)
-    intel_meter.METER.record(out.usage, out.cost_usd, task=task,
-                             provider=out.provider, model=out.model, ms=out.ms)
-    return out
+# The choke point every provider call goes through, defined beside the meter it
+# feeds. Imported rather than redefined: the agent loop calls the same function, and
+# `server/intel/` cannot import this module without inverting the layering.
+spend = intel_meter.spend
 
 # Small on purpose: this is a round trip, not a benchmark. The schema is the same
 # shape the real tasks use, so a model that cannot hold a grammar fails here rather
@@ -331,6 +320,58 @@ async def summarise(name: str, body: SummaryBody | None = None) -> JSONResponse:
         # run permanent for that version.
         cache.put(key, {k: v for k, v in result.items() if k not in ("cached", "ms")})
     return JSONResponse(result)
+
+
+class AskBody(BaseModel):
+    """One question, and the table the console is looking at."""
+
+    question: str = Field(min_length=1, max_length=2000)
+    table: str | None = None
+    # Both caps are the caller's, within the module's ceilings. A console showing a
+    # spend panel should be able to say "this question may cost a penny", and a
+    # question that is allowed to read a fifth of a megabyte is not a question a UI
+    # should be able to widen without saying so.
+    max_turns: int | None = Field(default=None, ge=1, le=intel_agent.MAX_TURNS)
+    max_usd: float | None = Field(default=None, gt=0)
+
+
+@router.post("/ask")
+async def ask(body: AskBody) -> JSONResponse:
+    """A tool loop over the read surface, capped on four axes and traced.
+
+    The one route here where the model decides what to do next rather than answering
+    a question we composed. Everything that makes that safe is somewhere else — the
+    tools are the read routes, the caps are in `intel/agent.py`, the spend goes
+    through the same meter as every other call — and what is left here is the shape
+    every other intel route already has: a provider, a try, and an honest answer when
+    there isn't one.
+
+    `deep` rather than `fast`: a loop that picks the wrong tool spends more turns than
+    a better model would have cost in the first place, which is the one place in this
+    console where the cheaper model is not the cheaper answer.
+    """
+    settings = cfg.load()
+    provider = intel_config.provider_for("deep", settings)
+
+    budget = intel_agent.Budget(
+        max_turns=body.max_turns or intel_agent.MAX_TURNS,
+        max_usd=body.max_usd,
+    )
+    try:
+        answer = await intel_agent.run(body.question, provider=provider,
+                                       table=body.table, budget=budget)
+    except NoProvider as e:
+        return JSONResponse({"ok": False, "error": e.reason,
+                             "setup_hint": e.setup_hint})
+
+    return JSONResponse({
+        "ok": answer.stop == intel_agent.ANSWERED,
+        "budget": budget.as_dict(),
+        # The tools are named on every answer, not only when something went wrong: a
+        # trace is only checkable if you know what could have been in it.
+        "tools_available": list(toolset.names()),
+        **answer.as_dict(),
+    })
 
 
 @router.delete("/cache")

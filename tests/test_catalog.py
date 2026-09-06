@@ -265,3 +265,139 @@ def test_a_root_with_tables_reports_no_listing_error(api):
 
     assert body["tables"], "the fixture corpus has tables"
     assert body["listing_error"] is None
+
+
+# ------------------------------------------------------- a table that is not there
+
+# `Catalog.open` documents that it raises `FileNotFoundError` for a missing table,
+# and the routes turn that into a 404. That held for local roots only: the `is_dir()`
+# pre-check cannot be made against a bucket, so on a remote root the miss came out of
+# `lance.dataset()` as a `ValueError` instead — and `main.py` registers a handler for
+# `ValueError` that re-raises anything which is not a throttle. A mistyped table name
+# was a 500 with a Rust source path in it.
+#
+# The tests below exercise the real path rather than a mock. A *name* carrying a URI
+# scheme skips the pre-check exactly as a remote root does, and `file://` reaches
+# Lance's own reader without a network.
+
+
+def missing_uri(root) -> str:
+    return f"file://{root}/no-such-table.lance"
+
+
+def test_a_missing_local_table_is_a_404(api):
+    r = api.get("/catalog/tables/no-such-table")
+
+    assert r.status_code == 404
+    assert "no-such-table" in r.json()["detail"]
+
+
+def test_a_missing_table_on_a_root_that_cannot_be_pre_checked_is_also_a_404(
+        api, corpus):
+    """The regression. Without the conversion in `Catalog.open` this is a 500."""
+    r = api.get(f"/catalog/tables/{missing_uri(corpus)}")
+
+    assert r.status_code == 404, (
+        f"got {r.status_code} — a missing table on a root that cannot be listed "
+        f"ahead of time is still a missing table")
+    assert "no table named" in r.json()["detail"]
+
+
+def test_the_operations_routes_answer_the_same_way(catalog, corpus):
+    """Written to match the console's, and the contract they both rely on lives in
+    `Catalog.open` — so fixing it there had to fix both without touching either."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from server.routes import ops as ops_routes
+
+    app = FastAPI()
+    ops_routes.bind(catalog)
+    app.include_router(ops_routes.router)
+    client = TestClient(app)
+
+    assert client.get("/ops/tables/no-such-table/proposals").status_code == 404
+    assert client.get(
+        f"/ops/tables/{missing_uri(corpus)}/proposals").status_code == 404
+
+
+def test_the_catalog_raises_the_error_its_docstring_promises(catalog, corpus):
+    """Asserted against the type rather than the status code, because the docstring
+    is what three other callers — the CLI, startup, and the ops routes — trust."""
+    import pytest
+
+    with pytest.raises(FileNotFoundError):
+        catalog.open(missing_uri(corpus), scope="test")
+
+
+def test_a_throttled_root_is_not_reported_as_a_missing_table(catalog, monkeypatch):
+    """The distinction the conversion must not lose.
+
+    A store refusing us has its own handler, its own status and its own advice — try
+    again shortly. Turning it into a 404 would tell somebody their table is gone when
+    it is there, and they would go looking for it.
+    """
+    import pytest
+
+    from server import catalog as catalog_module
+
+    throttle = OSError("Hub returned 429: rate limit exceeded, quota spent")
+    monkeypatch.setattr(catalog_module, "Handle",
+                        lambda **_: (_ for _ in ()).throw(throttle))
+
+    with pytest.raises(OSError) as caught:
+        catalog.open("file:///tmp/anything.lance", scope="test")
+    assert caught.value is throttle, "a throttle was swallowed as a missing table"
+
+
+def test_a_real_failure_is_not_reported_as_a_missing_table(catalog, monkeypatch):
+    """A corrupt manifest or a permission failure is a problem somebody has to see.
+    A 404 would send them to check their spelling, and they would check it forever."""
+    import pytest
+
+    from server import catalog as catalog_module
+
+    broken = ValueError("Invalid manifest: unexpected end of file")
+    monkeypatch.setattr(catalog_module, "Handle",
+                        lambda **_: (_ for _ in ()).throw(broken))
+
+    with pytest.raises(ValueError) as caught:
+        catalog.open("file:///tmp/anything.lance", scope="test")
+    assert caught.value is broken
+
+
+def test_a_missing_version_is_not_a_missing_table(api, catalog):
+    """The distinction the first attempt at this fix lost.
+
+    Lance says "was not found" the same way for a table that is absent and for
+    version 99 of a table that is present — the messages differ only in whether the
+    path ends `/_versions` or `/_versions/99.manifest`. Converting on the string
+    alone turned a 400 about a version into a 404 about a table that was sitting
+    right there. What tells them apart is the caller's own argument: an `open()` that
+    named a version is asking a different question, and `compare` already answers it
+    by exception type.
+    """
+    import pytest
+
+    r = api.get("/catalog/tables/versioned/compare", params={"a": 1, "b": 99})
+    assert r.status_code == 400, "a version that is not there is not a missing table"
+
+    with pytest.raises(ValueError):
+        catalog.open("versioned", scope="test", version=99)
+
+
+def test_what_counts_as_a_missing_dataset():
+    """The string test, against the message Lance actually produces — captured from
+    pylance 11 rather than written from memory."""
+    from server.catalog import is_missing_dataset
+
+    real = ValueError(
+        "Dataset at path moments.lance was not found: Not found: "
+        "moments.lance/_versions, /Users/runner/work/lance/lance/rust/lance-table/"
+        "src/io/commit.rs:660:26")
+    assert is_missing_dataset(real)
+
+    for other in ("Invalid manifest: unexpected end of file",
+                  "AccessDenied: you do not have permission",
+                  "Hub returned 429: rate limit exceeded"):
+        assert not is_missing_dataset(ValueError(other)), other

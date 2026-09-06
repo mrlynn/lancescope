@@ -32,6 +32,7 @@ from server.routes import datascan as datascan_routes
 from server.routes import demo
 from server.routes import ingest as ingest_routes
 from server.routes import intel as intel_routes
+from server.routes import ops as ops_routes
 from server.routes import settings as settings_routes
 
 # Before the catalog resolves: Lance reads `HF_TOKEN` from the environment when it
@@ -63,6 +64,7 @@ async def lifespan(app: FastAPI):
     datascan_routes.bind(CATALOG)
     settings_routes.bind(CATALOG)
     ingest_routes.bind(CATALOG)
+    ops_routes.bind(CATALOG)
     if ROOT.root is None:
         print(f"catalog: nothing configured — {ROOT.detail} Add a connection at "
               f"/console/settings.")
@@ -111,13 +113,19 @@ async def upstream_throttled(request: Request, exc: Exception) -> JSONResponse:
     Lance surfaces the Hub's HTTP status as a Python exception whose type depends on
     where in the Rust it gave up — an `OSError` from the manifest reader, a
     `ValueError` from `Dataset::checkout` — so both are registered and the message is
-    what decides. FastAPI would otherwise
-    otherwise turn into a 500 with a Rust source path in the body — a message that
-    reads as a bug in this project and sends the reader to the wrong repository. It
-    is not a bug and it is not permanent, so it gets the status that means so.
+    what decides. Unhandled, either would turn into a 500 with a Rust source path in
+    the body — a message that reads as a bug in this project and sends the reader to
+    the wrong repository. It is not a bug and it is not permanent, so it gets the
+    status that means so.
 
     Re-raised when the message is anything else, because a missing file or a bad
     permission is a real failure and swallowing it here would hide it.
+
+    One case used to arrive here that no longer does. A table that is simply not
+    there raises `ValueError` out of `lance.dataset()` on a remote root, reached this
+    handler, was correctly judged not-a-throttle, and was re-raised into a 500. It is
+    now turned into `FileNotFoundError` by `Catalog.open`, which is where the caller
+    was already told to expect it — see `server/catalog.py::is_missing_dataset`.
     """
     if not sources.is_throttled(exc):
         raise exc
@@ -174,6 +182,17 @@ def mount_routers(app: FastAPI, *, kiosk_mode: bool) -> None:
     # thing to hand an anonymous visitor.
     if not kiosk_mode:
         app.include_router(datascan_routes.router)
+
+    # Operation plans, under /ops/*. Nothing here writes: every route computes what
+    # an operation would do — the affected fragments, what it reads and writes,
+    # whether it can be undone — and returns it as a document with the script that
+    # would do it. The prefix says "operations" rather than "catalog" because that is
+    # where execution belongs when it lands, and burying it under a prefix that
+    # promises read-only would hide the decision. Absent from a public demo: a plan
+    # names paths, fragment counts and a database root, and a stranger's table is not
+    # a thing to hand an anonymous visitor a runbook for.
+    if not kiosk_mode:
+        app.include_router(ops_routes.router)
 
     # Creating a database, under /ingest/*. The only router that may write a dataset.
     # `POST /ingest/scan` lists a directory the caller names, which is a reasonable
