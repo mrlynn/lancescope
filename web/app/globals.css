@@ -306,12 +306,23 @@ body::before {
 /* ---------------------------------------------------------------------------
    Controls.
 
-   Everything clickable is one of four shapes: `.btn` (icon + label), `.iconbtn`
-   (the square, label carried by a tooltip), `.seg` (a segmented group), and the
-   older `.pill` that the settings forms still use. They share a border, a radius
-   and a hover, so a row mixing them reads as one control strip rather than as
-   four widgets that happen to sit together.
-   --------------------------------------------------------------------------- */
+   Everything clickable is one of five shapes: `.btn` (icon + label), `.iconbtn`
+   (the square, label carried by a tooltip), `.seg` (a segmented group), `.tabs`
+   (navigation), and the older `.pill` that the settings forms still use. The first
+   three share a border, a radius and a hover, so a row mixing them reads as one
+   control strip rather than as widgets that happen to sit together.
+
+   `.tabs` is the one that deliberately does not. The distinction it draws is real
+   and the app had no way to show it:
+
+     `.seg`  picks a mode *inside* a panel — query modes, compare modes, the theme.
+             It is a control, it looks like one, and its answer changes what the
+             panel in front of you does.
+     `.tabs` moves *between* views. It is navigation, it is the first thing on a
+             screen, and its answer changes what you are looking at.
+
+   Before this they were the same control, and the console's primary navigation read
+   as a row of buttons because that is what it was. */
 
 .btn, .iconbtn {
   display: inline-flex;
@@ -353,12 +364,20 @@ body::before {
 }
 
 /* An active/selected control, wherever one is toggled on. */
-.btn-on, .iconbtn-on {
+/* `data-on` as well as the class. The pane toggles in the toolbar set the attribute
+   — it is what `.seg` buttons use — and got no active state at all, because the only
+   rule reading it was scoped to `.seg > button`. Two spellings for one idea is the
+   bug; accepting both is the smaller fix, and the attribute is the one a caller
+   reaches for. */
+.btn-on, .iconbtn-on,
+.btn[data-on="true"], .iconbtn[data-on="true"] {
   color: var(--video);
   border-color: var(--video);
   background: rgb(var(--video-rgb) / 0.09);
 }
-.btn-on:hover:not(:disabled), .iconbtn-on:hover:not(:disabled) {
+.btn-on:hover:not(:disabled), .iconbtn-on:hover:not(:disabled),
+.btn[data-on="true"]:hover:not(:disabled),
+.iconbtn[data-on="true"]:hover:not(:disabled) {
   color: var(--video);
   border-color: var(--video);
   background: rgb(var(--video-rgb) / 0.14);
@@ -409,40 +428,72 @@ body::before {
   background: rgb(var(--video-rgb) / 0.11);
 }
 
-/* The console's tab bar gives up its labels before it gives up a destination.
+/* Navigation. Text, always — the labels are the thing that cannot be given up.
 
-   `.seg` scrolls when it must, and for a strip on a phone that is the right
-   behaviour — but it is the wrong thing to reach first on a desktop, where a tab you
-   have to push sideways to find is a tab most people never find. Six labelled
-   screens measure 644px. The centre pane is 668px at a 1280px window and 412px at a
-   1024px one, so the labels are the first thing that does not fit, and long before
-   the buttons are: the same six as glyphs are 233px.
+   What this replaces gave up the labels first, on the reasoning that a destination
+   you can still reach beats a word you can still read. That reasoning holds for a
+   glyph that means something on its own and fails for these: a gear, a tick and a
+   sparkle are not the names of anything, so dropping the label did not degrade the
+   control, it emptied it. Eight of them in a row is a puzzle.
 
-   Measured against the *container* rather than the window, because those are not the
-   same question. The rail and the inspector collapse below `lg`, so a 712px window
-   hands the centre 702px while a 1024px window hands it 412px — a viewport media
-   query would take the labels away at the width that has the most room for them.
+   Removing the icons instead is not the trade it sounds like. Six labelled tabs are
+   644px with icons and 472px without — **the icons cost more than the two tabs whose
+   arrival started this**, and the text row fits a 1280px window where the icon row
+   never did.
 
-   The glyph keeps a tooltip and an `aria-label` either way, so a button whose label
-   is gone still says what it is, to a pointer and to a screen reader both.
+   And it wraps rather than scrolls, which is the real payoff for dropping the box.
+   A bordered group cannot wrap without breaking its own border, so `.seg` had only
+   two ways to fail: push the overflow off the edge, or shed the labels. A row with
+   no border around it has a third, and a second line of tabs is the one failure here
+   that loses nothing at all. There is no container query and no fallback state
+   because there is no longer anything to fall back from. */
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 0 4px;
+  /* The rail the active tab sits on. Drawn on the row rather than under each tab so
+     it stays continuous across a wrap. */
+  border-bottom: 1px solid var(--rule);
+}
+.tabs > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  /* Reserves the active tab's underline on every tab, so nothing shifts by 2px when
+     the selection moves. */
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  color: var(--haze);
+  background: transparent;
+  transition: color .15s, border-color .15s;
+}
+.tabs > button:hover { color: var(--bright); }
+.tabs > button[aria-selected="true"], .tabs > button[data-on="true"] {
+  color: var(--video);
+  border-bottom-color: var(--video);
+}
 
-   Not on `.console-centre` itself: `container-type: inline-size` implies
-   `contain: layout`, which makes the element a containing block for every
-   `position: fixed` descendant. A wrapper around the two rows contains nothing that
-   would notice. */
-.seg-fit { container-type: inline-size; }
-
-/* 660px: the 644px six labelled screens measure, plus a little. Deliberately close
-   to the real figure rather than comfortably above it — every pixel of margin here
-   is a window that shows glyphs while it had room for words.
-
-   It is a threshold and not a measurement, so it cannot be exact: a badge adds 20px
-   to a screen that has findings, and the strip is therefore wider on a database with
-   something wrong with it. Erring low means such a window keeps its labels and the
-   strip scrolls a fraction; erring high means every window loses them. Low is the
-   better failure. */
-@container (max-width: 660px) {
-  .seg-label { display: none; }
+/* The second row, where a screen has one. Subordinate by weight rather than by
+   another box: two tab bars of equal strength would be two navigations, and only one
+   of them is. Active is the console's usual coral, without the underline that says
+   "this is the primary row". */
+.subtabs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 16px;
+}
+.subtabs > button {
+  padding: 4px 0;
+  color: var(--haze);
+  background: transparent;
+  transition: color .15s;
+}
+.subtabs > button:hover { color: var(--bright); }
+.subtabs > button[aria-selected="true"], .subtabs > button[data-on="true"] {
+  color: var(--video);
 }
 
 

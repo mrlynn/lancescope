@@ -54,6 +54,12 @@ export default function Inspector({ w, table, onGoToPanel }: {
       <Freshness name={table} version={current?.version ?? null}
                  latest={current?.latest_version ?? null} />
 
+      {/* `.seg`, not `.tabs`, though these are navigation by the rule in
+          globals.css. A 340px rail has no width for an underlined row, and this
+          strip is inside a pane rather than at the head of a screen — the coral wash
+          reads correctly at this scale where a 2px rule under three words would
+          read as a stray line. Deliberate, so it is not tidied later as an
+          oversight. */}
       <div className="seg mb-4" role="tablist">
         {PANES.map((p) => (
           <button

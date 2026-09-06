@@ -25,6 +25,7 @@ import type { Finding } from "@/app/lib/catalog";
 import { BINDINGS } from "@/app/lib/keys";
 import { describeSpec, useQueryHistory, useSavedQueries } from "@/app/lib/queries";
 import { usePins, useRecents } from "@/app/lib/recents";
+import { SCREENS, SCREEN_LABEL, entryOf } from "@/app/lib/screens";
 import type { Workspace } from "@/app/lib/workspace";
 
 type Item = {
@@ -96,11 +97,18 @@ export default function Palette({ w, open, onClose, root, onGo, onScreen, onSwit
       });
     }
 
-    for (const [tab, label] of [["schema", "Table"], ["query", "Query"], ["compare", "Compare"],
-                                ["training", "Training"], ["data", "Data"]] as const) {
+    // Read from `lib/screens.ts` rather than listed here. The copy this replaces was
+    // written before Operations existed and never grew it, so the one control whose
+    // whole job is reaching things could not reach that screen. A list the palette
+    // owns is a list that goes stale silently; deriving it means adding a screen
+    // adds its palette entry.
+    for (const s of SCREENS) {
       out.push({
-        id: `screen:${tab}`, group: "Screens", label, icon: "schema",
-        run: () => onScreen(tab),
+        id: `screen:${s.id}`,
+        group: "Screens",
+        label: SCREEN_LABEL[s.id],
+        icon: s.icon,
+        run: () => onScreen(entryOf(s.id)),
       });
     }
 
