@@ -95,7 +95,7 @@ export function Operations({ table }: { table: string }) {
             disabled={busy || Boolean(NEEDS_ARGUMENT[k])}
             onClick={() => show(k)}
             title={NEEDS_ARGUMENT[k]
-              ? `Needs ${NEEDS_ARGUMENT[k]} — ask the assistant, or open it from a proposal`
+              ? `Needs ${NEEDS_ARGUMENT[k]} — ask for it under Ask, or open it from a proposal`
               : `Plan a ${k}`}
             className="mono text-[11px] px-2.5 py-1.5 rounded-sm border border-[var(--rule)]
                        text-[var(--haze)] disabled:opacity-40 hover:text-[var(--bright)]"
@@ -105,8 +105,8 @@ export function Operations({ table }: { table: string }) {
         ))}
       </div>
       <p className="text-[11px] text-[var(--dim)] mb-6">
-        The greyed ones need an argument — a column, a version, a destination. Ask the
-        assistant for one and it will name the argument it used.
+        The greyed ones need an argument — a column, a version, a destination. Ask for
+        one under Ask and it will name the argument it used.
       </p>
 
       {error && <Caveat>{error}</Caveat>}

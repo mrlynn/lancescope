@@ -120,8 +120,8 @@ export function Assistant({ table, ai }: { table: string | null; ai: Capabilitie
 
       <p className="text-[11px] text-[var(--dim)] mb-5 leading-relaxed">
         It reads metadata through the same routes this console does, and it cannot
-        change anything. Asked to fix something it will plan it — the plan opens in
-        Operations, and running it stays yours.
+        change anything. Asked to fix something it will plan it, and the plan is
+        waiting under Plans — running it stays yours.
       </p>
 
       {failed && <Caveat>{failed}</Caveat>}

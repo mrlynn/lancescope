@@ -409,27 +409,41 @@ body::before {
   background: rgb(var(--video-rgb) / 0.11);
 }
 
-/* The console's tab bar: one row at every width, always in the same place, and
-   never quietly cut off.
+/* The console's tab bar gives up its labels before it gives up a destination.
 
-   It was a `flex-wrap` row of two `.seg` groups, so a window narrow enough to
-   squeeze them broke the second group onto a line of its own — and below `lg` the
-   detail column stacks under the table rail, so the same bar also travelled
-   several hundred pixels down the page, past the fold. The primary navigation of
-   the console changing both its shape and its position for one drag of a window
-   edge is two surprises, and the second one hides it.
+   `.seg` scrolls when it must, and for a strip on a phone that is the right
+   behaviour — but it is the wrong thing to reach first on a desktop, where a tab you
+   have to push sideways to find is a tab most people never find. Six labelled
+   screens measure 644px. The centre pane is 668px at a 1280px window and 412px at a
+   1024px one, so the labels are the first thing that does not fit, and long before
+   the buttons are: the same six as glyphs are 233px.
 
-   So it gives things up in an order, and says so at each step.
+   Measured against the *container* rather than the window, because those are not the
+   same question. The rail and the inspector collapse below `lg`, so a 712px window
+   hands the centre 702px while a 1024px window hands it 412px — a viewport media
+   query would take the labels away at the width that has the most room for them.
 
-   1. Full labels while they fit.
-   2. Then the labels go and the glyphs stay. Nine icon buttons fit a phone with
-      room over, which is the whole nav on screen and nothing cut — a better trade
-      than a labelled strip you have to push. The badge becomes a dot: the digit is
-      not legible at that size and its colour still carries the warning.
-   3. Only then does it scroll, and only then does it look like it scrolls. The
-      overflowing edge fades under a mask and grows an arrow to push it with. An
-      edge that fades on one side and not the other is also the answer to which way
-      the rest of the strip is. */
+   The glyph keeps a tooltip and an `aria-label` either way, so a button whose label
+   is gone still says what it is, to a pointer and to a screen reader both.
+
+   Not on `.console-centre` itself: `container-type: inline-size` implies
+   `contain: layout`, which makes the element a containing block for every
+   `position: fixed` descendant. A wrapper around the two rows contains nothing that
+   would notice. */
+.seg-fit { container-type: inline-size; }
+
+/* 660px: the 644px six labelled screens measure, plus a little. Deliberately close
+   to the real figure rather than comfortably above it — every pixel of margin here
+   is a window that shows glyphs while it had room for words.
+
+   It is a threshold and not a measurement, so it cannot be exact: a badge adds 20px
+   to a screen that has findings, and the strip is therefore wider on a database with
+   something wrong with it. Erring low means such a window keeps its labels and the
+   strip scrolls a fraction; erring high means every window loses them. Low is the
+   better failure. */
+@container (max-width: 660px) {
+  .seg-label { display: none; }
+}
 
 
 /* Tooltips, so an icon-only control still says what it does. Pure CSS: a title

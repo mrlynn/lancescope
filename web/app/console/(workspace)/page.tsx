@@ -24,7 +24,7 @@ import { useShortcut } from "@/app/lib/keys";
 import { notePush, setParams, useValue } from "@/app/lib/url-state";
 import { recordCost, set as setWorkspace, useWorkspace } from "@/app/lib/workspace";
 
-// Five screens, and one of them has sections.
+// Six screens, and two of them have sections.
 //
 // The old strip was nine peers in one row, and it took a `ResizeObserver`, a
 // hysteresis band, two fade masks and a pair of nudge arrows to keep them there.
@@ -35,44 +35,70 @@ import { recordCost, set as setWorkspace, useWorkspace } from "@/app/lib/workspa
 //
 // So the four become sections of a Table screen, which is the case the strip was
 // always fine for: tightly related facts about one thing. The others become places.
-const SECTIONS: { id: Section; icon: IconName }[] = [
-  { id: "schema", icon: "schema" },
-  { id: "versions", icon: "history" },
-  { id: "indices", icon: "index" },
-  { id: "fragments", icon: "fragments" },
-];
+//
+// Operations is the second screen with sections, by the same test rather than to
+// save a button. Its two are one workflow seen from either end: `plans` is what the
+// console worked out should be done, and `ask` is where you say it in words — and
+// what the asking produces *is* a plan, rendered by the section next to it. They
+// were briefly two screens, which put the answer one navigation away from the
+// question that made it.
+//
+// `plans` comes first because it needs no model. The planners are arithmetic over
+// metadata, so a console with nothing configured opens this screen on something that
+// works rather than on a panel asking for a key.
+const SECTIONS: Partial<Record<Screen, { id: Section; icon: IconName }[]>> = {
+  table: [
+    { id: "schema", icon: "schema" },
+    { id: "versions", icon: "history" },
+    { id: "indices", icon: "index" },
+    { id: "fragments", icon: "fragments" },
+  ],
+  operations: [
+    { id: "plans", icon: "check" },
+    { id: "ask", icon: "spark" },
+  ],
+};
+
+/** Which screen a section belongs to. Derived from `SECTIONS` so the two cannot
+ *  disagree — a section added above and forgotten here would be a tab that renders
+ *  and cannot be navigated to. */
+const SCREEN_OF = Object.fromEntries(
+  Object.entries(SECTIONS).flatMap(
+    ([screen, sections]) => (sections ?? []).map((s) => [s.id, screen as Screen]),
+  ),
+) as Record<Section, Screen>;
 
 const SCREENS: { id: Screen; icon: IconName }[] = [
   { id: "table", icon: "table" },
   { id: "query", icon: "search" },
   { id: "compare", icon: "history" },
   { id: "training", icon: "play" },
-  // Last, and last on purpose: it is the only screen that reads columns, and the
+  // Last but one, and on purpose: it is the only screen that reads columns, and the
   // only one that spends more than kilobytes. Nothing on it runs until somebody
   // presses a button.
   { id: "data", icon: "rows" },
-  // The two that came last and belong last. The assistant is the only screen where
-  // the model decides what to read rather than answering something the console
-  // composed, and Operations is the only one about changing the table — which it
-  // does by handing over a document and a command, never by running one.
-  { id: "assistant", icon: "spark" },
+  // And then the only screen about changing the table, which it does by handing over
+  // a document and a command rather than by running one.
   { id: "operations", icon: "settings" },
 ];
 
-type Section = "schema" | "versions" | "indices" | "fragments";
-type Screen = "table" | "query" | "compare" | "training" | "data"
-            | "assistant" | "operations";
-type Tab = Section | "query" | "compare" | "training" | "data"
-         | "assistant" | "operations";
+type Section = "schema" | "versions" | "indices" | "fragments" | "plans" | "ask";
+type Screen = "table" | "query" | "compare" | "training" | "data" | "operations";
+type Tab = Section | "query" | "compare" | "training" | "data";
 
-const TABS: Tab[] = ["schema", "versions", "indices", "fragments",
-                     "query", "compare", "training", "data",
-                     "assistant", "operations"];
+const TABS: Tab[] = ["schema", "versions", "indices", "fragments", "plans", "ask",
+                     "query", "compare", "training", "data"];
 
 /** Which screen a view belongs to. The URL still names the view, not the screen —
  *  see `MERGED_TABS`. */
 function screenOf(tab: Tab): Screen {
-  return SECTIONS.some((s) => s.id === tab) ? "table" : (tab as Screen);
+  return SCREEN_OF[tab as Section] ?? (tab as Screen);
+}
+
+/** Where a screen opens. A screen with sections opens at its first one; a screen
+ *  without them is the view itself. */
+function entryOf(screen: Screen): Tab {
+  return SECTIONS[screen]?.[0]?.id ?? (screen as Tab);
 }
 
 // Every `?tab=` this console has ever answered to still lands somewhere real.
@@ -82,7 +108,14 @@ function screenOf(tab: Tab): Screen {
 // is open beside whatever you are looking at — so the link opens the table it was
 // about and the findings are already on screen. Five links in this repository point
 // at one or the other.
-const MERGED_TABS: Record<string, Tab> = { rows: "query", insights: "schema" };
+//
+// `assistant` and `operations` were briefly screens of their own and are sections
+// now. Both spellings shipped — in release notes, in the assistant's own copy, and
+// in whatever anyone pasted to a colleague — so both still land where they meant.
+const MERGED_TABS: Record<string, Tab> = {
+  rows: "query", insights: "schema",
+  assistant: "ask", operations: "plans",
+};
 
 export default function Console() {
   // What was fetched lives in the store, because the shell shows some of it and a
@@ -113,7 +146,7 @@ export default function Console() {
   // have to know how many there are.
   const goScreen = useCallback((n: number) => {
     const s = SCREENS[n];
-    if (s) pickTab(s.id === "table" ? "schema" : (s.id as Tab));
+    if (s) pickTab(entryOf(s.id));
   }, [pickTab]);
   useShortcut("screen-1", useCallback(() => goScreen(0), [goScreen]));
   useShortcut("screen-2", useCallback(() => goScreen(1), [goScreen]));
@@ -121,7 +154,6 @@ export default function Console() {
   useShortcut("screen-4", useCallback(() => goScreen(3), [goScreen]));
   useShortcut("screen-5", useCallback(() => goScreen(4), [goScreen]));
   useShortcut("screen-6", useCallback(() => goScreen(5), [goScreen]));
-  useShortcut("screen-7", useCallback(() => goScreen(6), [goScreen]));
 
 
   const { list, listError, detail, versions, indices, fragments, findings, ai,
@@ -305,47 +337,55 @@ export default function Console() {
       ) : (
         <div className="min-w-0">
           <section className="min-w-0">
-            {/* Screens, then — on the one that has them — its sections. Two rows
-                of at most five, which cannot overflow at any width this supports,
-                so the whole scroll-and-fade apparatus the nine-tab strip needed is
-                gone with it. */}
-            <div className="seg mb-3" role="tablist" aria-label="Screen">
-              {SCREENS.map((s) => (
-                <button
-                  key={s.id}
-                  role="tab"
-                  aria-selected={screen === s.id}
-                  data-on={screen === s.id}
-                  // A screen is entered at its first section; a section is only
-                  // meaningful inside the table screen.
-                  onClick={() => pickTab(s.id === "table" ? "schema" : (s.id as Tab))}
-                  className="mono !px-3 text-[10px] tracking-[0.14em] uppercase"
-                >
-                  <Icon name={s.icon} size={14} />
-                  <span>{s.id}</span>
-                  <ScreenBadge findings={findings} screen={s.id} />
-                </button>
-              ))}
-            </div>
+            {/* Screens, then — on the screens that have them — their sections.
+                Wrapped in a container so the labels can be measured against the room
+                the strip actually has rather than against the window, which is not
+                the same question: the panes either side collapse below `lg`, so a
+                712px window gives the centre more width than a 1024px one does. See
+                `.seg-fit` in globals.css. */}
+            <div className="seg-fit min-w-0">
+              <div className="seg mb-3" role="tablist" aria-label="Screen">
+                {SCREENS.map((s) => (
+                  <button
+                    key={s.id}
+                    role="tab"
+                    aria-selected={screen === s.id}
+                    data-on={screen === s.id}
+                    // Carried by a tooltip as well as a label, because below the
+                    // container's threshold the label is not there to read.
+                    data-tip={s.id}
+                    aria-label={s.id}
+                    onClick={() => pickTab(entryOf(s.id))}
+                    className="mono !px-3 text-[10px] tracking-[0.14em] uppercase"
+                  >
+                    <Icon name={s.icon} size={14} />
+                    <span className="seg-label">{s.id}</span>
+                    <ScreenBadge findings={findings} screen={s.id} />
+                  </button>
+                ))}
+              </div>
 
-            {screen === "table" && (
+            {SECTIONS[screen] && (
               <div className="seg mb-6" role="tablist" aria-label="Section">
-                {SECTIONS.map((s) => (
+                {SECTIONS[screen]!.map((s) => (
                   <button
                     key={s.id}
                     role="tab"
                     aria-selected={tab === s.id}
                     data-on={tab === s.id}
+                    data-tip={s.id}
+                    aria-label={s.id}
                     onClick={() => pickTab(s.id)}
                     className="mono !px-3 text-[10px] tracking-[0.14em] uppercase"
                   >
                     <Icon name={s.icon} size={14} />
-                    <span>{s.id}</span>
+                    <span className="seg-label">{s.id}</span>
                     <TabBadge findings={findings} panel={s.id} />
                   </button>
                 ))}
               </div>
             )}
+            </div>
 
             <div className="panel p-6 min-h-[380px]">
               <PartialAnalysis d={findings} />
@@ -371,10 +411,10 @@ export default function Console() {
               {tab === "data" && (picked
                 ? <DataTab key={picked} table={picked} />
                 : <Empty>pick a table to check</Empty>)}
-              {tab === "assistant" && <Assistant key={picked} table={picked} ai={ai} />}
-              {tab === "operations" && (picked
+              {tab === "plans" && (picked
                 ? <Operations key={picked} table={picked} />
                 : <Empty>pick a table to plan against</Empty>)}
+              {tab === "ask" && <Assistant key={picked} table={picked} ai={ai} />}
             </div>
           </section>
         </div>
@@ -385,17 +425,22 @@ export default function Console() {
 
 /** How many findings a whole screen has.
  *
- *  The table screen carries whatever its four sections carry, because a count that
- *  vanished when you left the section holding it would be a count nobody could act
- *  on. Training carries its facet rather than a panel — the same rules narrowed to
- *  what a training run pays for. Query, compare and data carry nothing: no rule
- *  fires about them, and a badge that is always absent is not a badge.
+ *  A screen with sections carries whatever they carry, because a count that vanished
+ *  when you left the section holding it would be a count nobody could act on.
+ *  Training carries its facet rather than a panel — the same rules narrowed to what a
+ *  training run pays for. Query, compare and data carry nothing: no rule fires about
+ *  them, and a badge that is always absent is not a badge.
+ *
+ *  Operations carries nothing either, and deliberately. Its plans are *derived from*
+ *  the findings, so a badge here would count the same warning a second time and put
+ *  it two tabs from the number it was computed from.
  */
 function ScreenBadge({ findings, screen }: { findings: Findings | null; screen: Screen }) {
   if (screen === "training") return <TabBadge findings={findings} panel={null} facet="training" />;
-  if (screen !== "table") return null;
-  const sections = new Set<string>(SECTIONS.map((s) => s.id));
-  return <TabBadge findings={findings} panel={null} only={(f) => sections.has(f.panel)} />;
+  const sections = SECTIONS[screen];
+  if (!sections) return null;
+  const ids = new Set<string>(sections.map((s) => s.id));
+  return <TabBadge findings={findings} panel={null} only={(f) => ids.has(f.panel)} />;
 }
 
 /** How many findings a panel has, when it has any. Zero renders nothing rather than
