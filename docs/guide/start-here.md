@@ -83,5 +83,6 @@ Press **+ python** to get the script that reproduces it outside this app.
 ## Where to go next
 
 - [Diagnose a slow query](/docs/howto-diagnose) — plans, before-and-after, hybrid search
+- [Decide what to do about a table](/docs/howto-operate) — plans you read before you act
 - [Enable the language layer](/docs/howto-intelligence) — locally and free, or with a key
 - [Point an agent at it](/docs/howto-agents) — the same evidence, through Claude

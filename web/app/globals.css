@@ -324,6 +324,17 @@ body::before {
    Before this they were the same control, and the console's primary navigation read
    as a row of buttons because that is what it was. */
 
+/* Tailwind 4 dropped the `cursor: pointer` its preflight used to put on buttons, so
+   every control in this console — tabs, modes, chips, the accent Run — has been
+   rendering with the arrow cursor. Nothing on hover said "this is a thing you press",
+   which is the affordance a hover state is standing in for, and the one that makes a
+   dead control read as dead. Restoring it is the migration's own advice.
+
+   `not-allowed` on the flip side: it belongs to every disabled control rather than to
+   the three shapes that happened to remember it. */
+button, [role="button"] { cursor: pointer; }
+button:disabled, button[aria-disabled="true"] { cursor: not-allowed; }
+
 .btn, .iconbtn {
   display: inline-flex;
   align-items: center;
@@ -401,7 +412,16 @@ body::before {
      other axis is not `visible`, and a vertical scrollbar inside a 30px control is
      not a thing anyone wants. The bar on the other axis is hidden too — inside a
      control this short there is no room to draw one, and the clipped button says
-     more than a 3px line would. */
+     more than a 3px line would.
+
+     Known cost, and the reason the query modes explain themselves in a paragraph
+     rather than a tooltip: a scroll container clips on both axes, and `[data-tip]`
+     draws its bubble 7px *below* the button. Every tooltip inside a `.seg` is
+     rendered and then cut off — including the theme toggle's three, which are the
+     only labels those icon-only buttons have. `overflow-y: clip` with a clip-margin
+     looks like the fix and is not: with the other axis scrolling, `clip` has a used
+     value of `hidden`. A real fix means either giving up the scroll or drawing the
+     bubble somewhere other than a descendant, and neither is a line of CSS. */
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;
@@ -422,11 +442,29 @@ body::before {
   transition: color .15s, background-color .15s;
 }
 .seg > button + button { border-left: 1px solid var(--rule); }
-.seg > button:hover { color: var(--bright); }
+/* Hover belongs to the ones you can press. Unscoped, it brightened a mode this table
+   cannot answer exactly like one it can — the control was actively inviting a click
+   that would do nothing. `.btn` has guarded its hover this way all along. */
+.seg > button:hover:not(:disabled):not([aria-disabled="true"]) { color: var(--bright); }
 .seg > button[aria-pressed="true"], .seg > button[data-on="true"] {
   color: var(--video);
   background: rgb(var(--video-rgb) / 0.11);
 }
+
+/* Off, and visibly so. `.seg` was the only control shape here with no disabled state
+   at all: on a table with no full-text index, `full text` and `hybrid` were painted
+   identically to `filter`, and the only way to learn they were dead was to click one
+   and watch nothing happen. The same .72 as `.btn:disabled`, over the same
+   `not-allowed` every disabled button now gets, so the three shapes agree about what
+   off looks like.
+
+   `aria-disabled` as well as the attribute, and it is the spelling the query modes
+   use. A genuinely `disabled` button takes no pointer and no focus, so the sentence
+   saying *why* the mode is off cannot be reached from the control it is about —
+   which is how a strip that had a reason for every mode still read as four dead
+   buttons. Callers using the ARIA form guard their own onClick. */
+.seg > button:disabled,
+.seg > button[aria-disabled="true"] { opacity: .72; }
 
 /* Navigation. Text, always — the labels are the thing that cannot be given up.
 

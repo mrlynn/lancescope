@@ -88,6 +88,9 @@ export function Operations({ table }: { table: string }) {
       )}
 
       <Eyebrow>Plan something else</Eyebrow>
+      {/* `.72`, not `.4` — the figure every other disabled control in this console
+          uses. At .4 over --haze these labels land near 2:1, and a control you cannot
+          read is not the same as one you cannot press. */}
       <div className="flex flex-wrap gap-2 mb-2">
         {KINDS.map((k) => (
           <button
@@ -98,7 +101,7 @@ export function Operations({ table }: { table: string }) {
               ? `Needs ${NEEDS_ARGUMENT[k]} — ask for it under Ask, or open it from a proposal`
               : `Plan a ${k}`}
             className="mono text-[11px] px-2.5 py-1.5 rounded-sm border border-[var(--rule)]
-                       text-[var(--haze)] disabled:opacity-40 hover:text-[var(--bright)]"
+                       text-[var(--haze)] disabled:opacity-[.72] hover:text-[var(--bright)]"
           >
             {k}
           </button>
