@@ -113,13 +113,19 @@ async def upstream_throttled(request: Request, exc: Exception) -> JSONResponse:
     Lance surfaces the Hub's HTTP status as a Python exception whose type depends on
     where in the Rust it gave up — an `OSError` from the manifest reader, a
     `ValueError` from `Dataset::checkout` — so both are registered and the message is
-    what decides. FastAPI would otherwise
-    otherwise turn into a 500 with a Rust source path in the body — a message that
-    reads as a bug in this project and sends the reader to the wrong repository. It
-    is not a bug and it is not permanent, so it gets the status that means so.
+    what decides. Unhandled, either would turn into a 500 with a Rust source path in
+    the body — a message that reads as a bug in this project and sends the reader to
+    the wrong repository. It is not a bug and it is not permanent, so it gets the
+    status that means so.
 
     Re-raised when the message is anything else, because a missing file or a bad
     permission is a real failure and swallowing it here would hide it.
+
+    One case used to arrive here that no longer does. A table that is simply not
+    there raises `ValueError` out of `lance.dataset()` on a remote root, reached this
+    handler, was correctly judged not-a-throttle, and was re-raised into a 500. It is
+    now turned into `FileNotFoundError` by `Catalog.open`, which is where the caller
+    was already told to expect it — see `server/catalog.py::is_missing_dataset`.
     """
     if not sources.is_throttled(exc):
         raise exc
