@@ -24,7 +24,27 @@ from __future__ import annotations
 
 from datetime import timedelta
 
+import lance
+
 from server.ops import plan as P
+
+
+def can_quote_cleanup() -> bool:
+    """Whether this reader can say what a cleanup would delete before doing it.
+
+    `explain_cleanup_old_versions` arrived in pylance 9. Every reader back to this
+    project's floor can *perform* a cleanup; only these can quote one.
+
+    Deliberately not a `server/runtime.py` feature, though it looks like one. That
+    report is a gate rather than a description: CI fails a pylance row when
+    `runtime().degraded` is non-empty, and the container images refuse to publish on
+    the same signal. Listing this there would have moved the supported reader floor
+    from 3 to 9 — the whole project, over one optional planner — which is a decision
+    about what this software supports and not a side effect an operation plan gets to
+    have. The features in that report are console-wide: cost accounting, Blob V2,
+    index inspection. One of eight operation plans is not one of those.
+    """
+    return hasattr(lance.LanceDataset, "explain_cleanup_old_versions")
 
 # What `cleanup` defaults to elsewhere in the ecosystem. Stated rather than passed
 # through silently: "older than two weeks" is a policy, and a plan that applied one
@@ -53,12 +73,31 @@ def build(handle, *, older_than_days: int = DEFAULT_OLDER_THAN_DAYS,
     uri, version = handle.uri, ds.version
     versions = ds.versions()
 
+    # Asked before it is called rather than caught after. An `AttributeError` turned
+    # into a refusal says "something went wrong"; this says which reader you have and
+    # what would fix it, which is the difference between a dead end and an answer.
+    # `server/runtime.py` is where every other reader-version question is asked.
+    if not can_quote_cleanup():
+        return P.unsupported(
+            P.CLEANUP, handle.name, uri, version,
+            f"this Lance reader cannot say what a cleanup would delete — "
+            f"`explain_cleanup_old_versions` arrived in pylance 9 and this build has "
+            f"{getattr(lance, '__version__', '?')}. The operation itself would work; "
+            f"the quote is what is missing, and this is the one operation whose blast "
+            f"radius has to be measured rather than modelled, because nothing undoes "
+            f"it. Upgrade the reader, or run the cleanup yourself having read Lance's "
+            f"own output first.",
+            title="Cleanup cannot be quoted by this reader")
+
     try:
         explanation = ds.explain_cleanup_old_versions(
             older_than=timedelta(days=older_than_days),
             retain_versions=retain_versions,
         )
     except Exception as e:                                   # noqa: BLE001
+        # Still caught. Feature detection says the method is there, not that it can
+        # answer for this table — a branch or tag it refuses to walk past is a real
+        # failure and belongs in the plan rather than in a traceback.
         return P.unsupported(
             P.CLEANUP, handle.name, uri, version,
             f"this reader could not work out what cleanup would remove: {e}",

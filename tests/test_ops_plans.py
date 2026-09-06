@@ -14,6 +14,16 @@ import pytest
 
 from server import ops
 from server.ops import plan as P
+from server.ops.planners.cleanup import can_quote_cleanup
+
+# `explain_cleanup_old_versions` arrived in pylance 9, and `pyproject.toml` claims
+# `pylance>=3` — a claim the reader matrix in CI checks on every push. So the cleanup
+# planner has two behaviours and both are the product: a quote where the reader can
+# give one, and a refusal naming the reason where it cannot. Testing only the half
+# this machine happens to have is how the floor stops being true.
+HAS_DRY_RUN = can_quote_cleanup()
+needs_dry_run = pytest.mark.skipif(not HAS_DRY_RUN, reason="reader has no cleanup dry run")
+needs_no_dry_run = pytest.mark.skipif(HAS_DRY_RUN, reason="reader has a cleanup dry run")
 
 
 @pytest.fixture
@@ -168,6 +178,7 @@ def test_every_plan_says_whether_it_can_be_undone_and_how(catalog):
             assert "None" in plan.rollback or "no undo" in plan.rollback.lower()
 
 
+@needs_dry_run
 def test_history_cleanup_is_the_one_that_says_it_cannot_be_undone(catalog):
     plan = plan_for(catalog, "versioned", P.CLEANUP)
     assert plan.reversible is False
@@ -179,12 +190,43 @@ def test_history_cleanup_is_the_one_that_says_it_cannot_be_undone(catalog):
     assert "# stats = ds.cleanup_old_versions(" in plan.script
 
 
+@needs_dry_run
 def test_cleanup_is_quoted_by_lance_rather_than_modelled(catalog):
     plan = plan_for(catalog, "versioned", P.CLEANUP)
     assert "explain_cleanup_old_versions" in plan.estimate.basis
     # The one operation whose disk delta is known exactly, and negative.
     assert plan.estimate.disk_delta_bytes is not None
     assert plan.estimate.disk_delta_bytes <= 0
+
+
+@needs_no_dry_run
+def test_an_older_reader_refuses_to_plan_a_cleanup_rather_than_guessing(catalog):
+    """The other half of the matrix, and the more important half.
+
+    Every reader back to the floor can perform a cleanup; only pylance 9 and up can
+    say what one would remove. Planning it anyway from a modelled figure would be
+    offering a script for the single operation here that nothing undoes, with a byte
+    count nobody measured. The refusal names the reader and what would fix it.
+    """
+    plan = plan_for(catalog, "versioned", P.CLEANUP)
+
+    assert plan.capability.state == P.UNSUPPORTED
+    assert not plan.ready
+    assert "pylance 9" in plan.capability.reason
+    assert plan.script == "", "a refusal that still hands over the command"
+
+
+def test_the_cleanup_probe_stays_out_of_the_reader_report():
+    """`runtime().degraded` is a gate, not a description.
+
+    CI fails a pylance row when it is non-empty and the container images refuse to
+    publish on the same signal, so listing this there would have moved the supported
+    reader floor from 3 to 9 over one optional planner. An earlier draft of this
+    change did exactly that; the matrix caught it.
+    """
+    from server import runtime
+
+    assert "cleanup dry run" not in {f.name for f in runtime.runtime().features}
 
 
 def test_a_restore_moves_no_bytes(catalog):

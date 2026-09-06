@@ -160,7 +160,13 @@ async def test_no_amount_of_hostile_text_adds_a_tool(hostile):
 
 def test_a_plan_field_cannot_be_talked_out_of_its_value(hostile_root):
     """The fields a plan reports are arithmetic over metadata. A table that asks to be
-    reported as reversible is still a table, and cleanup is still irreversible."""
+    reported as reversible is still a table, and cleanup is still irreversible.
+
+    The caveat half needs a reader that can quote a cleanup — below pylance 9 the
+    planner refuses instead, which is its own tested behaviour in
+    `tests/test_ops_plans.py`. `reversible` is asserted on both paths, because a
+    refusal that let hostile text flip it would be the same bug wearing a different
+    hat."""
     from server.catalog import Catalog
     from server.ops import plan as P
     from server.ops.planners import cleanup
@@ -170,8 +176,9 @@ def test_a_plan_field_cannot_be_talked_out_of_its_value(hostile_root):
         handle = cat.open(NAME_ATTACK, scope="test")
         plan = cleanup.build(handle)
         assert plan.reversible is False
-        assert "cannot be undone" in " ".join(plan.caveats)
         assert plan.kind == P.CLEANUP
+        if cleanup.can_quote_cleanup():
+            assert "cannot be undone" in " ".join(plan.caveats)
     finally:
         cat.close_all()
 
