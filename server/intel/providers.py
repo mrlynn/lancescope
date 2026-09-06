@@ -1,9 +1,17 @@
 """One way to ask a model for something, whoever is serving it.
 
-The shape is deliberately small — `complete()` and nothing else — because the layers
-above are supposed to be doing the thinking. What varies between providers is not
-worth abstracting over twice: how you say "return JSON in this shape", how usage is
-reported, and what a failure looks like.
+Two shapes, and the second was added deliberately rather than grown into. `complete()`
+is one question and one answer, and for a long time it was the only thing here,
+because the layers above were supposed to be doing the thinking. `converse()` hands
+the thinking to the model: a running transcript, a set of tools, and an answer that
+may be a request to call one. The console's agent loop needs that and the two
+translation tasks cannot share an implementation, so they do not pretend to.
+
+What varies between providers is not worth abstracting over twice: how you say
+"return JSON in this shape", how a tool call is spelled on the wire, how usage is
+reported, and what a failure looks like. `Usage`, `Turn` and `Completion` are the
+narrow parts that are the same everywhere, and the meter records either without
+caring which produced it.
 
 Ollama is a first-class provider rather than an OpenAI-compatible URL, for one
 concrete reason: its native `/api/chat` takes a JSON schema in `format` and enforces
@@ -79,6 +87,72 @@ class Completion:
         }
 
 
+@dataclass(frozen=True)
+class ToolCall:
+    """A model asking for a tool, in the one shape the loop above understands.
+
+    `id` is the provider's own handle for this call and has to travel back with the
+    result — Anthropic matches on `tool_use_id` and OpenAI on `tool_call_id`, and
+    getting it wrong produces a transcript the model reads as a different question.
+    """
+
+    id: str
+    name: str
+    arguments: dict
+
+    def as_dict(self) -> dict:
+        return {"id": self.id, "name": self.name, "arguments": self.arguments}
+
+
+@dataclass(frozen=True)
+class Turn:
+    """One step of a conversation: what the model said, and what it wants called.
+
+    Carries the same cost fields as `Completion` so `spend()` records a turn and a
+    one-shot answer through the same path. A loop that spent money the meter never
+    saw would make the meter worse than useless — it would be reassuring.
+    """
+
+    text: str
+    tool_calls: tuple[ToolCall, ...]
+    stop_reason: str
+    usage: Usage
+    model: str
+    provider: str
+    cost_usd: float | None
+    ms: int
+
+    @property
+    def wants_tools(self) -> bool:
+        return bool(self.tool_calls)
+
+    def as_dict(self) -> dict:
+        return {
+            "text": self.text,
+            "tool_calls": [c.as_dict() for c in self.tool_calls],
+            "stop_reason": self.stop_reason,
+            "usage": self.usage.as_dict(),
+            "model": self.model,
+            "provider": self.provider,
+            "cost_usd": self.cost_usd,
+            "ms": self.ms,
+        }
+
+
+# The transcript the loop keeps, in nobody's wire format. Three roles:
+#
+#   {"role": "user",      "text": str}
+#   {"role": "assistant", "text": str, "tool_calls": [ToolCall, ...]}
+#   {"role": "tool",      "id": str, "name": str, "content": str}
+#
+# Provider-neutral on purpose. Anthropic spells a tool result as a `tool_result` block
+# inside a *user* message; OpenAI and Ollama spell it as its own `tool` role. A loop
+# that held either of those directly would be a loop that only worked on one provider,
+# and the bug would show up as a model quietly losing the thread rather than as an
+# error.
+Transcript = list[dict]
+
+
 class NoProvider(RuntimeError):
     """Nothing is configured. Not an error state — the ordinary one, on a fresh run.
 
@@ -113,6 +187,15 @@ class Provider(Protocol):
         effort: str | None = None,
         max_tokens: int = 2048,
     ) -> Completion: ...
+
+    def converse(
+        self,
+        *,
+        system: str,
+        messages: Transcript,
+        tools: list[dict],
+        max_tokens: int = 4096,
+    ) -> Turn: ...
 
 
 def _parse(text: str, schema: dict | None) -> dict | None:
@@ -207,6 +290,107 @@ class AnthropicProvider:
         )
 
 
+    # -- the tool loop's half ------------------------------------------------------
+
+    def _wire(self, messages: Transcript) -> list[dict]:
+        """The neutral transcript as Anthropic content blocks.
+
+        The one non-obvious part: a tool result is a block inside a *user* message,
+        and consecutive results have to be merged into one message rather than sent
+        as several. Two user messages in a row with one result each is a transcript
+        the API rejects, and it is exactly what a turn that called three tools
+        produces if you translate message by message.
+        """
+        out: list[dict] = []
+        pending: list[dict] = []
+
+        def flush() -> None:
+            if pending:
+                out.append({"role": "user", "content": list(pending)})
+                pending.clear()
+
+        for m in messages:
+            role = m["role"]
+            if role == "tool":
+                pending.append({
+                    "type": "tool_result",
+                    "tool_use_id": m["id"],
+                    "content": m["content"],
+                })
+                continue
+            flush()
+            if role == "user":
+                out.append({"role": "user", "content": m["text"]})
+                continue
+            blocks: list[dict] = []
+            if m.get("text"):
+                blocks.append({"type": "text", "text": m["text"]})
+            for c in m.get("tool_calls") or ():
+                blocks.append({"type": "tool_use", "id": c.id, "name": c.name,
+                               "input": c.arguments})
+            # An assistant turn with neither text nor a tool call cannot be sent and
+            # cannot have happened; dropping it is better than a 400 that names a
+            # message index nobody can map back to a turn.
+            if blocks:
+                out.append({"role": "assistant", "content": blocks})
+        flush()
+        return out
+
+    def converse(self, *, system, messages, tools, max_tokens=4096) -> Turn:
+        try:
+            import anthropic
+        except ImportError:
+            raise ProviderError(
+                "the anthropic SDK is not installed in this environment — "
+                "`uv sync`, or pick a local model instead") from None
+
+        client = anthropic.Anthropic(api_key=self.api_key, timeout=HOSTED_TIMEOUT_S)
+
+        t0 = time.time()
+        try:
+            resp = client.messages.create(
+                model=self.model,
+                max_tokens=max_tokens,
+                system=system,
+                messages=self._wire(messages),
+                tools=[{"name": t["name"], "description": t["description"],
+                        "input_schema": t["parameters"]} for t in tools],
+            )
+        except anthropic.AuthenticationError:
+            raise ProviderError("the API key was rejected") from None
+        except anthropic.NotFoundError:
+            raise ProviderError(f"no such model: {self.model}") from None
+        except anthropic.RateLimitError:
+            raise ProviderError("rate limited", retryable=True) from None
+        except anthropic.APIStatusError as e:
+            raise ProviderError(f"API error {e.status_code}",
+                                retryable=e.status_code >= 500) from None
+        except anthropic.APIConnectionError:
+            raise ProviderError("could not reach the API", retryable=True) from None
+        ms = int((time.time() - t0) * 1000)
+
+        if resp.stop_reason == "refusal":
+            raise ProviderError("the model declined this request")
+
+        text = "".join(b.text for b in resp.content if b.type == "text")
+        calls = tuple(
+            ToolCall(id=b.id, name=b.name, arguments=dict(b.input or {}))
+            for b in resp.content if b.type == "tool_use"
+        )
+        u = Usage(
+            resp.usage.input_tokens,
+            resp.usage.output_tokens,
+            getattr(resp.usage, "cache_read_input_tokens", 0) or 0,
+        )
+        return Turn(
+            text=text, tool_calls=calls, stop_reason=resp.stop_reason or "",
+            usage=u, model=self.model, provider=self.name,
+            cost_usd=registry.cost_usd(registry.lookup(self.model, self.name),
+                                       u.input_tokens, u.output_tokens),
+            ms=ms,
+        )
+
+
 # --------------------------------------------------------------------------- ollama
 
 def ollama_host(configured: str | None = None) -> str:
@@ -229,6 +413,68 @@ def ollama_models(host: str, timeout: float = PROBE_TIMEOUT_S) -> list[str] | No
         return sorted(m.get("name", "") for m in (r.json().get("models") or []) if m.get("name"))
     except (httpx.HTTPError, ValueError):
         return None
+
+
+def _openai_wire(messages: Transcript) -> list[dict]:
+    """The neutral transcript in the shape OpenAI defined and Ollama copied.
+
+    Simpler than Anthropic's: a tool result is its own message with its own role, so
+    nothing has to be merged. `tool_calls` carry their arguments as a JSON *string*,
+    which is the part that catches people out — a dict there is accepted by some
+    gateways and silently mangled by others.
+    """
+    out: list[dict] = []
+    for m in messages:
+        role = m["role"]
+        if role == "user":
+            out.append({"role": "user", "content": m["text"]})
+        elif role == "tool":
+            out.append({"role": "tool", "tool_call_id": m["id"],
+                        "name": m["name"], "content": m["content"]})
+        else:
+            msg: dict = {"role": "assistant", "content": m.get("text") or ""}
+            calls = m.get("tool_calls") or ()
+            if calls:
+                msg["tool_calls"] = [
+                    {"id": c.id, "type": "function",
+                     "function": {"name": c.name,
+                                  "arguments": json.dumps(c.arguments)}}
+                    for c in calls
+                ]
+            out.append(msg)
+    return out
+
+
+def _openai_tools(tools: list[dict]) -> list[dict]:
+    return [{"type": "function",
+             "function": {"name": t["name"], "description": t["description"],
+                          "parameters": t["parameters"]}}
+            for t in tools]
+
+
+def _openai_calls(message: dict) -> tuple[ToolCall, ...]:
+    """Tool calls out of a choice, tolerating arguments that are already parsed.
+
+    Ollama returns `arguments` as an object; OpenAI returns it as a string. Accepting
+    both here means neither provider needs its own extraction, and a gateway that
+    picks the other convention keeps working.
+    """
+    out = []
+    for c in message.get("tool_calls") or ():
+        fn = c.get("function") or {}
+        raw = fn.get("arguments")
+        if isinstance(raw, str):
+            try:
+                args = json.loads(raw or "{}")
+            except ValueError:
+                raise ProviderError(
+                    f"the model asked for {fn.get('name')!r} with arguments that are "
+                    f"not JSON") from None
+        else:
+            args = dict(raw or {})
+        out.append(ToolCall(id=str(c.get("id") or fn.get("name") or ""),
+                            name=fn.get("name") or "", arguments=args))
+    return tuple(out)
 
 
 class OllamaProvider:
@@ -276,6 +522,55 @@ class OllamaProvider:
                   payload.get("eval_count", 0) or 0, 0)
         return Completion(
             text=text, data=_parse(text, schema), usage=u,
+            model=self.model, provider=self.name, cost_usd=0.0, ms=ms,
+        )
+
+
+    def converse(self, *, system, messages, tools, max_tokens=4096) -> Turn:
+        """Ollama's native tool calling.
+
+        Worth being blunt about the failure mode this has and the hosted path does
+        not: `format` enforces a grammar, `tools` does not. A small model handed
+        eleven tools will call one that does not exist, or call the right one with
+        the wrong argument name, and nothing at this layer can prevent it. The loop
+        above answers an invented tool with a tool result saying so, which is the only
+        honest thing to do — and `registry.Model.tools` is how the console avoids
+        offering the loop to a model that cannot hold one in the first place.
+        """
+        body: dict = {
+            "model": self.model,
+            "stream": False,
+            "options": {"temperature": 0, "num_predict": max_tokens},
+            "messages": [{"role": "system", "content": system},
+                         *_openai_wire(messages)],
+            "tools": _openai_tools(tools),
+        }
+
+        t0 = time.time()
+        try:
+            r = httpx.post(f"{self.host}/api/chat", json=body, timeout=LOCAL_TIMEOUT_S)
+            r.raise_for_status()
+            payload = r.json()
+        except httpx.TimeoutException:
+            raise ProviderError(
+                f"{self.model} did not answer within {LOCAL_TIMEOUT_S:.0f}s — a large "
+                f"model loading cold can exceed this", retryable=True) from None
+        except httpx.HTTPStatusError as e:
+            detail = e.response.text.strip()[:200] or f"HTTP {e.response.status_code}"
+            raise ProviderError(f"ollama: {detail}") from None
+        except (httpx.HTTPError, ValueError) as e:
+            raise ProviderError(f"could not reach ollama at {self.host}: "
+                                f"{type(e).__name__}", retryable=True) from None
+        ms = int((time.time() - t0) * 1000)
+
+        message = payload.get("message") or {}
+        calls = _openai_calls(message)
+        return Turn(
+            text=message.get("content", "") or "",
+            tool_calls=calls,
+            stop_reason="tool_use" if calls else (payload.get("done_reason") or "stop"),
+            usage=Usage(payload.get("prompt_eval_count", 0) or 0,
+                        payload.get("eval_count", 0) or 0, 0),
             model=self.model, provider=self.name, cost_usd=0.0, ms=ms,
         )
 
@@ -345,6 +640,53 @@ class OpenAICompatProvider:
         )
 
 
+    def converse(self, *, system, messages, tools, max_tokens=4096) -> Turn:
+        body: dict = {
+            "model": self.model,
+            "temperature": 0,
+            "max_tokens": max_tokens,
+            "messages": [{"role": "system", "content": system},
+                         *_openai_wire(messages)],
+            "tools": _openai_tools(tools),
+        }
+        headers = {"authorization": f"Bearer {self.api_key}"} if self.api_key else {}
+
+        t0 = time.time()
+        try:
+            r = httpx.post(f"{self.base_url}/chat/completions", json=body,
+                           headers=headers, timeout=HOSTED_TIMEOUT_S)
+            r.raise_for_status()
+            payload = r.json()
+        except httpx.HTTPStatusError as e:
+            detail = e.response.text.strip()[:200] or f"HTTP {e.response.status_code}"
+            raise ProviderError(f"{self.base_url}: {detail}",
+                                retryable=e.response.status_code >= 500) from None
+        except (httpx.HTTPError, ValueError) as e:
+            raise ProviderError(f"could not reach {self.base_url}: "
+                                f"{type(e).__name__}", retryable=True) from None
+        ms = int((time.time() - t0) * 1000)
+
+        try:
+            choice = payload["choices"][0]
+        except (KeyError, IndexError, TypeError):
+            raise ProviderError("the endpoint returned no choices") from None
+        message = choice.get("message") or {}
+        calls = _openai_calls(message)
+        usage = payload.get("usage") or {}
+        u = Usage(usage.get("prompt_tokens", 0) or 0,
+                  usage.get("completion_tokens", 0) or 0,
+                  (usage.get("prompt_tokens_details") or {}).get("cached_tokens", 0) or 0)
+        return Turn(
+            text=message.get("content") or "",
+            tool_calls=calls,
+            stop_reason=choice.get("finish_reason") or "",
+            usage=u, model=self.model, provider=self.name,
+            cost_usd=registry.cost_usd(registry.lookup(self.model, self.name),
+                                       u.input_tokens, u.output_tokens),
+            ms=ms,
+        )
+
+
 # ----------------------------------------------------------------------------- null
 
 class NullProvider:
@@ -363,6 +705,9 @@ class NullProvider:
         self.setup_hint = setup_hint
 
     def complete(self, **_) -> Completion:
+        raise NoProvider(self.reason, self.setup_hint)
+
+    def converse(self, **_) -> Turn:
         raise NoProvider(self.reason, self.setup_hint)
 
 

@@ -158,3 +158,31 @@ def spend_ceiling() -> float | None:
 
 
 METER = Meter()
+
+
+def spend(provider, task: str, *, method: str = "complete", **kwargs):
+    """Make a provider call, having checked the ceiling and recorded what it cost.
+
+    Every call to a model in this repository goes through here. A second path that
+    called a provider directly would spend money the meter never saw, and the meter
+    would be worse than useless — it would be reassuring.
+
+    `task` is required rather than defaulted, because it is what the spend panel
+    breaks the bill down by: an optional label is a label that goes missing on the
+    call somebody adds next year, and "other: $4.12" answers nothing.
+
+    `method` selects between the two shapes a provider offers. `Completion` and `Turn`
+    carry the same cost fields, so an agent's eighth turn and a one-shot filter are
+    recorded identically — which is the point, because a loop is where the money
+    actually goes.
+
+    It lives beside the meter rather than beside the routes because the agent loop
+    needs it too, and `server/intel/` cannot import `server/routes/` without inverting
+    the layering. The route module re-exports it, so every existing caller is
+    unchanged.
+    """
+    METER.check_ceiling()
+    out = getattr(provider, method)(**kwargs)
+    METER.record(out.usage, out.cost_usd, task=task,
+                 provider=out.provider, model=out.model, ms=out.ms)
+    return out
