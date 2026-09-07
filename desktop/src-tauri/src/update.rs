@@ -317,6 +317,10 @@ fn free(app: &AppHandle) {
 /// it; the shell does not draw anything, because a native alert over a console that
 /// has its own way of naming states would be a second vocabulary.
 fn say(app: &AppHandle, state: &str, detail: &str) {
+    // On stdout as well as in the window, for the same reason the boot failure is:
+    // the window is for the person at the keyboard, and this is for whoever is
+    // later handed a log and asked what the update did.
+    println!("[shell] update {state}: {detail}");
     let Some(window) = app.get_webview_window("main") else {
         return;
     };

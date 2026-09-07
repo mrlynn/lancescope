@@ -543,7 +543,32 @@ if [ -n "${APPLE_ID:-}${NOTARY_PROFILE:-}" ]; then
     rm -f "$TARBALL" "$TARBALL.sig"
     # From the parent, so the archive holds `LanceScope.app/...` — the updater strips
     # exactly one leading component when it unpacks.
-    ( cd "$(dirname "$APP")" && tar -czf "$TARBALL" "$(basename "$APP")" )
+    #
+    # `--no-mac-metadata` is not decoration. Without it macOS tar stores every
+    # extended attribute as a second, hidden AppleDouble entry — 1,352 of them for
+    # this bundle, one per file, from `com.apple.provenance` alone. `tar -tzf` does
+    # not list them, because bsdtar re-absorbs its own; the updater reads the
+    # archive with Rust's `tar` crate, which sees them as ordinary files. The first
+    # is `._LanceScope.app`, whose path the plugin strips a component from and is
+    # left with nothing to unpack into. Every update this project shipped would
+    # have failed on arrival, and the tarball would have looked perfect from here.
+    ( cd "$(dirname "$APP")" \
+      && COPYFILE_DISABLE=1 tar --no-mac-metadata -czf "$TARBALL" "$(basename "$APP")" )
+    # Asked of the archive rather than trusted to the flag, because the flag is one
+    # `tar` implementation's spelling and this is the property that matters.
+    python3 - "$TARBALL" <<'CHECK'
+import sys, tarfile
+
+bad = [
+    m.name
+    for m in tarfile.open(sys.argv[1])
+    if m.name.startswith("._") or "/._" in m.name
+]
+if bad:
+    print(f"the tarball carries {len(bad)} AppleDouble entries, starting {bad[0]}.")
+    print("An updater unpacking this would refuse it. Do not publish it.")
+    sys.exit(1)
+CHECK
     npx --yes @tauri-apps/cli@2.11.4 signer sign "$TARBALL" >/dev/null \
       || { echo "the update artifact could not be signed"; exit 1; }
     [ -f "$TARBALL.sig" ] || { echo "signer produced no .sig beside the tarball"; exit 1; }
