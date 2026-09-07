@@ -109,10 +109,73 @@ def test_the_update_tarball_carries_no_apple_double_entries():
         "the update tarball is built without --no-mac-metadata, so it carries an "
         "AppleDouble entry per file and no installed copy can unpack it"
     )
-    assert "AppleDouble" in source, (
+    assert "check_release.py bundle" in source, (
         "nothing checks the archive that was written; the flag is a spelling, and "
         "the property is what a copy in the field depends on"
     )
+
+
+
+def test_the_signing_key_is_checked_against_the_committed_public_half():
+    """Signing proves the key works, not that it is the right key.
+
+    Those are different questions with the same happy path. A rotated key, a secret
+    pasted from the wrong vault, or a fork's key all sign perfectly, notarise
+    perfectly and publish a release that looks exactly right — and that every copy
+    in the field rejects, because the public half they carry will not verify it.
+    Nothing about that is visible from a build log.
+
+    So the preflight signs a throwaway file and then reads the key id back out of
+    the signature, before spending forty minutes on a build it would have to throw
+    away.
+    """
+    source = SIGN.read_text()
+    assert "check_release.py key" in source, (
+        "the preflight checks that the key signs, not that it is the key whose "
+        "public half is in tauri.conf.json"
+    )
+    probe = source.index('signer sign "$PROBE"')
+    assert source.index("check_release.py key") > probe, (
+        "the key id can only be read out of a signature, so it has to come after "
+        "the probe is signed"
+    )
+
+
+def test_a_tagged_release_cannot_ship_without_an_update_artifact():
+    """A tag is a promise to the copies already installed.
+
+    Without the signing key the build still produces an app and a disk image, which
+    is right for a fork. Publishing that as a release is not: it makes
+    `/releases/latest/download/latest.json` a 404, and every installed copy reports
+    a failed update until some later release fixes it. That is a state produced by a
+    missing secret and discovered by users.
+    """
+    workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text()
+    assert "refs/tags/" in workflow and "::error::" in workflow, (
+        "a tagged release with no latest.json should fail the build rather than "
+        "warn, because nobody reads the log of a green run"
+    )
+
+
+def test_the_checker_reads_a_key_id_the_way_minisign_writes_one():
+    """The eight bytes the whole check rests on.
+
+    A minisign public key and a minisign signature both begin with a two-byte
+    algorithm tag and then the same eight-byte key id. Comparing those says "one
+    keypair" without Ed25519, a dependency, or the file that was signed. The
+    algorithm tags are deliberately not compared — a public key reads `Ed` and a
+    signature over a prehashed file reads `ED`, and both are normal.
+    """
+    import sys
+
+    sys.path.insert(0, str(ROOT / "scripts"))
+    import check_release
+
+    key_id = check_release.pubkey_id()
+    assert len(key_id) == 8, "a minisign key id is eight bytes"
+    # The committed key, so a config change that swaps it is visible in a diff here
+    # as well as in tauri.conf.json.
+    assert key_id.hex() == "dc66296fcd08e71c"
 
 
 def test_the_signer_is_not_handed_the_wrong_kind_of_key():

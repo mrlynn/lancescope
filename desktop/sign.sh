@@ -95,6 +95,36 @@ echo "==> checking the identity is present"
 security find-identity -v -p codesigning | grep -F "$APPLE_SIGNING_IDENTITY" \
   || { echo "that identity is not in the keychain"; exit 1; }
 
+# And how long it has left.
+#
+# A Developer ID certificate is good for five years and then it is not, and the
+# day it lapses every release fails at signing with a message about an identity
+# that is right there in the keychain. Renewing means a new certificate, a new
+# .p12, and a new secret in CI — none of which is a thing to start discovering on
+# the day a release is due. A warning inside a month is enough notice to do it
+# calmly. Never fatal: an expired certificate fails loudly on its own, and a
+# reading this could not take is not a reason to refuse to build.
+EXPIRY=$(security find-certificate -c "$APPLE_SIGNING_IDENTITY" -p 2>/dev/null \
+  | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2 || true)
+if [ -n "$EXPIRY" ]; then
+  LEFT=$(python3 - "$EXPIRY" <<'DAYS' || true
+import datetime, sys
+
+when = datetime.datetime.strptime(sys.argv[1].strip(), "%b %d %H:%M:%S %Y %Z")
+print((when.replace(tzinfo=datetime.UTC) - datetime.datetime.now(datetime.UTC)).days)
+DAYS
+)
+  if [ -n "$LEFT" ] && [ "$LEFT" -lt 30 ] 2>/dev/null; then
+    echo
+    echo "    NOTE: that certificate expires in $LEFT days ($EXPIRY)."
+    echo "    Renew it in the developer portal, export a new .p12, and replace the"
+    echo "    APPLE_CERTIFICATE secret. After it lapses, nothing signs."
+    echo
+  else
+    echo "    valid for $LEFT more days"
+  fi
+fi
+
 # Notarisation credentials, checked before anything slow runs.
 #
 # Tauri notarises during the bundle when these are set, which means a wrong password
@@ -232,6 +262,21 @@ EOF
     echo "  - TAURI_SIGNING_PRIVATE_KEY holds a path rather than the key itself;"
     echo "    the variable for a path is TAURI_SIGNING_PRIVATE_KEY_PATH."
     echo "  - the secret picked up a stray newline on its way into CI."
+    echo
+    echo "Nothing was built."
+    rm -rf "$(dirname "$PROBE")"
+    exit 1
+  fi
+
+  # And that it is the *right* key, which signing proves nothing about.
+  #
+  # The check above answers "can this key sign". It cannot answer "is this the key
+  # whose public half every installed copy carries", and those are different
+  # questions with the same happy path. A rotated key, a secret pasted from the
+  # wrong vault, or a fork's key all build, sign, notarise and publish a release
+  # that looks exactly right and that no copy in the field will accept — a failure
+  # nobody sees until a user reports an update that will not install.
+  if ! python3 scripts/check_release.py key "$PROBE.sig"; then
     echo
     echo "Nothing was built."
     rm -rf "$(dirname "$PROBE")"
@@ -554,21 +599,6 @@ if [ -n "${APPLE_ID:-}${NOTARY_PROFILE:-}" ]; then
     # have failed on arrival, and the tarball would have looked perfect from here.
     ( cd "$(dirname "$APP")" \
       && COPYFILE_DISABLE=1 tar --no-mac-metadata -czf "$TARBALL" "$(basename "$APP")" )
-    # Asked of the archive rather than trusted to the flag, because the flag is one
-    # `tar` implementation's spelling and this is the property that matters.
-    python3 - "$TARBALL" <<'CHECK'
-import sys, tarfile
-
-bad = [
-    m.name
-    for m in tarfile.open(sys.argv[1])
-    if m.name.startswith("._") or "/._" in m.name
-]
-if bad:
-    print(f"the tarball carries {len(bad)} AppleDouble entries, starting {bad[0]}.")
-    print("An updater unpacking this would refuse it. Do not publish it.")
-    sys.exit(1)
-CHECK
     npx --yes @tauri-apps/cli@2.11.4 signer sign "$TARBALL" >/dev/null \
       || { echo "the update artifact could not be signed"; exit 1; }
     [ -f "$TARBALL.sig" ] || { echo "signer produced no .sig beside the tarball"; exit 1; }
@@ -588,8 +618,8 @@ sig = pathlib.Path(sys.argv[1]).read_text().strip()
 version = json.loads(
     pathlib.Path("desktop/src-tauri/tauri.conf.json").read_text()
 )["version"]
-# The download the release publishes. `latest/download` rather than the tag, so a
-# copy installed today still resolves after the next release moves the pointer.
+# The tag rather than `latest/download`, so a copy that reads this manifest today
+# still resolves it after the next release moves what `latest` means.
 url = ("https://github.com/mrlynn/lancescope/releases/download/"
        f"v{version}/LanceScope.app.tar.gz")
 pathlib.Path(sys.argv[2]).write_text(json.dumps({
@@ -598,7 +628,15 @@ pathlib.Path(sys.argv[2]).write_text(json.dumps({
     "platforms": {"darwin-aarch64": {"signature": sig, "url": url}},
 }, indent=2) + "\n")
 EOF
-    echo "    latest.json for v$(python3 -c "import json,pathlib;print(json.loads(pathlib.Path('desktop/src-tauri/tauri.conf.json').read_text())['version'])")"
+
+    # Everything that has to be true of an update, asked of the files themselves
+    # rather than of the commands that wrote them: no AppleDouble entries, a
+    # signature from the committed keypair, and a manifest naming this version at a
+    # URL shaped like the release that will carry it. The same script runs after
+    # publishing — `make release-check` — against what the world can see.
+    echo "==> checking the update artifact"
+    python3 scripts/check_release.py bundle \
+      "$PWD/desktop/src-tauri/target/release/bundle/macos" || exit 1
   fi
 
   # The disk image was assembled around an app with no ticket, so it has to be made
