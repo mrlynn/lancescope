@@ -178,6 +178,36 @@ Without it the build is exactly what it was: an app and a disk image, signed and
 notarised. `sign.sh` says which of the two it is doing rather than quietly producing
 less.
 
+### What an installed copy does with it
+
+The shell checks once a day on launch, and whenever somebody picks *Check for
+Updates…*. When there is something newer it says so in the console's own toast, and
+the toast has a button: **Install and restart**. Pressing it downloads the tarball,
+verifies the minisign signature against the `pubkey` above, renames
+`LanceScope.app` aside, unpacks the new one in its place, kills the server this
+process started, and execs the new binary. The window comes back on the console it
+left.
+
+It will not ask for a password to do that. The plugin would — when the rename is
+refused it escalates with `do shell script … with administrator privileges` — so
+`desktop/src-tauri/src/update.rs` tests the directory holding the app by writing to
+it *before* anything is downloaded. A copy that cannot replace itself says so and
+offers the release page, which is where somebody who wants it badly enough can go.
+That is the ordinary state for an app run from a disk image, or installed into a
+folder owned by an administrator who is not the person at the keyboard.
+
+The button reaches the shell by navigating to `/__shell/install-update`, which the
+window's `on_navigation` handler recognises and discards. That is not a shortcut
+around IPC; it is the only channel there is. The console is loaded from
+`http://127.0.0.1:<port>`, a *remote* origin as far as Tauri is concerned, and the
+alternative is a capability opening commands to the whole page in order to carry one
+verb. The server never sees the path — it is swallowed before the request is made,
+and in a browser nothing ever asks for it.
+
+One operational catch, unchanged by any of this: `release.yml` creates the GitHub
+release as a **draft**, and `/releases/latest/download/latest.json` does not resolve
+until a human publishes it. Nothing in the field updates before that, deliberately.
+
 ### Why the tarball is built where it is
 
 `tauri.conf.json` does **not** set `createUpdaterArtifacts`, and should not. That

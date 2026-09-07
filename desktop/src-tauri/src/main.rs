@@ -345,14 +345,31 @@ fn boot(handle: tauri::AppHandle) {
                 // eventually granted a command: the pattern has to be a wildcard
                 // because the port is the kernel's, so the guarantee has to come
                 // from here instead.
-                .on_navigation(move |url| {
-                    let ours = url.scheme() == "http"
-                        && url.host_str() == Some("127.0.0.1")
-                        && url.port() == Some(port);
-                    if !ours {
-                        let _ = tauri_plugin_opener::open_url(url.as_str(), None::<&str>);
+                .on_navigation({
+                    // The other direction, too. A page on a remote origin — which
+                    // `http://127.0.0.1:<port>` is, as far as Tauri is concerned —
+                    // has no IPC without a capability granting it, and granting one
+                    // would open every command to the whole console rather than the
+                    // single thing it needs to say. So it says that by navigating,
+                    // and this swallows the navigation: `/__shell/…` is a path the
+                    // server does not serve and nothing else links to, the window
+                    // never leaves the console, and the ACL stays empty.
+                    let shell = handle.clone();
+                    move |url| {
+                        let ours = url.scheme() == "http"
+                            && url.host_str() == Some("127.0.0.1")
+                            && url.port() == Some(port);
+                        if ours && url.path().starts_with("/__shell/") {
+                            if url.path() == "/__shell/install-update" {
+                                update::install(shell.clone());
+                            }
+                            return false;
+                        }
+                        if !ours {
+                            let _ = tauri_plugin_opener::open_url(url.as_str(), None::<&str>);
+                        }
+                        ours
                     }
-                    ours
                 })
                 .build();
 
@@ -443,6 +460,7 @@ fn main() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(Server(Mutex::new(None)))
         .manage(Port(Mutex::new(None)))
+        .manage(update::Pending::default())
         .setup(|app| {
             let handle = app.handle().clone();
 
