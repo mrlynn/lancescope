@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Set the version, in the three files that each hold their own copy of it.
+"""Set the version, in every file that holds its own copy of it.
 
-`pyproject.toml`, `desktop/src-tauri/Cargo.toml` and
-`desktop/src-tauri/tauri.conf.json` all carry the number as a literal. Cargo will
-not read it from anywhere else, so there is no single source to derive the other
-two from without generating and committing files, which is worse than editing
-three lines. This edits the three lines and prints what it did;
-tests/test_version.py fails the build if they ever disagree.
+`pyproject.toml`, `desktop/src-tauri/Cargo.toml`, `tauri.conf.json`, `Cargo.lock`
+and `server/__init__.py` all carry the number as a literal. Cargo will not read it
+from anywhere else and a PyInstaller bundle carries neither `pyproject.toml` nor
+its own package metadata, so there is no single source to derive the rest from
+without generating and committing files, which is worse than editing five lines.
+This edits the five lines and prints what it did; tests/test_version.py fails the
+build if they ever disagree.
 
     make version SET=0.2.0        set all three
     make version                  show what each currently claims
@@ -26,6 +27,7 @@ ROOT = Path(__file__).resolve().parent.parent
 # (path, regex with one group around the version, human name)
 TOML_VERSION = re.compile(r'^(version\s*=\s*")([^"]+)(")', re.M)
 JSON_VERSION = re.compile(r'^(\s*"version"\s*:\s*")([^"]+)(")', re.M)
+PY_VERSION = re.compile(r'^(__version__\s*=\s*")([^"]+)(")', re.M)
 
 # `Cargo.lock` pins the crate's own version alongside its dependencies', so a bump
 # that touches only `Cargo.toml` leaves the lock claiming the old one until the next
@@ -41,6 +43,10 @@ TARGETS = [
     (ROOT / "desktop/src-tauri/Cargo.toml", TOML_VERSION),
     (ROOT / "desktop/src-tauri/tauri.conf.json", JSON_VERSION),
     (ROOT / "desktop/src-tauri/Cargo.lock", LOCK_VERSION),
+    # The server reports its own version to the console, which draws it in the
+    # rail. Nothing can derive this one either: `pyproject.toml` is not inside the
+    # PyInstaller bundle and neither is the package metadata.
+    (ROOT / "server/__init__.py", PY_VERSION),
 ]
 
 SEMVER = re.compile(r"^\d+\.\d+\.\d+([-+].+)?$")
@@ -66,7 +72,7 @@ def check(expected: str) -> int:
             print(f"  {v}  {path.relative_to(ROOT)}  (expected {expected})")
         print(f"\nthe tag says {expected}; the repo does not agree")
         return 1
-    print(f"all three files say {expected}")
+    print(f"every file says {expected}")
     return 0
 
 

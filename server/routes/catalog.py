@@ -22,8 +22,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from server import __version__, compare, kiosk, query, sources
 from server import bundle as server_bundle
-from server import compare, kiosk, query, sources
 from server import estimate as server_estimate
 from server.catalog import (
     Catalog,
@@ -105,6 +105,12 @@ async def runtime_report() -> JSONResponse:
     # indistinguishable from one that was never installed.
     return JSONResponse({
         **lance_runtime().as_dict(),
+        # This console's own version, which is a different kind of fact from the
+        # rest of the report — those describe the reader underneath, this one
+        # describes the thing reading. It rides here for the same reason `kiosk`
+        # does: the console already asks this route, and a second request to learn
+        # one string would be silly.
+        "app": __version__,
         "kiosk": kiosk.enabled(),
         "sources": [r.as_dict() for r in sources.loaded()],
     })

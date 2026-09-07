@@ -26,6 +26,7 @@ import DbSwitcher from "@/app/components/nav/DbSwitcher";
 import Inspector from "@/app/components/console/shell/Inspector";
 import Palette, { Shortcuts } from "@/app/components/console/shell/Palette";
 import UpdateNotice from "@/app/components/console/shell/UpdateNotice";
+import VersionBadge from "@/app/components/console/VersionBadge";
 import { listen, useShortcut } from "@/app/lib/keys";
 import TableRail from "@/app/components/console/TableRail";
 import { listTables } from "@/app/lib/catalog";
@@ -225,18 +226,25 @@ export default function ConsoleShell({ children }: { children: ReactNode }) {
 
       <div className="console-body" data-pane={narrow}>
         <nav className="console-pane console-rail" aria-label="Tables">
-          <TableRail
-            tables={w.list?.tables ?? null}
-            picked={table}
-            query={railQuery}
-            onQuery={setRailQuery}
-            filterRef={railFilter}
-            onPick={pick}
-            pins={pins}
-            onTogglePin={togglePin}
-            recents={recents}
-            listBytes={w.list?.read_bytes ?? null}
-          />
+          {/* A column the height of the pane, so the version sits on the floor of
+              the rail when the table list is short and after it when the list is
+              long enough to scroll. `min-h-full` rather than a fixed height: the
+              pane is the scroll container and this has to be free to exceed it. */}
+          <div className="flex flex-col min-h-full">
+            <TableRail
+              tables={w.list?.tables ?? null}
+              picked={table}
+              query={railQuery}
+              onQuery={setRailQuery}
+              filterRef={railFilter}
+              onPick={pick}
+              pins={pins}
+              onTogglePin={togglePin}
+              recents={recents}
+              listBytes={w.list?.read_bytes ?? null}
+            />
+            <VersionBadge />
+          </div>
         </nav>
         <section className="console-pane console-centre">{children}</section>
         <Inspector w={w} table={table} onGoToPanel={onGoToPanel} />
