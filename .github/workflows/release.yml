@@ -141,6 +141,10 @@ jobs:
           MAC="desktop/src-tauri/target/release/bundle/macos"
           if [ -f "$MAC/latest.json" ]; then
             shasum -a 256 "$MAC/LanceScope.app.tar.gz" >> "$RUNNER_TEMP/SHA256SUMS.txt"
+            # latest.json too. It is 650 bytes and it is the file that decides what
+            # every installed copy does next; leaving it out of the manifest made
+            # the one artifact nobody could check the one that matters most.
+            shasum -a 256 "$MAC/latest.json" >> "$RUNNER_TEMP/SHA256SUMS.txt"
             {
               echo "update<<EOF"
               echo "$MAC/LanceScope.app.tar.gz"
@@ -149,6 +153,17 @@ jobs:
               echo "EOF"
             } >> "$GITHUB_OUTPUT"
             echo "update artifact: $(du -h "$MAC/LanceScope.app.tar.gz" | cut -f1)"
+          elif [ "${{ startsWith(github.ref, 'refs/tags/') }}" = "true" ]; then
+            # A warning here used to be enough, and it is not. Publishing a release
+            # with no latest.json makes /releases/latest/download/latest.json a 404,
+            # and every copy in the field reports a failed update until the next
+            # release fixes it — a state produced by a missing secret and noticed by
+            # users. A tag is a promise to those copies, so this is fatal on one and
+            # a note on anything else, which keeps a fork's release working.
+            echo "::error::TAURI_SIGNING_PRIVATE_KEY produced no update artifact."
+            echo "A tagged release without latest.json breaks updates for every"
+            echo "installed copy. Set the secret, or build this from a branch."
+            exit 1
           else
             echo "no update artifact (no signing key); the DMG is the only download"
             echo "update=" >> "$GITHUB_OUTPUT"

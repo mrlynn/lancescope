@@ -1,5 +1,5 @@
 .PHONY: local
-.PHONY: help setup download prepare prepare-force embed build ingest scan doctor open cost findings run-config verify test check docs ui sidecar app api mcp web demo dev tidy bench clean roll publish-roll
+.PHONY: help setup download prepare prepare-force embed build ingest scan doctor open cost findings run-config verify test check docs ui sidecar app api mcp web demo dev tidy bench clean roll publish-roll release-check
 
 PY := .venv/bin/python
 UVICORN := .venv/bin/uvicorn
@@ -211,6 +211,19 @@ version:
 	@$(PY) scripts/bump_version.py $(SET)
 
 # --- desktop ------------------------------------------------------------------
+
+# What an installed copy sees, asked the way an installed copy asks it.
+#
+# Run this after promoting a draft, which is the moment /releases/latest moves and
+# the only moment any of it becomes true. It fetches the endpoint compiled into
+# every shipped binary, checks the version is the one intended, checks the
+# signature came from the keypair whose public half is committed, and checks the
+# tarball it names actually resolves.
+#
+#   make release-check              expect this checkout's version
+#   make release-check V=0.5.1      expect a specific one
+release-check:
+	@$(PY) scripts/check_release.py live $(if $(V),--expect $(V),)
 
 # The picture behind the icons in the disk image. Generated from the palette in
 # web/app/globals.css, so run this after changing a brand colour.

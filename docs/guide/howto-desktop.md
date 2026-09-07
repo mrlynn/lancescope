@@ -204,9 +204,49 @@ alternative is a capability opening commands to the whole page in order to carry
 verb. The server never sees the path — it is swallowed before the request is made,
 and in a browser nothing ever asks for it.
 
-One operational catch, unchanged by any of this: `release.yml` creates the GitHub
-release as a **draft**, and `/releases/latest/download/latest.json` does not resolve
-until a human publishes it. Nothing in the field updates before that, deliberately.
+### Publishing, and the two things it is easy to get wrong
+
+`release.yml` creates the GitHub release as a **draft**, and
+`/releases/latest/download/latest.json` does not resolve until a human publishes it.
+Nothing in the field updates before that, deliberately: a draft is never "latest",
+so a bad build cannot become the download button before somebody has opened the disk
+image once.
+
+Promoting the draft is the moment all of it becomes true, so check it there:
+
+```bash
+make release-check
+```
+
+That fetches the endpoint compiled into every shipped binary, checks the version is
+the one intended, checks the signature came from the keypair whose public half is
+committed, and checks the tarball it names resolves. It is the same script
+`sign.sh` runs over the files before they are uploaded, pointed at what the world
+can see instead.
+
+**There is no rollback.** The updater only moves forward: it compares versions and
+installs when the offer is newer. If 0.5.2 turns out to be bad, re-publishing 0.5.1
+as latest does nothing at all for the copies that already took 0.5.2 — they will
+read the manifest, see an older version, and report themselves up to date, forever.
+The only recovery is 0.5.3. This is worth knowing before an incident, because the
+instinct in one is to revert the release, and here that instinct is wrong: reverting
+protects the people who have not updated yet and abandons the ones who have.
+
+**"Latest" means most recently published, not highest version.** GitHub picks the
+newest non-draft, non-prerelease by publication date. Promoting an old draft after a
+newer release makes it `/releases/latest`, which moves the website's download button
+back a version. The updater itself is unharmed — it will not go backwards — but the
+download page will hand new users the older disk image until something else is
+published. Publish drafts in the order they were built.
+
+### What gets built, and for what
+
+`darwin-aarch64` and nothing else. The bundle targets are `app` and `dmg`, the
+manifest names one platform, and `lancescope.mlynn.dev/download` hands that disk
+image to everybody who asks — including somebody on an Intel Mac, for whom it will
+not open. Adding `x86_64` means a second runner, a second sidecar, a universal
+binary or a second download, and a manifest with two platforms in it. Until that
+exists, the download page is the place to say so; it lives outside this repository.
 
 ### Why the tarball is built where it is
 
