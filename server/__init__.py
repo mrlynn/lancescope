@@ -10,4 +10,4 @@ server that wants to report its own version has to carry it as a literal.
 fails the build if they ever disagree, which is the same bargain the others make.
 """
 
-__version__ = "0.5.2"
+__version__ = "0.5.3"
