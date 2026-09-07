@@ -330,6 +330,10 @@ export type RuntimeReport = {
   versions: { lance: string; pyarrow: string; python: string };
   features: RuntimeFeature[];
   summary: string | null;
+  /** This console's own version, as against the reader versions above. The rail
+   *  draws it; the server is the only thing that knows it, since a packaged
+   *  build carries neither pyproject.toml nor its own package metadata. */
+  app: string;
   /** Whether this process is the public demo rather than someone's own console.
    *  Carried here because every screen already has a reason to ask what the
    *  runtime is, and a second request to learn one boolean would be silly. */
