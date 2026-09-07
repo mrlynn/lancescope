@@ -77,10 +77,41 @@ def test_the_update_artifact_is_built_after_the_staple():
         "createUpdaterArtifacts would write the tarball before the app is signed"
     )
     staple = source.index('xcrun stapler staple "$APP"')
-    tarball = source.index('tar -czf "$TARBALL"')
+    tarball = source.index('-czf "$TARBALL"')
     assert staple < tarball, (
         "the update tarball is built before the app is stapled, so it would carry "
         "an app Apple has not seen"
+    )
+
+
+
+def test_the_update_tarball_carries_no_apple_double_entries():
+    """The bug that would have broken every update this project shipped.
+
+    macOS `tar` stores each extended attribute as a second, hidden AppleDouble
+    entry beside the file it belongs to. `com.apple.provenance` is on every file in
+    a built bundle, so a plain `tar -czf` of the app wrote 1,352 of them. `tar -tzf`
+    does not list them — bsdtar re-absorbs its own — so the archive looked perfect
+    from here and failed on arrival:
+
+        failed to unpack `._LanceScope.app` into `…/tauri_updated_app…/`
+
+    The updater reads with Rust's `tar` crate, which sees ordinary files. It strips
+    one path component from each entry to unwrap the bundle directory, and that
+    leaves the top-level `._LanceScope.app` with no path at all. The nested ones are
+    no better: unpacked, they land in the installed bundle and break its signature.
+
+    Two assertions, because the flag alone is one `tar` implementation's spelling.
+    The script must also ask the archive it actually wrote.
+    """
+    source = SIGN.read_text()
+    assert "--no-mac-metadata" in source, (
+        "the update tarball is built without --no-mac-metadata, so it carries an "
+        "AppleDouble entry per file and no installed copy can unpack it"
+    )
+    assert "AppleDouble" in source, (
+        "nothing checks the archive that was written; the flag is a spelling, and "
+        "the property is what a copy in the field depends on"
     )
 
 
