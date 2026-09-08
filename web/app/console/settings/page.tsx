@@ -18,6 +18,7 @@ import Icon, { type IconName } from "@/app/components/Icon";
 import AppBar from "@/app/components/nav/AppBar";
 import SampleDatasets from "@/app/components/samples/SampleDatasets";
 import ModelPicker from "@/app/components/settings/ModelPicker";
+import Agents from "@/app/components/settings/Agents";
 import Spend from "@/app/components/settings/Spend";
 import { Caveat, Copy, Empty, Eyebrow, fmtWhen } from "@/app/components/console/atoms";
 import { dbParent } from "@/app/lib/dbname";
@@ -31,7 +32,7 @@ import {
 
 /* ---------------------------------------------------------------------- tabs */
 
-/** The three subjects, each with the one line that says why you would open it. */
+/** The four subjects, each with the one line that says why you would open it. */
 const TABS = [
   {
     id: "connections",
@@ -44,6 +45,12 @@ const TABS = [
     icon: "spark",
     label: "intelligence",
     blurb: "The optional language layer — provider, models, key, and what it costs.",
+  },
+  {
+    id: "agents",
+    icon: "agent",
+    label: "agents",
+    blurb: "Connect an agent host to this console's read surface — the command, and where to put it.",
   },
   {
     id: "provenance",
@@ -192,6 +199,11 @@ export default function SettingsPage() {
                 not mounted there, and there is no key to have spent anything. */}
             {!kiosk && <Spend ceiling={state?.intelligence.spend_ceiling_usd ?? null} />}
           </div>
+        </div>
+
+        <div hidden={tab !== "agents"} role="tabpanel"
+             id="settings-panel-agents" aria-labelledby="settings-tab-agents">
+          <Agents />
         </div>
 
         {/* Two panels that answer the same question from opposite ends — which

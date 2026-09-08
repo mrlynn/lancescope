@@ -533,16 +533,33 @@ def build_scanner(handle: Handle, spec: QuerySpec, projected: list[str],
     return ds.scanner(**kwargs)
 
 
-def explain(handle: Handle, spec: QuerySpec) -> PlanReading:
-    """The plan, without running anything. Free, and often the whole answer."""
+def explain_with_projection(handle: Handle,
+                            spec: QuerySpec) -> tuple[PlanReading, list[str], list[dict]]:
+    """The plan, and the projection it was planned against.
+
+    Split out from `explain` because the projection is worth more than the plan to
+    two callers. `reproduction` needs it to write a script that reads the same
+    columns the query did, and a caller wants to know which heavy columns were left
+    out — and both of those used to be reachable only by *running* the query, which
+    is the one thing this path exists to avoid.
+
+    `explain` stays as the plain answer, so nothing that only wants a plan has to
+    unpack three values to get one.
+    """
     spec = spec.normalised()
-    projected, _ = _projection(handle.ds, spec.columns, set(spec.expand or []))
+    projected, omitted = _projection(handle.ds, spec.columns, set(spec.expand or []))
     try:
-        return read_plan(build_scanner(handle, spec, projected).explain_plan(verbose=False))
+        plan = read_plan(build_scanner(handle, spec, projected).explain_plan(verbose=False))
     except QueryError:
         raise
     except Exception as e:                                   # noqa: BLE001
         raise QueryError(_first_line(e)) from None
+    return plan, projected, omitted
+
+
+def explain(handle: Handle, spec: QuerySpec) -> PlanReading:
+    """The plan, without running anything. Free, and often the whole answer."""
+    return explain_with_projection(handle, spec)[0]
 
 
 def unused_index_warning(handle: Handle, spec: QuerySpec, plan: PlanReading) -> str | None:

@@ -531,8 +531,8 @@ class OllamaProvider:
 
         Worth being blunt about the failure mode this has and the hosted path does
         not: `format` enforces a grammar, `tools` does not. A small model handed
-        eleven tools will call one that does not exist, or call the right one with
-        the wrong argument name, and nothing at this layer can prevent it. The loop
+        a dozen-odd tools will call one that does not exist, or call the right one
+        with the wrong argument name, and nothing at this layer can prevent it. The loop
         above answers an invented tool with a tool result saying so, which is the only
         honest thing to do — and `registry.Model.tools` is how the console avoids
         offering the loop to a model that cannot hold one in the first place.

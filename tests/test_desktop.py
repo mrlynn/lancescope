@@ -249,3 +249,40 @@ def test_the_frozen_app_is_told_where_its_certificates_are():
 
     # And the bundle has to be a dependency rather than a passenger.
     assert '"certifi"' in (ROOT / "pyproject.toml").read_text()
+
+
+# ------------------------------------------------------------------ the mcp entry
+
+SPEC = ROOT / "packaging" / "lancescope.spec"
+ENTRY = ROOT / "packaging" / "console_server.py"
+
+
+def test_the_frozen_binary_can_serve_mcp():
+    """`lancescope-server mcp`, spelled the same way as `lancescope mcp`.
+
+    Without this the packaged app is the one build an agent host cannot reach, which
+    is backwards — it is the build most of its users have.
+    """
+    text = ENTRY.read_text()
+    assert 'sys.argv[1] == "mcp"' in text
+
+
+def test_the_mcp_dispatch_happens_before_the_console_is_imported():
+    """`server.standalone` prints, and importing `server.main` prints under
+    LANCESCOPE_STAGES. Stdout belongs to the protocol, so the order is the guarantee."""
+    text = ENTRY.read_text()
+    dispatch = text.index('sys.argv[1] == "mcp"')
+    console = text.index("from server.standalone import main")
+    assert dispatch < console, (
+        "the console import moved above the mcp dispatch; a frozen MCP server would "
+        "now print before its first frame")
+
+
+def test_the_spec_carries_what_the_mcp_server_needs():
+    """The MCP SDK picks its anyio backend by string, which PyInstaller's import
+    graph cannot see. Missing, the frozen server dies before its first frame and the
+    agent host reports only 'disconnected'."""
+    text = SPEC.read_text()
+    for name in ("mcp", "server.mcp_server", "anyio._backends._asyncio"):
+        assert f'"{name}"' in text, f"{name} is not in hiddenimports"
+

@@ -13,7 +13,7 @@ repository is built on: no tool here can materialise a blob column, because the
 route it calls cannot.
 
 The tools themselves live in `server/intel/toolset.py`, because the console's own
-agent loop offers the same eleven and the argument above applies a second time: two
+agent loop offers the same set and the argument above applies a second time: two
 declarations of `read_rows` would be two chances to get it wrong, and the wrong one
 would be whichever caller nobody was testing. This module is the stdio adapter — it
 decides how they are announced, not what they are.
@@ -35,11 +35,14 @@ from server.intel import toolset
 # had to know the tools had moved would be a test measuring the refactor rather than
 # the guarantee.
 from server.intel.toolset import (  # noqa: F401
+    compare_versions,
     data_scan_estimate,
     describe_table,
     estimate_scan,
+    explain_query,
     list_tables,
     propose_operation,
+    query_capabilities,
     read_rows,
     table_bundle,
     table_findings,
@@ -47,6 +50,7 @@ from server.intel.toolset import (  # noqa: F401
     table_indices,
     table_run_config,
     table_versions,
+    validate_filter,
 )
 
 INSTRUCTIONS = """LanceScope exposes a LanceDB database read-only.
@@ -92,6 +96,25 @@ It returns the same numbers as one document that says what collecting it cost, a
 redacts the database root, because a path carries a username and a bucket carries an
 employer.
 
+Asked why a query is slow, call explain_query. It returns the plan without running
+anything: the access path Lance chose, what got pushed down, the heavy columns it would
+not read, and — the answer people are usually looking for — whether an index exists that
+this query went around, which is why a search somebody indexed got no faster. Call
+query_capabilities first if unsure a mode is available on this table, and validate_filter
+first if the filter came out of a conversation rather than off the schema; a predicate
+that parses and matches nothing is the failure people actually hit.
+
+Nothing here runs a query, and there is no tool that does. explain_query returns a
+runnable Python reproduction of the same query, generated from the spec it planned —
+give the person that, and let them run it in their own process against their own read
+budget. Running a search on somebody's database is a button in their console, which is
+where a decision to spend their bytes belongs.
+
+Asked what changed between two versions of a table, call compare_versions with the
+numbers from table_versions. It reports the shape — columns, indices, rows, fragments,
+bytes — and deliberately not what a query reads on either side, because that would mean
+running one.
+
 Asked to *set up* a run rather than judge one, call table_run_config. It returns the
 block to keep beside the training code — uri, version, columns, what they weigh, the
 worker ceiling — so that none of it has to be retyped from a screen, and so the run
@@ -116,7 +139,7 @@ _missing = headless.missing
 catalog = headless.catalog
 NOT_CONFIGURED = headless.NOT_CONFIGURED
 
-# Registered in a loop rather than eleven decorators. The SDK reads the argument
+# Registered in a loop rather than one decorator per tool. The SDK reads the argument
 # schema off each function's signature, which is the same source `toolset.parameters`
 # is checked against, so the two announcements of a tool cannot disagree without a
 # test failing.

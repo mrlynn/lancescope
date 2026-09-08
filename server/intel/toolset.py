@@ -3,8 +3,8 @@
 Two front ends now hand these tools to a model: `server/mcp_server.py`, which gives
 them to somebody else's agent over stdio, and `server/intel/agent.py`, which runs a
 loop over them inside the console. Before this module they would have been declared
-twice — the same eleven names, the same eleven descriptions, and two chances to get
-`read_rows` wrong.
+twice — the same names, the same descriptions, and two chances to get `read_rows`
+wrong.
 
 That is the failure `mcp_server.py` was built to avoid one level down. Its rule is
 that every tool *is* the HTTP route called in process, never a reimplementation,
@@ -23,8 +23,19 @@ argument means an agent cannot spend a turn discovering that. `table_bundle` has
 `paths`, because the redaction default is the safe one and an agent has no way to know
 whether its output is about to be pasted somewhere public. There is no tool that runs
 a data scan; `data_scan_estimate` prices one and stops, because an agent should not be
-able to spend megabytes of somebody's read budget on a turn. Each of those omissions
-is a decision, and moving the tools here moves the decisions with them.
+able to spend megabytes of somebody's read budget on a turn. There is no tool that runs
+a *query* either, for the same reason and by the same shape: `explain_query` returns the
+plan and the script, and executing it is a button in the console.
+
+And there is no completions tool. The facet probe behind that route reads distinct
+column values, and `server/routes/intel.py` already decided that row values go to a
+hosted model only on an explicit request — an MCP caller is a hosted model by
+construction, and there is nobody in the loop to ask. `validate_filter` answers the
+question completions was for, in the safe direction: it says whether the value a caller
+guessed exists, without handing over the ones it did not guess.
+
+Each of those omissions is a decision, and moving the tools here moves the decisions
+with them.
 
 Every tool answers with the route's own JSON, which carries `read_bytes` and
 `read_iops`. That is what lets a loop above this module report what an answer cost to
@@ -36,7 +47,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
-from server import headless
+from server import headless, query
 from server.routes import catalog as routes
 
 _body = headless.body
@@ -242,6 +253,77 @@ async def read_rows(name: str, filter: str | None = None, limit: int = 25,
         return {"error": str(getattr(e, "detail", e))}
 
 
+async def query_capabilities(name: str) -> dict:
+    if catalog() is None:
+        return NOT_CONFIGURED
+    try:
+        return await _body(await routes.query_capabilities(name))
+    except Exception as e:                                   # noqa: BLE001
+        return _missing(name, e)
+
+
+async def validate_filter(name: str, filter: str) -> dict:
+    if catalog() is None:
+        return NOT_CONFIGURED
+    try:
+        return await _body(await routes.query_validate(
+            name, routes.FilterBody(filter=filter)))
+    except Exception as e:                                   # noqa: BLE001
+        return _missing(name, e)
+
+
+async def explain_query(name: str, mode: str = "scan", filter: str | None = None,
+                        columns: str | None = None, limit: int = 25, offset: int = 0,
+                        text: str | None = None, vector_column: str | None = None,
+                        like_row: int | None = None, k: int = 10,
+                        metric: str | None = None, prefilter: bool = True) -> dict:
+    # Three of `QueryBody`'s fields are deliberately not offered.
+    #
+    # No `expand`, for the reason `read_rows` gives: the route refuses to materialise
+    # a blob column, and not offering the argument means an agent cannot spend a turn
+    # discovering that.
+    #
+    # No `vector`. A literal list of floats is not a scalar argument, and there is no
+    # embedding model on this surface — a vector a model invented would search for
+    # nothing in particular at a thousand tokens a call. `like_row` searches with a
+    # vector the table already holds, which is the honest form of the same question.
+    #
+    # No `timeout_s`: nothing runs, so there is nothing to wait for.
+    if catalog() is None:
+        return NOT_CONFIGURED
+    # Checked here rather than left to `QuerySpec.normalised`, which silently coerces
+    # an unrecognised mode to "scan". A caller that asked for something else would get
+    # a scan plan back with nothing anywhere saying its mode had been discarded, and
+    # would believe it. The enum in `parameters` is for models that read schemas; this
+    # is for the ones that do not.
+    if mode not in query.MODES:
+        return {"error": f"no query mode named {mode!r}",
+                "detail": f"one of {', '.join(query.MODES)} — call query_capabilities "
+                          f"for which of them this table can answer."}
+    try:
+        return await _body(await routes.query_explain(name, routes.QueryBody(
+            mode=mode, filter=filter, limit=limit, offset=offset, text=text,
+            columns=[c.strip() for c in columns.split(",") if c.strip()]
+            if columns else None,
+            vector_column=vector_column, like_row=like_row, k=k, metric=metric,
+            prefilter=prefilter, expand=None)))
+    except Exception as e:                                   # noqa: BLE001
+        # Not `_missing`: this route answers 400 for a filter that will not parse or a
+        # column that is not there, and reporting either of those as a missing table
+        # would send a caller to retry the name forever.
+        return {"error": str(getattr(e, "detail", e))}
+
+
+async def compare_versions(name: str, a: int, b: int) -> dict:
+    if catalog() is None:
+        return NOT_CONFIGURED
+    try:
+        return await _body(await routes.compare_versions(name, a=a, b=b))
+    except Exception as e:                                   # noqa: BLE001
+        # As above: an out-of-range version is a 400, and it is not a missing table.
+        return {"error": str(getattr(e, "detail", e))}
+
+
 # ---------------------------------------------------------------------- the tool set
 
 TOOLS: tuple[Tool, ...] = (
@@ -408,6 +490,114 @@ TOOLS: tuple[Tool, ...] = (
                        "description": "The column, for an index or a re-embedding."},
         }),
         call=propose_operation,
+    ),
+    Tool(
+        name="query_capabilities",
+        description="What this table can be asked, and — more usefully — why not, "
+                    "where it cannot. Four modes: a scan any table answers, full-text "
+                    "search that needs an inverted index, vector search that needs a "
+                    "vector column, and hybrid that needs both. Each comes back with a "
+                    "reason rather than a bare boolean, because a full-text search "
+                    "offered on a table with no inverted index returns nothing, and "
+                    "nothing is indistinguishable from a search that found nothing. "
+                    "Read this before proposing a query, and quote the reason where a "
+                    "mode is unavailable — 'there is no inverted index on title' is the "
+                    "answer somebody needs, not a retried search. Vector search "
+                    "reported as available with no ANN index is still available: it "
+                    "reads every row, and the reason says so.",
+        parameters=_table_arg(),
+        call=query_capabilities,
+    ),
+    Tool(
+        name="validate_filter",
+        description="Does this predicate parse, and how many rows does it match. Two "
+                    "answers in one metadata read: 'valid' says Lance understood the "
+                    "syntax, and 'matched_rows' says whether it means what was "
+                    "intended. The second is the one people get wrong — "
+                    "track = 'Go devroom' on a table whose value is 'Go' is a "
+                    "perfectly valid filter matching nothing, and finding that out "
+                    "here costs one count instead of a scan and an empty page. An "
+                    "invalid filter is an ordinary answer with Lance's own reason "
+                    "attached, not a failure. Reach for this before read_rows or "
+                    "explain_query whenever a filter came out of a conversation "
+                    "rather than off the schema.",
+        parameters=_table_arg({
+            "filter": {"type": "string",
+                       "description": "A SQL boolean predicate — the body of a WHERE "
+                                      "clause, with no SELECT and no LIMIT."},
+        }, required=["name", "filter"]),
+        call=validate_filter,
+    ),
+    Tool(
+        name="explain_query",
+        description="The plan a query would take, without running it — which is "
+                    "usually the whole diagnosis. It says which access path Lance "
+                    "chose (an ANN index, an inverted index, a scalar index, or a "
+                    "brute-force scan of every row), what filter got pushed down, how "
+                    "many fragments it would touch, which heavy columns it would not "
+                    "read, and whether an index exists that this query went around — "
+                    "the last of those being why a search you indexed got no faster. "
+                    "For mode='scan' it also weighs what running it would cost; that "
+                    "weight is null for vector, full-text and hybrid on purpose, "
+                    "because an index rather than the projection decides what those "
+                    "fetch and a number that looked like an answer there would be "
+                    "worse than none. The answer carries a runnable Python "
+                    "reproduction of the same query, generated from the spec that was "
+                    "planned rather than written by hand — hand that to the person, "
+                    "because this tool does not run anything and there is no tool here "
+                    "that does. Running a query spends the read budget of somebody's "
+                    "database on a turn, and that decision belongs to them, in their "
+                    "console or in their own process. Call query_capabilities first if "
+                    "unsure a mode is available, and validate_filter first if the "
+                    "filter came out of a conversation.",
+        parameters=_table_arg({
+            "mode": {"type": "string", "enum": list(query.MODES),
+                     "description": "The access path to plan for. Default 'scan'."},
+            "filter": {"type": "string",
+                       "description": "A SQL boolean predicate — the body of a WHERE "
+                                      "clause, with no SELECT and no LIMIT."},
+            "columns": {"type": "string",
+                        "description": "Comma-separated column names to project."},
+            "limit": {"type": "integer", "description": "Rows the query would return."},
+            "offset": {"type": "integer", "description": "Rows the query would skip."},
+            "text": {"type": "string",
+                     "description": "The search text, for mode 'fts' or 'hybrid'."},
+            "vector_column": {"type": "string",
+                              "description": "The vector column, for 'vector' or "
+                                             "'hybrid'."},
+            "like_row": {"type": "integer",
+                         "description": "Search with the vector this row already "
+                                        "holds — the way to ask for 'rows like this "
+                                        "one' without an embedding model."},
+            "k": {"type": "integer", "description": "Neighbours to fetch. Default 10."},
+            "metric": {"type": "string",
+                       "description": "Distance metric. Defaults to the one the index "
+                                      "was built with; naming a different one is what "
+                                      "turns an indexed search into a full scan."},
+            "prefilter": {"type": "boolean",
+                          "description": "Apply the filter before the vector search "
+                                         "rather than after. Default true."},
+        }),
+        call=explain_query,
+    ),
+    Tool(
+        name="compare_versions",
+        description="Two pinned versions of one table, side by side, and what "
+                    "structurally changed between them: columns added, dropped or "
+                    "retyped, indices created or gone, and how the row, fragment and "
+                    "byte counts moved. Pinned is the point — a table written to while "
+                    "a comparison is being assembled would give a before from one "
+                    "moment and an after from another, and the diff between those "
+                    "describes nothing that ever existed. Get the version numbers from "
+                    "table_versions. This compares the shape of two versions; it does "
+                    "not run a query against either, so it cannot say whether an index "
+                    "actually changed what a search reads — that comparison is a "
+                    "button in the console.",
+        parameters=_table_arg({
+            "a": {"type": "integer", "description": "The earlier version number."},
+            "b": {"type": "integer", "description": "The later version number."},
+        }, required=["name", "a", "b"]),
+        call=compare_versions,
     ),
 )
 

@@ -56,6 +56,60 @@ def _catalog() -> Catalog:
     return CATALOG
 
 
+redact_paths = server_bundle.redact_paths
+
+
+def _root_spellings() -> list[str]:
+    """Every way the database root can appear in a message somebody else wrote.
+
+    Lance does not quote a path back the way it was given. Asked about a version that
+    does not exist under `/Users/x/lance`, it answers `Dataset at path
+    Users/x/lance/...` — its object store normalises the leading slash away, so a
+    literal replacement of the root alone matches nothing and the redaction quietly
+    does not happen. A redaction that looks like it worked is worse than none, so the
+    variants are enumerated here rather than assumed.
+
+    The home directory travels too, for the reason `bundle.roots_of` gives: a stray
+    absolute path anywhere in a message carries a username even when it is not under
+    the root.
+    """
+    spellings: list[str] = []
+    if CATALOG is not None and CATALOG.root_uri:
+        spellings.append(str(CATALOG.root_uri))
+    spellings.append(str(Path.home()))
+
+    out: list[str] = []
+    for root in spellings:
+        out.append(root)
+        # `/Users/x` -> `Users/x`, which is how an object store spells it.
+        out.append(root.lstrip("/"))
+        # `s3://bucket/x` -> `bucket/x`, likewise: the scheme is often dropped by the
+        # time a store reports a miss, and the bucket is the half that names a company.
+        _, sep, rest = root.partition("://")
+        if sep and rest:
+            out.append(rest)
+    # Deduplicated, and empties dropped — `redact_paths` substitutes longest first, so
+    # a root that is a prefix of another cannot shadow it.
+    return [r for r in dict.fromkeys(out) if r]
+
+
+def safe_detail(text: str) -> str:
+    """An error message with the database root taken out of it.
+
+    Anything a storage layer or a query engine wrote is untrusted for this purpose:
+    it is assembled from paths, and paths carry a username, a bucket, and therefore
+    an employer. `table_bundle` has redacted its root by default since it existed, on
+    exactly that argument; an error detail is the same text reaching the same places
+    — an issue, a paste, an agent host that is not ours — and was simply never given
+    the same treatment.
+
+    Applied where a caught exception reaches a caller, not where a message this
+    module wrote does: a table name the caller just supplied is theirs already, and
+    blanking it would cost the error its meaning for no gain.
+    """
+    return server_bundle.redact_paths(text, _root_spellings())
+
+
 def open_table(name: str) -> Handle:
     """Open one table in the console's scope, or 404.
 
@@ -66,7 +120,13 @@ def open_table(name: str) -> Handle:
     try:
         return _catalog().open(name, scope=SCOPE)
     except FileNotFoundError:
-        raise HTTPException(404, f"no table named {name!r} under {_catalog().root_uri}") from None
+        # The root is named because "no table named x" alone leaves a caller unable
+        # to tell a typo from a console pointed somewhere else. Redacted because that
+        # distinction is worth a placeholder, not a username — `list_tables` reports
+        # the root in full to whoever asked for it.
+        raise HTTPException(
+            404,
+            safe_detail(f"no table named {name!r} under {_catalog().root_uri}")) from None
 
 
 def _latest(ds) -> dict:
@@ -626,7 +686,7 @@ async def rows(
         ).to_table()
     except (ValueError, OSError) as e:
         # A filter the user typed is user input, not a server fault.
-        raise HTTPException(400, f"bad query: {e}") from None
+        raise HTTPException(400, safe_detail(f"bad query: {e}")) from None
     d = h.drain()
 
     records = table.to_pylist()
@@ -1006,8 +1066,11 @@ async def compare_versions(name: str, a: int, b: int) -> JSONResponse:
     except (ValueError, OSError) as e:
         # An out-of-range version is the caller asking for something that is not
         # there, not a fault.
-        raise HTTPException(400, f"cannot open both versions: "
-                                 f"{str(e).splitlines()[0][:160]}") from None
+        # Redacted before it is truncated, not after. The other order cuts the root
+        # in half and leaves the tail of it — `<root>/code/lancedb/data/` — which is
+        # not a leak but reads like a bug, and is a substitution that missed.
+        reason = safe_detail(str(e).splitlines()[0])[:160]
+        raise HTTPException(400, f"cannot open both versions: {reason}") from None
 
     left.drain()
     right.drain()
@@ -1102,7 +1165,9 @@ async def blob(name: str, request: Request, key: str | None = None,
             found = ds.to_table(columns=[key_column], filter=predicate,
                                 limit=1, with_row_id=True)
         except (ValueError, OSError) as e:
-            raise HTTPException(400, f"{key!r} is not a usable {key_column}: {e}") from None
+            raise HTTPException(
+                400,
+                safe_detail(f"{key!r} is not a usable {key_column}: {e}")) from None
         if found.num_rows == 0:
             raise HTTPException(404, f"no row in {name} where {key_column} = {key!r}")
         row_id = found.column("_rowid")[0].as_py()
@@ -1282,10 +1347,11 @@ async def query_explain(name: str, body: QueryBody) -> JSONResponse:
     """The plan, without running the query. Often the whole diagnosis."""
     h = open_table(name)
     h.drain()
+    spec = body.spec()
     try:
-        plan = query.explain(h, body.spec())
+        plan, projected, omitted = query.explain_with_projection(h, spec)
     except query.QueryError as e:
-        raise HTTPException(400, str(e)) from None
+        raise HTTPException(400, safe_detail(str(e))) from None
     d = h.drain()
 
     # What running it would weigh, for a scan. The route used to answer "here is the
@@ -1294,13 +1360,21 @@ async def query_explain(name: str, body: QueryBody) -> JSONResponse:
     # names are not what an index makes the reader fetch, and a number that looked
     # like an answer there would be worse than none.
     weight = None
-    if body.spec().normalised().mode == "scan":
+    if spec.normalised().mode == "scan":
         try:
             weight = server_estimate.scan_estimate(h, columns=body.columns).as_dict()
         except (KeyError, OSError, ValueError):
             weight = None
 
+    # The script and the warning, both of which used to require running the query to
+    # see. Neither needs a row: `reproduction` is written from the spec that was
+    # planned, and the warning is read off the plan. Withholding them here was never
+    # a decision, only the shape the route grew in — and an agent asked why a search
+    # is slow has to be able to reach both without spending a scan to do it.
     return JSONResponse({"name": name, "plan": plan.as_dict(), "estimate": weight,
+                         "reproduction": query.reproduction(h.uri, spec, projected),
+                         "omitted_columns": omitted,
+                         "unused_index": query.unused_index_warning(h, spec, plan),
                          "read_bytes": d.read_bytes, "read_iops": d.read_iops})
 
 
@@ -1324,14 +1398,24 @@ async def compare_query(name: str, body: CompareQueryBody) -> JSONResponse:
     except FileNotFoundError:
         raise HTTPException(404, f"no table named {name!r}") from None
     except (ValueError, OSError) as e:
-        raise HTTPException(400, f"cannot open both versions: "
-                                 f"{str(e).splitlines()[0][:160]}") from None
+        # Redacted before it is truncated, not after. The other order cuts the root
+        # in half and leaves the tail of it — `<root>/code/lancedb/data/` — which is
+        # not a leak but reads like a bug, and is a substitution that missed.
+        reason = safe_detail(str(e).splitlines()[0])[:160]
+        raise HTTPException(400, f"cannot open both versions: {reason}") from None
 
     result = compare.compare_query(left, right, body.spec(), cell=_cell)
     if result.a is None and result.b is None:
-        raise HTTPException(400, result.a_error or "the query could not be run")
+        raise HTTPException(400, safe_detail(
+            result.a_error or "the query could not be run"))
+    # `a_error` and `b_error` are Lance's own words about a query that failed on one
+    # side, and they travel in a 200 — a comparison where one version could not answer
+    # is a result, not a fault. Same text as the 400 above, so the same treatment: it
+    # would be odd to redact a message on the path where the query failed on both
+    # versions and leave it whole on the path where it failed on one.
+    body_out = redact_paths(result.as_dict(), _root_spellings())
     return JSONResponse({"name": name, "versions": {"a": body.a, "b": body.b},
-                         **result.as_dict()})
+                         **body_out})
 
 
 @router.post("/tables/{name:path}/query", dependencies=[Depends(kiosk.limit_heavy)])
@@ -1354,7 +1438,7 @@ async def run_query(name: str, body: QueryBody) -> JSONResponse:
         )
     except query.QueryError as e:
         # A query someone typed is theirs to fix, not a server fault.
-        raise HTTPException(400, str(e)) from None
+        raise HTTPException(400, safe_detail(str(e))) from None
     except TimeoutError:
         # 408 rather than 500: nothing is broken, the wait ran out. The wording is
         # deliberate — the scan is still going, because Lance gives us no way to

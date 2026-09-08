@@ -301,7 +301,7 @@ api:
 # The read surface over stdio, for an agent host. Read-only, and it reads whichever
 # connection the console is pointed at.
 mcp:
-	$(PY) -m server.mcp_server
+	$(PY) -m ingest.cli mcp
 
 web:
 	cd web && npm run dev

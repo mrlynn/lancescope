@@ -368,6 +368,62 @@ export type Sample = {
   added: boolean;
 };
 
+/** How this console was started, and therefore what an agent host should run.
+ *  Worked out on the server because only that process knows whether it is a
+ *  checkout, a wheel, the packaged app or a container. */
+export type LaunchView = {
+  mode: "frozen" | "installed" | "checkout" | "container";
+  command: string;
+  args: string[];
+  runnable: boolean;
+  detail: string;
+  env: Record<string, string>;
+  /** Set when the command works now and will stop working — a bundle on a mounted
+   *  disk image, in Downloads, or in a build directory. Empty in the normal case. */
+  warning: string;
+};
+
+/** Which database the generated config names. `follow` leaves it to the console's
+ *  own ladder; `none` means there is nothing to name yet. */
+export type PinView = {
+  mode: "connection" | "follow" | "none";
+  connection_id: string | null;
+  uri: string | null;
+  note: string;
+};
+
+export type AgentHost = {
+  id: string;
+  label: string;
+  kind: "cli" | "file";
+  config_path: string;
+  config_key: string;
+  server_name: string;
+  json: string;
+  restart_note: string;
+  command_line?: string;
+};
+
+export type AgentsView = {
+  launch: LaunchView;
+  root: ResolvedRoot;
+  env_locked: boolean;
+  pin: PinView;
+  connections: { id: string; label: string; uri: string; active: boolean }[];
+  tool_count: number;
+  server_name: string;
+  hosts: AgentHost[];
+};
+
+/** `pin` is a connection id, or "active" for whichever one is, or "none" to let the
+ *  agent follow the console the way the server itself does. */
+export async function getAgents(pin = "active"): Promise<AgentsView> {
+  const res = await fetch(`/api/settings/agents?pin=${encodeURIComponent(pin)}`,
+                          { cache: "no-store" });
+  if (!res.ok) throw new Error(`agents: ${res.status}`);
+  return res.json();
+}
+
 export type SampleList = { samples: Sample[]; note: string };
 
 export async function getSamples(): Promise<SampleList> {

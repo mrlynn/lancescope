@@ -277,7 +277,7 @@ def summary_prompt(context: str) -> tuple[str, str]:
 # The agent loop's system prompt. Longer than the two above, and for a reason that is
 # worth stating: those tasks hand the model one block of metadata and take one answer
 # back, so the only thing that can go wrong is the answer. A loop hands the model
-# eleven tools and its own results, turn after turn, and the things that go wrong are
+# a set of tools and its own results, turn after turn, and the things that go wrong are
 # that it invents a number, that it treats a table's contents as an instruction, or
 # that it spends someone's budget wandering. Each paragraph below is one of those.
 
