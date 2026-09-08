@@ -129,3 +129,12 @@ What this build can decode, and what it cannot.
 | --- | --- |
 | `--into` | check a specific destination as well |
 | `--json` | the same answer as an object, for a script |
+
+## `lancescope mcp`
+
+Serve the read surface over stdio, for an agent host such as Claude Code or Claude Desktop.
+
+| flag | what it does |
+| --- | --- |
+| `--root` | pin to this database, ignoring whichever connection the console is pointed at (sets LANCE_ROOT, which wins over saved connections) |
+| `--config` | read connections from this settings file rather than the default — needed when the console runs with LANCESCOPE_CONFIG set, because an agent host does not inherit it |

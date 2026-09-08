@@ -13,7 +13,7 @@ This measures both.*
 
 [![CI](https://github.com/mrlynn/lancescope/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/mrlynn/lancescope/actions/workflows/ci.yml) [![Images](https://github.com/mrlynn/lancescope/actions/workflows/images.yml/badge.svg)](https://github.com/mrlynn/lancescope/actions/workflows/images.yml) [![Release](https://github.com/mrlynn/lancescope/actions/workflows/release.yml/badge.svg)](https://github.com/mrlynn/lancescope/actions/workflows/release.yml) [![version](https://img.shields.io/github/v/tag/mrlynn/lancescope?label=version&color=ff734a)](https://github.com/mrlynn/lancescope/tags) [![license](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-[![python](https://img.shields.io/badge/python-3.12-3776AB?logo=python&logoColor=white)](.python-version) [![pylance](https://img.shields.io/badge/pylance-3.0%20%E2%86%92%2011.0%20%C2%B7%208%20readers-ff734a)](docs/guide/reference-versions.md) [![lance format](https://img.shields.io/badge/lance%20format-2.2%20%C2%B7%20Blob%20V2-informational)](docs/guide/explain-blobs.md) [![fastapi](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)](server/) [![next.js](https://img.shields.io/badge/Next.js%2016-000?logo=nextdotjs&logoColor=white)](web/) [![ghcr](https://img.shields.io/badge/ghcr.io-8%20tagged%20images-2496ED?logo=docker&logoColor=white)](https://github.com/mrlynn/lancescope/pkgs/container/lancescope) [![mcp](https://img.shields.io/badge/MCP-12%20read--only%20tools-6E56CF)](docs/guide/reference-mcp.md) [![ruff](https://img.shields.io/badge/lint-ruff%200.16.5-D7FF64?logo=ruff&logoColor=black)](.github/workflows/ci.yml) [![macos](https://img.shields.io/badge/macOS-Apple%20Silicon%20app-000?logo=apple&logoColor=white)](docs/guide/howto-desktop.md)
+[![python](https://img.shields.io/badge/python-3.12-3776AB?logo=python&logoColor=white)](.python-version) [![pylance](https://img.shields.io/badge/pylance-3.0%20%E2%86%92%2011.0%20%C2%B7%208%20readers-ff734a)](docs/guide/reference-versions.md) [![lance format](https://img.shields.io/badge/lance%20format-2.2%20%C2%B7%20Blob%20V2-informational)](docs/guide/explain-blobs.md) [![fastapi](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)](server/) [![next.js](https://img.shields.io/badge/Next.js%2016-000?logo=nextdotjs&logoColor=white)](web/) [![ghcr](https://img.shields.io/badge/ghcr.io-8%20tagged%20images-2496ED?logo=docker&logoColor=white)](https://github.com/mrlynn/lancescope/pkgs/container/lancescope) [![mcp](https://img.shields.io/badge/MCP-16%20read--only%20tools-6E56CF)](docs/guide/reference-mcp.md) [![ruff](https://img.shields.io/badge/lint-ruff%200.16.5-D7FF64?logo=ruff&logoColor=black)](.github/workflows/ci.yml) [![macos](https://img.shields.io/badge/macOS-Apple%20Silicon%20app-000?logo=apple&logoColor=white)](docs/guide/howto-desktop.md)
 
 **[Website](https://lancescope.mlynn.dev)** · **[Live console](https://demo.lancescope.mlynn.dev/console)** · **[Docs](https://lancescope.mlynn.dev/docs)** · **[Guide](docs/guide/index.md)** · **[Releases](https://github.com/mrlynn/lancescope/releases)**
 
@@ -240,9 +240,15 @@ different buttons.
 The console's read surface is also an MCP server, so Claude Code — or any agent host
 that speaks MCP — can inspect a LanceDB database directly:
 
+Open **Settings → Agents** and copy the command, or write it out yourself:
+
 ```bash
-claude mcp add lancescope -- uv --directory /path/to/lancescope run python -m server.mcp_server
+claude mcp add lancescope -- lancescope mcp          # installed, or the packaged app
+claude mcp add lancescope -- uv --directory /path/to/lancescope run python -m ingest.cli mcp
 ```
+
+The settings pane also carries the JSON block for Claude Desktop, Cursor, Windsurf and
+VS Code, and the path each one reads it from.
 
 **Which database?** Whichever connection the console is pointed at — the same ladder,
 resolved on every call, so switching connections in the console switches what the agent
@@ -250,16 +256,18 @@ sees. `list_tables` reports the root it resolved, so the agent can say which dat
 is describing. To pin it to one instead, independently of the console:
 
 ```bash
-claude mcp add lancescope --env LANCE_ROOT=/path/to/tables -- \
-  uv --directory /path/to/lancescope run python -m server.mcp_server
+claude mcp add lancescope -- lancescope mcp --root /path/to/tables
 ```
 
-Ten tools — `list_tables`, `describe_table`, `read_rows`, `table_findings`,
-`table_fragments`, `table_indices`, `table_versions`, `estimate_scan`,
-`table_run_config`, `table_bundle` — every one of them read-only and declared as such,
-and none able to materialise a blob column, because the routes underneath them cannot.
-It needs no key of its own: the intelligence is the agent's, and the tools are the same
-routes the console calls.
+The read surface, as tools — catalog, schema, versions, indices, fragments, findings,
+estimates, run configs, diagnosis bundles, operation plans, and the query surface as
+`explain_query`, `query_capabilities`, `validate_filter` and `compare_versions`. Every
+one of them is read-only and declared as such, and none can materialise a blob column,
+because the routes underneath them cannot. Nothing here *runs* a query: `explain_query`
+returns the plan and a Python reproduction, and spending the read budget stays a button
+in the console. The full list is in [the reference](docs/guide/reference-mcp.md), which
+is generated from the code. It needs no key of its own: the intelligence is the agent's,
+and the tools are the same routes the console calls.
 
 Ask it *"what's in this database and what's wrong with it"* and it comes back with the
 unindexed vector column and what a search therefore costs — with the numbers those

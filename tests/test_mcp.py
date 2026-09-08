@@ -51,6 +51,11 @@ async def test_the_tool_set_is_narrow_and_read_shaped(mcp):
         "estimate_scan", "table_versions", "table_indices", "table_fragments",
         "table_bundle", "data_scan_estimate",
         "read_rows",
+        # The query surface, explain-shaped. Each of these reads a plan or a count and
+        # stops there: `explain_query` returns the access path and the script to run it
+        # elsewhere, and nothing here executes a search. The line is drawn by name in
+        # the assertion below rather than left to the reader of this list.
+        "query_capabilities", "validate_filter", "explain_query", "compare_versions",
         # A plan is a read. It is computed from the same metadata the findings are,
         # it returns a document, and it carries no way to apply itself — the tool
         # withholds the script and says to open the console for it, on this surface
@@ -58,8 +63,18 @@ async def test_the_tool_set_is_narrow_and_read_shaped(mcp):
         # this list is where it had to be made rather than assumed.
         "propose_operation",
     }
-    # Deliberately absent: anything that spends money, and anything that writes.
-    assert not any("summar" in n or "ask" in n or "query" in n for n in names)
+    # Deliberately absent: anything that spends money, anything that writes, and
+    # anything that runs a query.
+    #
+    # This used to sieve for the substring "query", back when no tool here touched the
+    # query surface at all and banning the word was the same as banning the thing. It
+    # is not any more: `explain_query` reads a plan and `query_capabilities` reads a
+    # schema, and neither moves a row. Naming the forbidden tools is the better guard
+    # anyway — it catches the decision rather than a word, so the day somebody adds
+    # `run_query` they have to delete a name here and say why.
+    assert not any("summar" in n or "ask" in n for n in names)
+    assert not {"run_query", "execute_query", "search_table",
+                "compare_query", "query_completions"} & names
 
 
 async def test_no_tool_hands_out_something_runnable(mcp):
@@ -122,9 +137,84 @@ async def test_a_filter_works_and_a_bad_one_is_an_answer_not_a_crash(mcp):
 
 async def test_a_missing_table_is_an_answer(mcp):
     for tool in (mcp.describe_table, mcp.table_findings, mcp.table_versions,
-                 mcp.table_indices, mcp.table_fragments):
+                 mcp.table_indices, mcp.table_fragments, mcp.query_capabilities,
+                 mcp.explain_query):
         body = await tool("no-such-table")
         assert "error" in body, f"{tool.__name__} raised instead of answering"
+
+
+async def test_explain_hands_back_something_runnable_without_running_it(mcp):
+    """The trade the query tools are built on.
+
+    Nothing here executes a search, so the useful half has to leave some other way:
+    the plan says what Lance would do, and the reproduction is the script that does
+    it on the caller's own machine and the caller's own read budget.
+    """
+    body = await mcp.explain_query("ordinary", filter="track = 'Go'")
+    assert "lance.dataset(" in body["reproduction"]
+    # The raw plan always travels, whether or not `read_plan` recognised an operator
+    # in it — `server/query.py:read_plan` keyword-matches on purpose and degrades to
+    # "we recognised less of it" rather than to being wrong.
+    assert body["plan"]["text"]
+    assert body["plan"]["pushed_down_filter"], "the filter should reach the scan"
+    # A scan is the one mode whose weight can be worked out from the footers.
+    assert body["estimate"] is not None
+    # And it cost nothing to find out. Planning reads the manifest the handle already
+    # opened and no data at all, which is the whole argument for this tool existing
+    # rather than a run_query one.
+    assert body["read_bytes"] == 0
+
+
+async def test_a_vector_query_is_not_given_a_weight_it_cannot_have(mcp):
+    """An index rather than the projection decides what a vector search fetches, so
+    the honest answer to "what would this weigh" is that this route cannot say."""
+    body = await mcp.explain_query("vectors", mode="vector", vector_column="vector",
+                                   like_row=0)
+    assert body["estimate"] is None
+    assert "lance.dataset(" in body["reproduction"]
+
+
+async def test_an_unrecognised_mode_is_refused_rather_than_quietly_scanned(mcp):
+    """`QuerySpec.normalised` coerces an unknown mode to "scan". Left alone, that
+    hands a caller a scan plan for a query it did not ask for, with nothing anywhere
+    saying so — and an agent cannot tell a wrong answer from a right one."""
+    body = await mcp.explain_query("ordinary", mode="knn")
+    assert "error" in body
+    assert "knn" in body["error"]
+    assert "scan" in body["detail"] and "vector" in body["detail"]
+    assert "plan" not in body
+
+
+async def test_a_filter_that_matches_nothing_is_the_answer_not_an_error(mcp):
+    good = await mcp.validate_filter("ordinary", filter="track = 'Go'")
+    assert good["valid"] is True and good["matched_rows"] > 0
+
+    # Valid syntax, no rows — the failure people actually hit, and the reason this
+    # tool reports a count rather than a boolean.
+    empty = await mcp.validate_filter("ordinary", filter="track = 'Go devroom'")
+    assert empty["valid"] is True and empty["matched_rows"] == 0
+
+    bad = await mcp.validate_filter("ordinary", filter="nope = 1")
+    assert bad["valid"] is False and bad["error"]
+
+
+async def test_capabilities_say_why_a_mode_is_unavailable(mcp):
+    body = await mcp.query_capabilities("ordinary")
+    modes = {c["mode"]: c for c in body["capabilities"]}
+    assert modes["scan"]["available"] is True
+    # Whatever this table cannot answer, it has to say why — a bare False would be
+    # indistinguishable from a search that found nothing.
+    for c in body["capabilities"]:
+        if not c["available"]:
+            assert c["reason"], f"{c['mode']} is unavailable with no reason given"
+
+
+async def test_comparing_a_version_that_is_not_there_is_an_answer(mcp):
+    body = await mcp.compare_versions("ordinary", a=1, b=999)
+    assert "error" in body
+    # Specifically not "no table named 'ordinary'" — the table is right there, and a
+    # caller told otherwise would retry the name forever instead of the version.
+    assert "no table named" not in body["error"]
 
 
 async def test_the_row_limit_is_capped(mcp):

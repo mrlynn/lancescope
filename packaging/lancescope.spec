@@ -34,6 +34,15 @@ a = Analysis(
         "uvicorn.protocols.http.auto",
         "uvicorn.protocols.websockets.auto",
         "uvicorn.lifespan.on",
+        # `lancescope-server mcp`. The import lives inside a function so the console
+        # path stays cold, and PyInstaller does follow those — but the MCP SDK picks
+        # its anyio backend by string, which the graph cannot see. Without the backend
+        # the frozen server dies before its first frame, which an agent host reports
+        # as "disconnected" and nothing else. `make app` then feeding the binary an
+        # initialize frame is the only check that catches it.
+        "mcp",
+        "server.mcp_server",
+        "anyio._backends._asyncio",
     ],
     excludes=[
         # The demo's embedding path, and everything it drags with it. `server.routes.demo`

@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from server import kiosk
+from server import kiosk, launch
 from server import settings as cfg
 from server.catalog import Catalog, capabilities_for
 from server.intel import config as intel_config
@@ -282,6 +282,42 @@ async def remove(conn_id: str) -> JSONResponse:
         raise HTTPException(404, f"no connection {conn_id!r}")
     _apply_root(s)
     return JSONResponse(_state())
+
+
+# --------------------------------------------------------------------------- agents
+
+@router.get("/agents")
+async def agents(pin: str = "active") -> JSONResponse:
+    """The config an agent host needs to reach this console's read surface.
+
+    Read-only, and mounted in kiosk mode for the same reason `GET /settings` is: it
+    answers a question rather than changing anything. On a public demo the answer is
+    that there is no local command to give, which is worth saying plainly instead of
+    emitting a path inside a container.
+
+    Nothing here writes another application's config file. What comes back is text to
+    copy — see `server/launch.py` for why that is a decision rather than a shortfall.
+    """
+    from server.intel import toolset
+
+    s = cfg.load()
+    detected = launch.detect()
+    pinned = launch.pinning(s, pin)
+    resolved = cfg.resolve_root(s)
+
+    return JSONResponse({
+        "launch": detected.as_dict(),
+        "root": resolved.as_dict(),
+        "env_locked": resolved.source == "env",
+        "pin": pinned,
+        "connections": [{"id": c.id, "label": c.label, "uri": c.uri,
+                         "active": c.id == s.active_id} for c in s.connections],
+        # Counted, never written down. The number in this repository's prose has been
+        # wrong three times.
+        "tool_count": len(toolset.TOOLS),
+        "server_name": launch.SERVER_NAME,
+        "hosts": launch.render(detected, pinned),
+    })
 
 
 # --------------------------------------------------------------------- intelligence

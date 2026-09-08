@@ -144,7 +144,12 @@ def test_the_agent_surface_offers_no_tool_that_runs_an_operation():
 
     forbidden = {"run_operation", "execute_operation", "apply_plan", "run_plan",
                  "optimize_table", "compact_table", "create_index", "restore_version",
-                 "cleanup_versions", "migrate_table"}
+                 "cleanup_versions", "migrate_table",
+                 # Running a query writes nothing, and is quarantined for the sibling
+                 # reason: it spends the read budget of somebody's database on a turn.
+                 # `explain_query` returns the plan and the script; executing it is a
+                 # button in the console, next to the one that runs an operation.
+                 "run_query", "execute_query", "search_table", "compare_query"}
     offenders = sorted(set(toolset.names()) & forbidden)
     assert not offenders, (
         f"the agent tool set offers {offenders}. Proposing an operation is a tool; "

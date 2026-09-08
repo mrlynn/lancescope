@@ -66,6 +66,7 @@ The only routes that write anything, and what they write is the settings file.
 | method | path | what it does |
 | --- | --- | --- |
 | `GET` | `/settings` | — |
+| `GET` | `/settings/agents` | The config an agent host needs to reach this console's read surface. |
 | `POST` | `/settings/connections` | — |
 | `POST` | `/settings/connections/probe` | Check a path before committing to it. |
 | `DELETE` | `/settings/connections/{conn_id}` | — |

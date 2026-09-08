@@ -38,11 +38,19 @@ from server.intel import tasks, toolset
 from server.intel.meter import SpendCeiling, spend
 from server.intel.providers import NoProvider, ProviderError, ToolCall
 
-# Why eight. Measured against the eleven read tools: orienting on a table takes two
-# calls, a findings-led answer takes three or four, and the longest genuinely useful
-# trace observed was six — findings, indices, fragments, estimate, versions, rows. Past
-# eight the model is not converging, and the honest thing is to say so rather than to
-# keep paying for it.
+# Why eight. Measured against the read tools as they were then — eleven of them:
+# orienting on a table takes two calls, a findings-led answer takes three or four, and
+# the longest genuinely useful trace observed was six — findings, indices, fragments,
+# estimate, versions, rows. Past eight the model is not converging, and the honest
+# thing is to say so rather than to keep paying for it.
+#
+# The query tools arrived after that measurement and have not been remeasured against
+# it. They chain further than anything above does — query_capabilities, then
+# validate_filter, then explain_query is three turns before a word of the answer — so
+# eight is now a floor somebody should check rather than a number somebody checked.
+# Left where it is deliberately: raising a budget on a guess is how a ceiling stops
+# meaning anything, and the loop reports `turn-limit` when it runs out, so the
+# symptom is visible rather than silent.
 MAX_TURNS = 8
 
 # Roughly two hundred kilobytes. Every tool here reads manifests and footers, and a

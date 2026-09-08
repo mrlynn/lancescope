@@ -330,3 +330,35 @@ def test_bundle_says_which_table_is_missing_rather_than_raising(rooted, capsys):
 def test_an_unknown_facet_is_a_usage_error_not_a_traceback(rooted, capsys):
     assert cli_main(["bundle", "vectors", "--facet", "chess"]) == 2
     assert "chess" in capsys.readouterr().err
+
+
+def test_the_mcp_command_exists_and_returns_an_exit_code():
+    """`cmd_mcp` must return an int.
+
+    `ingest/cli.py:main` does `int(args.fn(args))`, and `mcp_server.main()` returns
+    None — so returning it directly would traceback on a clean shutdown, at the end
+    of every session that had worked perfectly.
+    """
+    import inspect
+
+    from ingest import cli
+
+    args = cli.build_parser().parse_args(["mcp"])
+    assert args.fn is cli.cmd_mcp
+    assert args.root is None and args.config is None
+
+    src = inspect.getsource(cli.cmd_mcp)
+    assert "return EXIT_OK" in src or "return 0" in src
+
+
+def test_the_mcp_command_clears_what_would_break_the_protocol():
+    """LANCESCOPE_STAGES makes `server/progress.py` print to stdout, and the desktop
+    shell sets it. Stdout is the protocol's channel."""
+    import inspect
+
+    from ingest import cli
+
+    src = inspect.getsource(cli.cmd_mcp)
+    assert "LANCESCOPE_STAGES" in src
+    assert "LANCESCOPE_WATCH_PARENT" in src
+

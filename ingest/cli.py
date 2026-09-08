@@ -698,6 +698,42 @@ def resolve_open_target(path: str | None) -> OpenTarget:
     return OpenTarget(root=p)
 
 
+def cmd_mcp(args) -> int:
+    """The read surface over stdio, for an agent host.
+
+    Stdout belongs to the protocol here, and to nothing else. That is the same
+    discipline `run-config` follows for a different reason — there the artifact owns
+    stdout, here the JSON-RPC frames do — and it is why this is the one command that
+    prints nothing at all on the way up.
+
+    Two environment variables are cleared rather than trusted. `LANCESCOPE_STAGES`
+    makes `server/progress.py` print to stdout, and the desktop shell sets it, so a
+    server launched from inside the app would otherwise open with a line the host
+    cannot parse. `LANCESCOPE_WATCH_PARENT` makes the process exit when its parent
+    changes, which for a console launched by a shell is a feature and for a server
+    launched by an agent host is a disconnect nobody can explain.
+    """
+    import os
+
+    os.environ.pop("LANCESCOPE_STAGES", None)
+    os.environ["LANCESCOPE_WATCH_PARENT"] = "0"
+
+    # Set before the import, because the ladder is read per call and the first call
+    # can arrive before this function's frame is gone.
+    if args.root:
+        os.environ["LANCE_ROOT"] = str(Path(args.root).expanduser())
+    if args.config:
+        os.environ["LANCESCOPE_CONFIG"] = str(Path(args.config).expanduser())
+
+    from server import mcp_server
+
+    mcp_server.main()
+    # Explicit: `main()` above returns None, and `main(argv)` below does
+    # `int(args.fn(args))`, so returning the call would raise a TypeError on a clean
+    # shutdown — a traceback at the end of every session that worked.
+    return EXIT_OK
+
+
 def cmd_open(args) -> int:
     target = resolve_open_target(args.path)
     if target.error:
@@ -854,6 +890,19 @@ def build_parser() -> argparse.ArgumentParser:
     d.add_argument("--into", help="check a specific destination as well")
     d.add_argument("--json", action="store_true")
     d.set_defaults(fn=cmd_doctor)
+
+    # No `--json`: this command's output is the MCP protocol, and stdout carries
+    # nothing else. No `--transport` either — the server speaks stdio and only stdio.
+    m = sub.add_parser("mcp", help="serve the read surface over stdio, for an agent "
+                                   "host such as Claude Code or Claude Desktop")
+    m.add_argument("--root", help="pin to this database, ignoring whichever connection "
+                                  "the console is pointed at (sets LANCE_ROOT, which "
+                                  "wins over saved connections)")
+    m.add_argument("--config", help="read connections from this settings file rather "
+                                    "than the default — needed when the console runs "
+                                    "with LANCESCOPE_CONFIG set, because an agent host "
+                                    "does not inherit it")
+    m.set_defaults(fn=cmd_mcp)
 
     return ap
 

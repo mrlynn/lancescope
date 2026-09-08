@@ -17,7 +17,8 @@ export type IconName =
   | "schema" | "history" | "index" | "fragments" | "rows"
   | "chevronDown" | "chevronRight" | "chevronLeft" | "arrowRight"
   | "plus" | "check" | "close" | "trash" | "refresh" | "external"
-  | "star" | "starFilled" | "clock" | "spark" | "warning" | "info" | "back";
+  | "star" | "starFilled" | "clock" | "spark" | "warning" | "info" | "back"
+  | "agent";
 
 /** Paths are authored on a 20x20 grid. Stroke-only unless the glyph reads better
  *  solid, in which case the entry carries its own `fill`. */
@@ -160,6 +161,16 @@ const PATHS: Record<IconName, React.ReactNode> = {
   ),
   // The intelligence layer's glyph: the mark's own dot, with the two smaller
   // satellites that say "derived", not "magic".
+  /** A plug. The settings tab it names is about connecting an outside program to
+   *  this console, and `spark` — the obvious alternative — is already the
+   *  intelligence tab's, where two tabs sharing a glyph would read as a mistake. */
+  agent: (
+    <>
+      <path d="M7.5 2.5v3.5M12.5 2.5v3.5" />
+      <rect x="5" y="6" width="10" height="5.5" rx="1.5" />
+      <path d="M10 11.5v3a2.5 2.5 0 0 1-2.5 2.5H6" />
+    </>
+  ),
   spark: (
     <>
       <path d="M9 3.4 10.3 7l3.6 1.3-3.6 1.3L9 13.2 7.7 9.6 4.1 8.3 7.7 7Z" />
