@@ -37,6 +37,7 @@ results are approximate by construction, because they come from an index that is
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -69,6 +70,20 @@ NEAR_DUPLICATE_DISTANCE = 0.02
 # stops meaning anything and nobody notices until the confusion matrix.
 IMBALANCE_SHARE = 0.6
 
+# The recall sweep. Rows of the table used as queries, and how many neighbours each
+# asks for. Twenty queries is enough for a recall figure to move in steps of half a
+# percent at k=10, and few enough that the sweep is a minute rather than an hour on a
+# remote table — where every probe is a round trip.
+RECALL_QUERIES = 20
+RECALL_K = 10
+# The recall a setting has to reach to be called enough. Not a standard, a line: the
+# claim names the cheapest setting that crosses it, and the curve shows the rest.
+RECALL_TARGET = 0.95
+# `refine_factor` settings, each at the default `nprobes`. Refining fetches that many
+# times `k` candidates and re-ranks them with the full vectors — which recovers what
+# compression loses and cannot recover a neighbour the probed partitions never held.
+REFINE_FACTORS = (2, 5, 10, 20)
+
 
 class Cancelled(Exception):
     """Raised out of a check when the job it belongs to was asked to stop."""
@@ -82,6 +97,24 @@ Cancel = Callable[[], bool]
 def _stop(cancelled: Cancel) -> None:
     if cancelled():
         raise Cancelled
+
+
+# Bytes a check read through a dataset other than the job's handle. `run_check`
+# drains the handle for its figure, so a read made anywhere else would be spent and
+# never reported — the one thing the number beside a check must not do. Per thread,
+# because checks run on the scan pool and each one owns its own tally.
+_carried = threading.local()
+
+
+def _carry(read_bytes: int, read_iops: int) -> None:
+    _carried.bytes = getattr(_carried, "bytes", 0) + read_bytes
+    _carried.iops = getattr(_carried, "iops", 0) + read_iops
+
+
+def _take_carried() -> tuple[int, int]:
+    out = getattr(_carried, "bytes", 0), getattr(_carried, "iops", 0)
+    _carried.bytes = _carried.iops = 0
+    return out
 
 
 # ---------------------------------------------------------------------- the survey
@@ -222,6 +255,9 @@ class Check:
     # Whether the footers can weigh it. False for the index probe, which they cannot.
     weighable: bool = True
     unweighable_reason: str = ""
+    # Appended to the quote, for a check that reads the weighed projection and then
+    # something small the footers cannot weigh — said rather than left out.
+    quote_note: str = ""
 
 
 # ------------------------------------------------------------------------- reading
@@ -653,6 +689,282 @@ def near_duplicates(handle: Handle, columns: list[str], cancelled: Cancel) -> li
     )]
 
 
+# The distance each metric orders by, over a batch of vectors `x` and queries `q`.
+# Only the order matters — recall compares which rows come back, not how far away
+# they are — so l2 is left squared and dot is left as a negated product.
+def _l2(q: np.ndarray, x: np.ndarray) -> np.ndarray:
+    return ((q * q).sum(1)[:, None] - 2 * q @ x.T + (x * x).sum(1)[None, :])
+
+
+def _cosine(q: np.ndarray, x: np.ndarray) -> np.ndarray:
+    with np.errstate(divide="ignore", invalid="ignore"):
+        sim = (q @ x.T) / (np.linalg.norm(q, axis=1)[:, None]
+                           * np.linalg.norm(x, axis=1)[None, :])
+    return 1 - sim
+
+
+def _dot(q: np.ndarray, x: np.ndarray) -> np.ndarray:
+    return -(q @ x.T)
+
+
+_DISTANCES = {"l2": _l2, "euclidean": _l2, "cosine": _cosine, "dot": _dot}
+
+
+def _ivf_index(ds, column: str) -> tuple[int | None, str]:
+    """How many partitions the vector index on `column` has, and what kind it is."""
+    from server.query import _index_stats
+
+    for idx in ds.list_indices():
+        if list(idx.get("fields") or [])[:1] != [column]:
+            continue
+        params = (_index_stats(ds, str(idx.get("name"))).get("indices") or [{}])[0]
+        n = params.get("num_partitions")
+        if n:
+            return int(n), str(params.get("index_type") or idx.get("type") or "")
+    return None, ""
+
+
+def _exact_neighbours(handle: Handle, column: str, queries: np.ndarray,
+                      exclude: list[int], k: int, metric: str,
+                      cancelled: Cancel) -> list[set[int]]:
+    """The true `k` nearest rows for every query, in one pass over the column.
+
+    One pass for all of them rather than one per query: the vector column is the
+    expensive thing on the table, and reading it twenty times to answer twenty
+    questions would be the full scan the index exists to avoid, paid twenty times.
+    The loop is ours, so it stops between batches when asked.
+    """
+    distance = _DISTANCES[metric]
+    n_q = len(queries)
+    best_d = np.full((n_q, k), np.inf)
+    best_id = np.full((n_q, k), -1, dtype=np.int64)
+    own = np.asarray(exclude, dtype=np.int64)[:, None]
+
+    scanner = handle.ds.scanner(columns=[column], with_row_id=True,
+                                batch_size=BATCH_ROWS)
+    for batch in scanner.to_batches():
+        _stop(cancelled)
+        col = batch.column(column)
+        valid = np.asarray(col.is_valid())
+        if not valid.any():
+            continue
+        dim = col.type.list_size
+        x = np.asarray(col.filter(pa.array(valid)).flatten().to_numpy(
+            zero_copy_only=False), dtype=np.float32).reshape(-1, dim)
+        ids = np.asarray(batch.column("_rowid").to_numpy())[valid].astype(np.int64)
+
+        d = distance(queries, x)
+        # A query's own row is its own nearest neighbour at distance zero, and
+        # counting it would hand every setting one free hit.
+        d = np.where((ids[None, :] == own) | ~np.isfinite(d), np.inf, d)
+        both_d = np.concatenate([best_d, d], axis=1)
+        both_id = np.concatenate([best_id, np.broadcast_to(ids, d.shape)], axis=1)
+        keep = np.argpartition(both_d, k - 1, axis=1)[:, :k]
+        best_d = np.take_along_axis(both_d, keep, axis=1)
+        best_id = np.take_along_axis(both_id, keep, axis=1)
+
+    return [{int(i) for i, dist in zip(row_id, row_d, strict=True) if np.isfinite(dist)}
+            for row_id, row_d in zip(best_id, best_d, strict=True)]
+
+
+def _probe_settings(partitions: int) -> list[int | None]:
+    """Powers of two up to every partition, then every partition, then the default.
+
+    Doubling because recall climbs fast and then flattens, and the interesting part
+    is where it flattens. `None` is what a search that names no setting gets — the
+    one most code runs with, and the point the claim is about.
+    """
+    out: list[int | None] = []
+    n = 1
+    while n < partitions:
+        out.append(n)
+        n *= 2
+    out.append(partitions)
+    out.append(None)
+    return out
+
+
+def _measure(open_args: dict, nearest: dict, queries: np.ndarray, own_ids: list[int],
+             truth: list[set[int]], k: int, cancelled: Cancel) -> dict:
+    """One setting: every query through the index, on a table opened just for it.
+
+    Opened afresh so it starts from a cold index cache rather than inheriting the
+    partitions the setting before it loaded — which would make every later setting
+    look cheaper than it is. Its queries share that cache, the way a running service's
+    would. What it read is carried into the check's total, since it was not read
+    through the job's handle.
+    """
+    import lance
+
+    fresh = lance.dataset(**open_args)
+    fresh.io_stats_incremental()                      # opening is not searching
+    found = 0
+    started = time.monotonic()
+    for q, own, want in zip(queries, own_ids, truth, strict=True):
+        _stop(cancelled)
+        got = fresh.scanner(columns=["_distance"], with_row_id=True,
+                            nearest={**nearest, "q": q},
+                            disable_scoring_autoprojection=True).to_table()
+        ids = [int(i) for i in got.column("_rowid").to_pylist() if i != own][:k]
+        found += len(want.intersection(ids))
+    ms = (time.monotonic() - started) * 1000
+    spent = fresh.io_stats_incremental()
+    _carry(spent.read_bytes, spent.read_iops)
+    wanted = sum(len(w) for w in truth) or 1
+    return {"recall": round(found / wanted, 4),
+            "read_bytes": int(spent.read_bytes / len(queries)),
+            "ms": round(ms / len(queries), 1)}
+
+
+def _uncompressed(index_type: str) -> bool:
+    """Whether the index keeps the full vectors, leaving refining nothing to recover."""
+    return index_type.upper().endswith("FLAT")
+
+
+def index_recall(handle: Handle, columns: list[str], cancelled: Cancel) -> list[Finding]:
+    """How many of the true nearest neighbours the index finds, and what probing costs.
+
+    An IVF index answers a search by looking in the few partitions nearest the query
+    and nowhere else, which is what makes it fast and what makes it approximate.
+    `nprobes` is how many partitions it looks in. This samples rows to use as
+    queries, finds each one's true neighbours with one exact pass over the column,
+    then runs the same queries through the index at every power of two up to all the
+    partitions — and at the default — and reports what fraction of the true
+    neighbours came back against the bytes each search read.
+
+    A compressed index (PQ, SQ, RQ) loses neighbours a second way: the distances it
+    ranks by are approximate, so a true neighbour in a probed partition can still
+    rank out of the top `k`. `refine_factor` fetches more candidates and re-ranks them
+    with the full vectors, so the same queries also run at 2, 5, 10 and 20 times `k`,
+    at the default `nprobes`. An index that keeps the full vectors has nothing for
+    refining to recover, and that series is skipped with the reason.
+
+    The exact pass is the expensive part and the only part the quote can weigh: it
+    reads the whole vector column once. The index probes are small and are reported
+    after, per setting. Each setting opens the table afresh, so it starts from a cold
+    index cache rather than inheriting the partitions the setting before it loaded.
+    """
+    from server.query import index_metrics
+
+    column = columns[0]
+    ds = handle.ds
+    metric = index_metrics(ds).get(column)
+    partitions, index_type = _ivf_index(ds, column)
+    if metric not in _DISTANCES or not partitions:
+        return [_finding(
+            "index-recall", id=f"index-recall-{column}", severity="note",
+            title="recall could not be measured on this index",
+            claim=(f"The index on `{column}` reports metric {metric or 'unknown'!r} and "
+                   f"{partitions or 'no'} partitions. This check compares against an "
+                   f"exact search in l2, cosine or dot, over an IVF index, and does "
+                   f"not guess at anything else."),
+            evidence={"column": column, "metric": metric or "unknown",
+                      "partitions": partitions or 0},
+            columns=[column])]
+
+    rows = ds.count_rows()
+    k = min(RECALL_K, rows - 1)
+    if k < 1:
+        return []
+    rng = np.random.default_rng(0)
+    offsets = sorted(int(i) for i in
+                     rng.choice(rows, size=min(RECALL_QUERIES, rows), replace=False))
+    picked = ds.take(offsets, columns=[column, "_rowid"]).to_pylist()
+    picked = [p for p in picked if p[column] is not None
+              and np.isfinite(np.asarray(p[column], dtype=np.float32)).all()]
+    if not picked:
+        return []
+    queries = np.asarray([p[column] for p in picked], dtype=np.float32)
+    own_ids = [int(p["_rowid"]) for p in picked]
+
+    before = handle.drain()
+    _carry(before.read_bytes, before.read_iops)      # the sample, still this check's
+    truth = _exact_neighbours(handle, column, queries, own_ids, k, metric, cancelled)
+    exact = handle.drain()
+    _carry(exact.read_bytes, exact.read_iops)
+
+    open_args = {**handle.target.open_args(), "version": ds.version}
+    base = {"column": column, "k": k + 1, "metric": metric}
+
+    def measure(**extra) -> dict:
+        _stop(cancelled)
+        return _measure(open_args, {**base, **extra}, queries, own_ids, truth, k,
+                        cancelled)
+
+    curve = []
+    for setting in _probe_settings(partitions):
+        extra = ({} if setting is None
+                 else {"minimum_nprobes": setting, "maximum_nprobes": setting})
+        curve.append({"nprobes": setting, **measure(**extra)})
+
+    refine_curve: list[dict] = []
+    refine_skipped = ""
+    if _uncompressed(index_type):
+        refine_skipped = (f"{index_type} keeps the full vectors, so its distances are "
+                          f"already exact and refining has nothing to recover.")
+    else:
+        for factor in REFINE_FACTORS:
+            refine_curve.append({"refine_factor": factor,
+                                 **measure(refine_factor=factor)})
+
+    default = next(p for p in curve if p["nprobes"] is None)
+    swept = [p for p in curve if p["nprobes"] is not None]
+    enough = next((p for p in swept if p["recall"] >= RECALL_TARGET), None)
+    refined = next((p for p in refine_curve if p["recall"] >= RECALL_TARGET), None)
+    exact_per_query = exact.read_bytes
+    if enough:
+        cheapest = (f"The fewest partitions that reach {RECALL_TARGET:.0%} is "
+                    f"{enough['nprobes']}, at {fmt_bytes(enough['read_bytes'])} a search.")
+        if refined and refined["read_bytes"] < enough["read_bytes"]:
+            cheapest += (f" Refining gets there for less: `refine_factor` "
+                         f"{refined['refine_factor']} at the default reaches "
+                         f"{refined['recall']:.0%} at {fmt_bytes(refined['read_bytes'])}.")
+    else:
+        cheapest = (f"No number of partitions reaches {RECALL_TARGET:.0%} — probing all "
+                    f"{partitions} still finds {swept[-1]['recall']:.0%}, so what is lost "
+                    f"is the index's compression rather than the partitions it skips.")
+        if refined:
+            cheapest += (f" Refining recovers it: `refine_factor` "
+                         f"{refined['refine_factor']} at the default reaches "
+                         f"{refined['recall']:.0%} at {fmt_bytes(refined['read_bytes'])} "
+                         f"a search.")
+        elif refine_curve:
+            best = max(refine_curve, key=lambda p: p["recall"])
+            cheapest += (f" Refining does not close it either — `refine_factor` "
+                         f"{best['refine_factor']} reaches {best['recall']:.0%}, so the "
+                         f"neighbours are missing from the partitions probed by default "
+                         f"as well; more partitions and refining together are the next "
+                         f"thing to try.")
+    evidence = {"column": column, "metric": metric, "index_type": index_type,
+                "partitions": partitions, "k": k, "queries": len(queries),
+                "default_recall": default["recall"],
+                "default_read_bytes": default["read_bytes"],
+                "exact_read_bytes": exact_per_query,
+                "curve": curve}
+    if refine_curve:
+        evidence["refine_curve"] = refine_curve
+    else:
+        evidence["refine_skipped"] = refine_skipped
+    return [_finding(
+        "index-recall",
+        id=f"index-recall-{column}",
+        severity="warn" if default["recall"] < 0.9 else "note",
+        title=f"the default search finds {default['recall']:.0%} of the true neighbours",
+        claim=(f"Over {len(queries)} sampled rows, a search through the `{metric}` index "
+               f"on `{column}` with its default settings returns "
+               f"{default['recall']:.0%} of the {k} nearest neighbours an exact scan "
+               f"finds, reading {fmt_bytes(default['read_bytes'])} a search. An exact "
+               f"search reads the whole column, {fmt_bytes(exact_per_query)}. {cheapest}"),
+        evidence=evidence,
+        caveat=("Rows of the table used as their own queries. Recall on real queries "
+                "can differ where they do not look like the rows — text embedded into "
+                "an image space, for one. Bytes are per search from Lance's counters, "
+                "with each setting starting from a cold index cache and its queries "
+                "sharing it the way a running service would."),
+        columns=[column],
+    )]
+
+
 # ------------------------------------------------------------------- the registry
 
 def _needs(kind: str, what: str):
@@ -792,6 +1104,16 @@ CHECKS: tuple[Check, ...] = (
             "reads the index and the vectors of the neighbours it finds, and the job "
             "reports what that came to rather than guessing here."),
     ),
+    Check(
+        id="index-recall",
+        title="What the vector index gives up for its speed",
+        default_columns=lambda s: [c.name for c in s.vectors if c.indexed][:1]
+                                  or [c.name for c in s.vectors][:1],
+        capability=_indexed_vector_capability,
+        run=index_recall,
+        quote_note=(", once, for the exact answer — plus a few index probes per "
+                    "setting, which the result reports"),
+    ),
 )
 
 BY_ID = {c.id: c for c in CHECKS}
@@ -851,6 +1173,7 @@ def plan(handle: Handle, selections: list[dict] | None = None) -> dict:
                 if est.blob_bytes:
                     quote += (f", and none of the {fmt_bytes(est.blob_bytes)} of blob "
                               f"payload those descriptors point at")
+                quote += check.quote_note
             except (KeyError, OSError, ValueError) as e:
                 reason = (f"The footers could not be read on this root, so this check "
                           f"cannot be weighed before it runs: {e}")
@@ -900,6 +1223,7 @@ def run_check(handle: Handle, check_id: str, columns: list[str],
                            detail=capability.reason)
 
     handle.drain()                              # zero, so the cost below is this check's
+    _take_carried()
     started = time.monotonic()
     try:
         findings = check.run(handle, columns, cancelled)
@@ -913,7 +1237,9 @@ def run_check(handle: Handle, check_id: str, columns: list[str],
         detail = str(e)[:200]
     ms = int((time.monotonic() - started) * 1000)
     d = handle.drain()
+    carried_bytes, carried_iops = _take_carried()
 
     return CheckResult(check=check_id, findings=findings, columns=columns,
-                       read_bytes=d.read_bytes, read_iops=d.read_iops, ms=ms,
+                       read_bytes=d.read_bytes + carried_bytes,
+                       read_iops=d.read_iops + carried_iops, ms=ms,
                        state=state, error=error, detail=detail)

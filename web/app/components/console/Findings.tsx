@@ -12,6 +12,7 @@ import { type ReactNode, useCallback, useEffect, useState } from "react";
 import Icon from "@/app/components/Icon";
 import BundleButton from "@/app/components/console/BundleButton";
 import { Empty } from "@/app/components/console/atoms";
+import { RecallCurve, isRecallCurve } from "@/app/components/console/RecallCurve";
 import { fmtBytes } from "@/app/lib/api";
 import type { Finding, Findings } from "@/app/lib/catalog";
 import {
@@ -37,9 +38,14 @@ function fmtValue(key: string, value: unknown): string {
     if (value >= 1e3) return `${(value / 1e3).toFixed(1)} KB`;
     return `${value} B`;
   }
-  if (key === "share" || key === "coverage") return `${(value * 100).toFixed(1)}%`;
+  if (key === "share" || key === "coverage" || key.endsWith("recall"))
+    return `${(value * 100).toFixed(1)}%`;
   return value.toLocaleString();
 }
+
+// Evidence the recall chart draws or states under itself. As entries in the list
+// they would be a row of objects nobody can read, and a sentence said twice.
+const CHARTED = new Set(["curve", "refine_curve", "refine_skipped"]);
 
 export function FindingCard({ f, compact = false }: { f: Finding; compact?: boolean }) {
   const tone = TONE[f.severity] ?? TONE.note;
@@ -71,10 +77,19 @@ export function FindingCard({ f, compact = false }: { f: Finding; compact?: bool
         </p>
       )}
 
+      {!compact && isRecallCurve(f.evidence.curve) && (
+        <RecallCurve curve={f.evidence.curve}
+                     refineCurve={isRecallCurve(f.evidence.refine_curve)
+                                  ? f.evidence.refine_curve : []}
+                     refineSkipped={String(f.evidence.refine_skipped ?? "")}
+                     exactBytes={Number(f.evidence.exact_read_bytes) || 0}
+                     partitions={Number(f.evidence.partitions) || 0} />
+      )}
+
       {!compact && (
         <dl className="flex flex-wrap gap-x-6 gap-y-1 mt-3 pt-3"
             style={{ borderTop: "1px solid var(--hairline)" }}>
-          {Object.entries(f.evidence).map(([k, v]) => (
+          {Object.entries(f.evidence).filter(([k]) => !CHARTED.has(k)).map(([k, v]) => (
             <div key={k} className="flex items-baseline gap-1.5">
               <dt className="eyebrow">{k.replace(/_/g, " ")}</dt>
               <dd className="mono text-[11px] text-[var(--bright)]">{fmtValue(k, v)}</dd>

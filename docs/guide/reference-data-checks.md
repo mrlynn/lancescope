@@ -113,6 +113,32 @@ The distance threshold is in the index's own units, and the metric it was built
 with is in the evidence — an l2 index and a cosine index do not mean the same
 thing by 0.02.
 
+## index-recall
+
+*What the vector index gives up for its speed.*
+
+How many of the true nearest neighbours the index finds, and what probing costs.
+
+An IVF index answers a search by looking in the few partitions nearest the query
+and nowhere else, which is what makes it fast and what makes it approximate.
+`nprobes` is how many partitions it looks in. This samples rows to use as
+queries, finds each one's true neighbours with one exact pass over the column,
+then runs the same queries through the index at every power of two up to all the
+partitions — and at the default — and reports what fraction of the true
+neighbours came back against the bytes each search read.
+
+A compressed index (PQ, SQ, RQ) loses neighbours a second way: the distances it
+ranks by are approximate, so a true neighbour in a probed partition can still
+rank out of the top `k`. `refine_factor` fetches more candidates and re-ranks them
+with the full vectors, so the same queries also run at 2, 5, 10 and 20 times `k`,
+at the default `nprobes`. An index that keeps the full vectors has nothing for
+refining to recover, and that series is skipped with the reason.
+
+The exact pass is the expensive part and the only part the quote can weigh: it
+reads the whole vector column once. The index probes are small and are reported
+after, per setting. Each setting opens the table afresh, so it starts from a cold
+index cache rather than inheriting the partitions the setting before it loaded.
+
 ## When a check will not run
 
 A check reports the same three states a connection does — `available`, `unsupported`, `unverified` — with the reason attached. Two of them matter often:
