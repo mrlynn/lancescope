@@ -256,7 +256,9 @@ def demo_root() -> Path | None:
     """
     try:
         from config import LANCE  # ingest/ is put on sys.path by the app
-    except ImportError:
+    except (ImportError, OSError):
+        # `config` creates its data directories on import, which raises where the
+        # app is installed read-only — the Docker image makes `/app` unwritable.
         return None
     p = Path(LANCE)
     return p if has_tables(p) else None
