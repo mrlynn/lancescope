@@ -44,6 +44,24 @@ const MODE_LABEL: Record<string, string> = {
 
 const MODES = ["scan", "fts", "vector", "hybrid"] as const;
 
+const DIALECTS = ["lancedb", "lance"] as const;
+type Dialect = (typeof DIALECTS)[number];
+const DIALECT_KEY = "lancescope.query.dialect";
+
+function readDialect(): Dialect {
+  try {
+    return localStorage.getItem(DIALECT_KEY) === "lance" ? "lance" : "lancedb";
+  } catch {
+    return "lancedb";
+  }
+}
+
+/** The script for the chosen library, falling back to `lance` — which the server
+ *  always writes — where it could not write the other. */
+function reproductionIn(r: QueryResult, d: Dialect): string {
+  return (d === "lancedb" && r.reproduction_lancedb) || r.reproduction;
+}
+
 /** A placeholder written against this table's own columns.
  *
  *  It used to read `track = 'Go' and year = 2025`, which is the demo corpus. On any
@@ -120,6 +138,14 @@ export function QueryTab({ table, root, ai }: {
   const [weight, setWeight] = useState<{ mode: string; est: Estimate | null } | null>(null);
   const [showPlan, setShowPlan] = useState(false);
   const [showRepro, setShowRepro] = useState(false);
+  // Which library the reproduction is written against. `lancedb` first, because it
+  // is what somebody building on LanceDB actually writes; `lance` is what this
+  // console runs. Remembered per viewer — a preference, not state worth sharing.
+  const [dialect, setDialectState] = useState<Dialect>(readDialect);
+  const setDialect = useCallback((d: Dialect) => {
+    setDialectState(d);
+    try { localStorage.setItem(DIALECT_KEY, d); } catch { /* private window */ }
+  }, []);
   // Whether to read the first page on open. Undecided until the capability probes
   // settle, because a `?tab=query` deep link on a searchable table opens in vector
   // mode instead, and a scan fired underneath it would be a read nobody asked for.
@@ -258,11 +284,11 @@ export function QueryTab({ table, root, ai }: {
       timeout_s: Number(timeout) > 0 ? Number(timeout) : null,
       expand: exp.length ? exp : null,
       ...(mode === "fts" || mode === "hybrid" ? { text } : {}),
+      ...(mode !== "scan" ? { prefilter } : {}),
       ...(mode === "vector" || mode === "hybrid"
         ? {
             vector_column: vectorColumn,
             k: Number(k) || 10,
-            prefilter,
             // A described query and "rows like row N" are the same search with a
             // different source for the vector, so only one of them is sent.
             ...(queryVector ? { vector: queryVector } : { like_row: Number(likeRow) || 0 }),
@@ -316,12 +342,13 @@ export function QueryTab({ table, root, ai }: {
   // The shortest thing that reproduces what is on screen. The server already writes
   // it — a runnable snippet against the reader's own copy — and it was rendered
   // behind a toggle with no way to take it.
+  const script = result ? reproductionIn(result, dialect) : "";
   useShortcut("copy-diagnostic", useCallback(() => {
-    if (!result?.reproduction) return;
-    navigator.clipboard.writeText(result.reproduction).catch(() => {
+    if (!script) return;
+    navigator.clipboard.writeText(script).catch(() => {
       // Refused, and the value is on screen behind the python toggle.
     });
-  }, [result]));
+  }, [script]));
 
   const load = useCallback((q: StoredQuery) => {
     setMode(q.spec.mode);
@@ -342,9 +369,10 @@ export function QueryTab({ table, root, ai }: {
     limit: Number(limit) || 25,
     expand: expand.length ? expand : null,
     ...(mode === "fts" || mode === "hybrid" ? { text } : {}),
+    ...(mode !== "scan" ? { prefilter } : {}),
     ...(mode === "vector" || mode === "hybrid"
       ? { vector_column: vectorColumn, like_row: Number(likeRow) || 0,
-          k: Number(k) || 10, prefilter }
+          k: Number(k) || 10 }
       : {}),
   });
 
@@ -548,7 +576,7 @@ export function QueryTab({ table, root, ai }: {
         </div>
       )}
 
-      {(mode === "vector" || mode === "hybrid") && (
+      {mode !== "scan" && (
         <label className="flex items-center gap-2 mb-4 text-[12px] text-[var(--haze)]">
           <input type="checkbox" checked={prefilter}
                  onChange={(e) => setPrefilter(e.target.checked)} />
@@ -656,17 +684,30 @@ export function QueryTab({ table, root, ai }: {
 
           {showRepro && (
             <div className="relative mb-4">
+              {/* Only offered when the server could write both: a `lancedb` script
+                  needs a database and a table name, and a namespace this process
+                  cannot locate has neither. */}
+              {result.reproduction_lancedb && (
+                <div className="seg mb-2" role="group" aria-label="reproduction library">
+                  {DIALECTS.map((d) => (
+                    <button key={d} onClick={() => setDialect(d)} data-on={dialect === d}
+                            className="mono !px-3 text-[10px] tracking-[0.14em]">
+                      {d}
+                    </button>
+                  ))}
+                </div>
+              )}
               <pre className="mono text-[10px] leading-relaxed p-4 rounded-sm
                               overflow-x-auto whitespace-pre"
                    style={{ background: "var(--ink-3)", border: "1px solid var(--rule)",
                             color: "var(--body)" }}>
-                {result.reproduction}
+                {script}
               </pre>
               {/* The `Copy` atom's own comment names this as one of the three things
                   it exists for — "a table path, a run config, a reproduction" — and
                   this was the one that never got one. ⌘⇧C does the same thing. */}
               <span className="absolute top-2 right-2">
-                <Copy value={result.reproduction} what="reproduction" size={13} />
+                <Copy value={script} what="reproduction" size={13} />
               </span>
             </div>
           )}

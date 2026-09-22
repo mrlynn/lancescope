@@ -223,6 +223,15 @@ def test_every_reproduction_is_runnable_python(api):
         assert "lance.dataset" in source
 
 
+def test_a_full_text_reproduction_filters_where_the_console_did(api):
+    """Without `prefilter` the scanner ranks first and filters the top `limit`
+    afterwards — a script that left it out would return fewer rows than the
+    console did."""
+    body = run(api, "searchable", {"mode": "fts", "text": "kubernetes",
+                                   "filter": "year = 2024", "limit": 5}).json()
+    assert "prefilter=True" in body["reproduction"]
+
+
 def test_explain_costs_nothing_to_ask(api):
     r = api.post("/catalog/tables/vectors/query/explain",
                  json={"mode": "vector", "vector_column": "vector", "like_row": 0,

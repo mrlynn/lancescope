@@ -155,6 +155,11 @@ test = [
     # parser reading the hand-rolled output back is what makes writing it by hand
     # safe, so the parser belongs here and nowhere else.
     "pyyaml>=6",
+    # The query workspace writes a `lancedb` script beside the `lance` one, and a
+    # script is only proven by running it: parsing catches a typo, not a query that
+    # returns different rows. The server itself never imports it — see
+    # `test_no_server_module_imports_lancedb`.
+    "lancedb>=0.26",
 ]
 
 [tool.ruff]

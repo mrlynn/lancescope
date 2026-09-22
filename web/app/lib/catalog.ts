@@ -449,6 +449,9 @@ export type QueryResult = {
   total_rows: number | null;
   truncated: boolean;
   reproduction: string;
+  /** The same query against `lancedb`. Null where the table has no database and
+   *  name `lancedb` could open it by — a namespace this process cannot locate. */
+  reproduction_lancedb: string | null;
   /** The version this result describes, and the newest on disk when it was read.
    *  They differ when the table has been written to since, which makes everything
    *  on screen true of a version nobody is using any more. */
