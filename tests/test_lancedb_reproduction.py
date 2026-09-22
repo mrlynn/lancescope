@@ -53,7 +53,10 @@ def ids(rows) -> list[int]:
     ("searchable", {"mode": "fts", "text": "kubernetes", "filter": "year = 2024",
                     "limit": 5}),
     ("vectors", {"mode": "vector", "vector_column": "vector", "like_row": 0, "k": 5}),
-    ("indexed", {"mode": "vector", "vector_column": "vector", "like_row": 3, "k": 5,
+    # Unindexed, so both engines search exhaustively and there is one right answer.
+    # The indexed table has its own test below: an ANN search is approximate, and
+    # two engines are not obliged to approximate it the same way.
+    ("vectors", {"mode": "vector", "vector_column": "vector", "like_row": 3, "k": 5,
                  "filter": "track = 'Rust'"}),
 ])
 def test_the_lancedb_script_returns_what_the_console_returned(api, table, spec):
@@ -70,6 +73,23 @@ def test_the_lancedb_script_returns_what_the_console_returned(api, table, spec):
         assert sorted(ids(got)) == sorted(ids(body["rows"]))
     else:
         assert ids(got) == ids(body["rows"])
+
+
+def test_an_indexed_filtered_script_searches_the_same_rows_the_same_way(api):
+    """Not compared row for row. The fixture's index trains on unseeded k-means, and
+    an older pylance probes a fixed number of partitions where `lancedb`'s own Lance
+    keeps probing until it has k — so on one run the console can miss a neighbour
+    the script finds. What the script owes is the same search: the filter,
+    prefiltered, over the same metric, for the same k."""
+    body = run(api, "indexed", {"mode": "vector", "vector_column": "vector",
+                                "like_row": 3, "k": 5, "filter": "track = 'Rust'"})
+    source = body["reproduction_lancedb"]
+    assert ".where(\"track = 'Rust'\")" in source
+    assert ".distance_type('l2')" in source
+
+    got = execute(source).to_pylist()
+    assert len(got) == len(body["rows"]) == 5
+    assert all(r["track"] == "Rust" for r in got)
 
 
 def test_a_vector_script_names_the_metric_the_index_was_built_with(api):
