@@ -79,6 +79,10 @@ RECALL_K = 10
 # The recall a setting has to reach to be called enough. Not a standard, a line: the
 # claim names the cheapest setting that crosses it, and the curve shows the rest.
 RECALL_TARGET = 0.95
+# `refine_factor` settings, each at the default `nprobes`. Refining fetches that many
+# times `k` candidates and re-ranks them with the full vectors — which recovers what
+# compression loses and cannot recover a neighbour the probed partitions never held.
+REFINE_FACTORS = (2, 5, 10, 20)
 
 
 class Cancelled(Exception):
@@ -706,8 +710,8 @@ def _dot(q: np.ndarray, x: np.ndarray) -> np.ndarray:
 _DISTANCES = {"l2": _l2, "euclidean": _l2, "cosine": _cosine, "dot": _dot}
 
 
-def _ivf_partitions(ds, column: str) -> int | None:
-    """How many partitions the vector index on `column` was built with."""
+def _ivf_index(ds, column: str) -> tuple[int | None, str]:
+    """How many partitions the vector index on `column` has, and what kind it is."""
     from server.query import _index_stats
 
     for idx in ds.list_indices():
@@ -716,8 +720,8 @@ def _ivf_partitions(ds, column: str) -> int | None:
         params = (_index_stats(ds, str(idx.get("name"))).get("indices") or [{}])[0]
         n = params.get("num_partitions")
         if n:
-            return int(n)
-    return None
+            return int(n), str(params.get("index_type") or idx.get("type") or "")
+    return None, ""
 
 
 def _exact_neighbours(handle: Handle, column: str, queries: np.ndarray,
@@ -780,6 +784,43 @@ def _probe_settings(partitions: int) -> list[int | None]:
     return out
 
 
+def _measure(open_args: dict, nearest: dict, queries: np.ndarray, own_ids: list[int],
+             truth: list[set[int]], k: int, cancelled: Cancel) -> dict:
+    """One setting: every query through the index, on a table opened just for it.
+
+    Opened afresh so it starts from a cold index cache rather than inheriting the
+    partitions the setting before it loaded — which would make every later setting
+    look cheaper than it is. Its queries share that cache, the way a running service's
+    would. What it read is carried into the check's total, since it was not read
+    through the job's handle.
+    """
+    import lance
+
+    fresh = lance.dataset(**open_args)
+    fresh.io_stats_incremental()                      # opening is not searching
+    found = 0
+    started = time.monotonic()
+    for q, own, want in zip(queries, own_ids, truth, strict=True):
+        _stop(cancelled)
+        got = fresh.scanner(columns=["_distance"], with_row_id=True,
+                            nearest={**nearest, "q": q},
+                            disable_scoring_autoprojection=True).to_table()
+        ids = [int(i) for i in got.column("_rowid").to_pylist() if i != own][:k]
+        found += len(want.intersection(ids))
+    ms = (time.monotonic() - started) * 1000
+    spent = fresh.io_stats_incremental()
+    _carry(spent.read_bytes, spent.read_iops)
+    wanted = sum(len(w) for w in truth) or 1
+    return {"recall": round(found / wanted, 4),
+            "read_bytes": int(spent.read_bytes / len(queries)),
+            "ms": round(ms / len(queries), 1)}
+
+
+def _uncompressed(index_type: str) -> bool:
+    """Whether the index keeps the full vectors, leaving refining nothing to recover."""
+    return index_type.upper().endswith("FLAT")
+
+
 def index_recall(handle: Handle, columns: list[str], cancelled: Cancel) -> list[Finding]:
     """How many of the true nearest neighbours the index finds, and what probing costs.
 
@@ -791,6 +832,13 @@ def index_recall(handle: Handle, columns: list[str], cancelled: Cancel) -> list[
     partitions — and at the default — and reports what fraction of the true
     neighbours came back against the bytes each search read.
 
+    A compressed index (PQ, SQ, RQ) loses neighbours a second way: the distances it
+    ranks by are approximate, so a true neighbour in a probed partition can still
+    rank out of the top `k`. `refine_factor` fetches more candidates and re-ranks them
+    with the full vectors, so the same queries also run at 2, 5, 10 and 20 times `k`,
+    at the default `nprobes`. An index that keeps the full vectors has nothing for
+    refining to recover, and that series is skipped with the reason.
+
     The exact pass is the expensive part and the only part the quote can weigh: it
     reads the whole vector column once. The index probes are small and are reported
     after, per setting. Each setting opens the table afresh, so it starts from a cold
@@ -801,7 +849,7 @@ def index_recall(handle: Handle, columns: list[str], cancelled: Cancel) -> list[
     column = columns[0]
     ds = handle.ds
     metric = index_metrics(ds).get(column)
-    partitions = _ivf_partitions(ds, column)
+    partitions, index_type = _ivf_index(ds, column)
     if metric not in _DISTANCES or not partitions:
         return [_finding(
             "index-recall", id=f"index-recall-{column}", severity="note",
@@ -835,47 +883,68 @@ def index_recall(handle: Handle, columns: list[str], cancelled: Cancel) -> list[
     exact = handle.drain()
     _carry(exact.read_bytes, exact.read_iops)
 
-    import lance
-
     open_args = {**handle.target.open_args(), "version": ds.version}
+    base = {"column": column, "k": k + 1, "metric": metric}
+
+    def measure(**extra) -> dict:
+        _stop(cancelled)
+        return _measure(open_args, {**base, **extra}, queries, own_ids, truth, k,
+                        cancelled)
+
     curve = []
     for setting in _probe_settings(partitions):
-        _stop(cancelled)
-        fresh = lance.dataset(**open_args)
-        fresh.io_stats_incremental()                  # opening is not searching
-        nearest: dict = {"column": column, "k": k + 1, "metric": metric}
-        if setting is not None:
-            nearest["minimum_nprobes"] = nearest["maximum_nprobes"] = setting
-        found = 0
-        started = time.monotonic()
-        for q, own, want in zip(queries, own_ids, truth, strict=True):
-            _stop(cancelled)
-            got = fresh.scanner(columns=["_distance"], with_row_id=True,
-                                nearest={**nearest, "q": q},
-                                disable_scoring_autoprojection=True).to_table()
-            ids = [int(i) for i in got.column("_rowid").to_pylist() if i != own][:k]
-            found += len(want.intersection(ids))
-        ms = (time.monotonic() - started) * 1000
-        spent = fresh.io_stats_incremental()
-        _carry(spent.read_bytes, spent.read_iops)
-        wanted = sum(len(w) for w in truth) or 1
-        curve.append({"nprobes": setting, "recall": round(found / wanted, 4),
-                      "read_bytes": int(spent.read_bytes / len(queries)),
-                      "ms": round(ms / len(queries), 1)})
+        extra = ({} if setting is None
+                 else {"minimum_nprobes": setting, "maximum_nprobes": setting})
+        curve.append({"nprobes": setting, **measure(**extra)})
+
+    refine_curve: list[dict] = []
+    refine_skipped = ""
+    if _uncompressed(index_type):
+        refine_skipped = (f"{index_type} keeps the full vectors, so its distances are "
+                          f"already exact and refining has nothing to recover.")
+    else:
+        for factor in REFINE_FACTORS:
+            refine_curve.append({"refine_factor": factor,
+                                 **measure(refine_factor=factor)})
 
     default = next(p for p in curve if p["nprobes"] is None)
     swept = [p for p in curve if p["nprobes"] is not None]
     enough = next((p for p in swept if p["recall"] >= RECALL_TARGET), None)
+    refined = next((p for p in refine_curve if p["recall"] >= RECALL_TARGET), None)
     exact_per_query = exact.read_bytes
     if enough:
         cheapest = (f"The fewest partitions that reach {RECALL_TARGET:.0%} is "
                     f"{enough['nprobes']}, at {fmt_bytes(enough['read_bytes'])} a search.")
+        if refined and refined["read_bytes"] < enough["read_bytes"]:
+            cheapest += (f" Refining gets there for less: `refine_factor` "
+                         f"{refined['refine_factor']} at the default reaches "
+                         f"{refined['recall']:.0%} at {fmt_bytes(refined['read_bytes'])}.")
     else:
-        cheapest = (f"No setting reaches {RECALL_TARGET:.0%} — probing all "
-                    f"{partitions} partitions still finds {swept[-1]['recall']:.0%}, so "
-                    f"what is lost is the index's compression rather than the partitions "
-                    f"it skips. `refine_factor` re-ranks the candidates with the full "
-                    f"vectors and is the setting that moves this.")
+        cheapest = (f"No number of partitions reaches {RECALL_TARGET:.0%} — probing all "
+                    f"{partitions} still finds {swept[-1]['recall']:.0%}, so what is lost "
+                    f"is the index's compression rather than the partitions it skips.")
+        if refined:
+            cheapest += (f" Refining recovers it: `refine_factor` "
+                         f"{refined['refine_factor']} at the default reaches "
+                         f"{refined['recall']:.0%} at {fmt_bytes(refined['read_bytes'])} "
+                         f"a search.")
+        elif refine_curve:
+            best = max(refine_curve, key=lambda p: p["recall"])
+            cheapest += (f" Refining does not close it either — `refine_factor` "
+                         f"{best['refine_factor']} reaches {best['recall']:.0%}, so the "
+                         f"neighbours are missing from the partitions probed by default "
+                         f"as well; more partitions and refining together are the next "
+                         f"thing to try.")
+    evidence = {"column": column, "metric": metric, "index_type": index_type,
+                "partitions": partitions, "k": k, "queries": len(queries),
+                "default_recall": default["recall"],
+                "default_read_bytes": default["read_bytes"],
+                "exact_read_bytes": exact_per_query,
+                "curve": curve}
+    if refine_curve:
+        evidence["refine_curve"] = refine_curve
+    else:
+        evidence["refine_skipped"] = refine_skipped
     return [_finding(
         "index-recall",
         id=f"index-recall-{column}",
@@ -886,12 +955,7 @@ def index_recall(handle: Handle, columns: list[str], cancelled: Cancel) -> list[
                f"{default['recall']:.0%} of the {k} nearest neighbours an exact scan "
                f"finds, reading {fmt_bytes(default['read_bytes'])} a search. An exact "
                f"search reads the whole column, {fmt_bytes(exact_per_query)}. {cheapest}"),
-        evidence={"column": column, "metric": metric, "partitions": partitions,
-                  "k": k, "queries": len(queries),
-                  "default_recall": default["recall"],
-                  "default_read_bytes": default["read_bytes"],
-                  "exact_read_bytes": exact_per_query,
-                  "curve": curve},
+        evidence=evidence,
         caveat=("Rows of the table used as their own queries. Recall on real queries "
                 "can differ where they do not look like the rows — text embedded into "
                 "an image space, for one. Bytes are per search from Lance's counters, "

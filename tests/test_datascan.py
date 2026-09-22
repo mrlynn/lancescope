@@ -235,8 +235,47 @@ def test_index_recall_counts_the_probes_as_well_as_the_exact_pass(catalog):
     result = run(catalog, "indexed", "index-recall", ["vector"])
     e = result.findings[0].evidence
 
-    probed = sum(p["read_bytes"] * e["queries"] for p in e["curve"])
+    probed = sum(p["read_bytes"] * e["queries"]
+                 for p in e["curve"] + e.get("refine_curve", []))
     assert result.read_bytes >= e["exact_read_bytes"] + probed
+
+
+def test_an_uncompressed_index_skips_refining_and_says_why(catalog):
+    """IVF_FLAT ranks by the full vectors already. Refining it would be settings that
+    cost probes and cannot move the line, so the series is not run."""
+    result = run(catalog, "indexed", "index-recall", ["vector"])
+    e = result.findings[0].evidence
+
+    assert "refine_curve" not in e
+    assert "full vectors" in e["refine_skipped"]
+
+
+def test_refining_a_compressed_index_recovers_what_compression_lost(tmp_path):
+    """The case refining exists for. PQ over two sub-vectors is coarse enough that
+    probing every partition still misses neighbours; re-ranking candidates with the
+    full vectors should get most of them back."""
+    import lance
+    import numpy as np
+    import pyarrow as pa
+
+    from server.catalog import Handle
+
+    n, dim = 2_000, 16
+    v = np.random.default_rng(5).standard_normal((n, dim)).astype(np.float32)
+    uri = str(tmp_path / "pq.lance")
+    ds = lance.write_dataset(pa.table({"vector": pa.FixedSizeListArray.from_arrays(
+        pa.array(v.reshape(-1)), dim)}), uri)
+    ds.create_index("vector", index_type="IVF_PQ", num_partitions=4, num_sub_vectors=2)
+    handle = Handle(name="pq", target=uri, scope="test", pinned=False)
+
+    result = datascan.run_check(handle, "index-recall", ["vector"], never)
+
+    assert result.state == "done", result.detail
+    e = result.findings[0].evidence
+    assert [p["refine_factor"] for p in e["refine_curve"]] == list(datascan.REFINE_FACTORS)
+    best_probe = max(p["recall"] for p in e["curve"])
+    best_refine = max(p["recall"] for p in e["refine_curve"])
+    assert best_refine > best_probe
 
 
 def test_index_recall_is_quoted_on_the_pass_and_says_the_probes_come_after(catalog):

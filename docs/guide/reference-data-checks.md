@@ -127,6 +127,13 @@ then runs the same queries through the index at every power of two up to all the
 partitions — and at the default — and reports what fraction of the true
 neighbours came back against the bytes each search read.
 
+A compressed index (PQ, SQ, RQ) loses neighbours a second way: the distances it
+ranks by are approximate, so a true neighbour in a probed partition can still
+rank out of the top `k`. `refine_factor` fetches more candidates and re-ranks them
+with the full vectors, so the same queries also run at 2, 5, 10 and 20 times `k`,
+at the default `nprobes`. An index that keeps the full vectors has nothing for
+refining to recover, and that series is skipped with the reason.
+
 The exact pass is the expensive part and the only part the quote can weigh: it
 reads the whole vector column once. The index probes are small and are reported
 after, per setting. Each setting opens the table afresh, so it starts from a cold

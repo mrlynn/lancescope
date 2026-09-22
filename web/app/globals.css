@@ -55,6 +55,13 @@
   --index-rgb: 139 85 18;
   --video-rgb: 176 53 14;
 
+  /* Two series on one chart. Not --index and --video: amber against red-orange is
+     ΔE 9 under normal vision and 1.8 for a deuteranope, which is one colour with two
+     names. The validator in the dataviz method passes this pair on every check —
+     lightness band, chroma, CVD ≥ 19, normal vision ≥ 23, contrast ≥ 3:1. */
+  --series-1: #8b5512;
+  --series-2: #3d64b0;
+
   --hairline: rgb(74 66 60 / 0.22);     /* table row separators */
   --scrim:    rgb(250 247 245 / 0.97);  /* full-screen overlays */
   --scrim-2:  rgb(250 247 245 / 0.94);
@@ -128,6 +135,11 @@
   --video:  #ff734a;
   --index-rgb: 217 160 91;
   --video-rgb: 255 115 74;
+
+  /* Inside the dark band (L 0.48–0.67), which --index at 0.75 is not — fine as the
+     one accent, too bright to sit beside a second hue. Validated as a pair. */
+  --series-1: #bf8638;
+  --series-2: #7092e0;
 
   --hairline: rgb(123 109 102 / 0.5);
   --scrim:    rgb(12 11 10 / 0.97);
