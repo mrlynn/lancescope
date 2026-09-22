@@ -48,7 +48,8 @@ def ids(rows) -> list[int]:
 @pytest.mark.parametrize("table, spec", [
     ("ordinary", {"mode": "scan", "filter": "track = 'Go'", "limit": 5}),
     ("ordinary", {"mode": "scan", "limit": 4, "offset": 3}),
-    ("searchable", {"mode": "fts", "text": "kubernetes", "limit": 5}),
+    # Above the eight rows that match, so no tie can fall across the limit.
+    ("searchable", {"mode": "fts", "text": "kubernetes", "limit": 10}),
     ("searchable", {"mode": "fts", "text": "kubernetes", "filter": "year = 2024",
                     "limit": 5}),
     ("vectors", {"mode": "vector", "vector_column": "vector", "like_row": 0, "k": 5}),
@@ -62,7 +63,13 @@ def test_the_lancedb_script_returns_what_the_console_returned(api, table, spec):
 
     got = execute(source).to_pylist()
 
-    assert ids(got) == ids(body["rows"])
+    # Every match in `searchable` scores the same under BM25, and `lancedb` carries
+    # its own Lance engine rather than the installed pylance — so on an older reader
+    # the two break those ties differently. Same rows, and neither order is wrong.
+    if spec["mode"] == "fts":
+        assert sorted(ids(got)) == sorted(ids(body["rows"]))
+    else:
+        assert ids(got) == ids(body["rows"])
 
 
 def test_a_vector_script_names_the_metric_the_index_was_built_with(api):
