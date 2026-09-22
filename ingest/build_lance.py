@@ -87,13 +87,47 @@ def build_moments(talks: list[dict]) -> pa.Table:
     return pa.table(cols, schema=MOMENTS_SCHEMA)
 
 
-def write_segments(talks: list[dict], prune: bool = True) -> int:
+def stored_segments() -> tuple[lance.LanceDataset | None, dict[tuple[str, int], int]]:
+    """The segments table a previous build left, indexed by (talk, segment).
+
+    A build prunes each talk's segment files once their bytes are in the blob column,
+    so for those talks the table is the only copy left. Reading them back from it is
+    what lets a build add new talks without re-segmenting the old ones.
+    """
+    try:
+        ds = lance.dataset(SEGMENTS_URI)
+    except Exception:                                              # noqa: BLE001
+        return None, {}
+    rows = ds.to_table(columns=["talk_id", "segment_idx"]).to_pylist()
+    return ds, {(r["talk_id"], r["segment_idx"]): i for i, r in enumerate(rows)}
+
+
+def segment_bytes(man: dict, prev: lance.LanceDataset | None,
+                  stored: dict[tuple[str, int], int]) -> list[bytes]:
+    """Each segment's MP4, from its working file or else from the previous table."""
+    out = []
+    for s in man["segments"]:
+        path = Path(s["path"])
+        if path.exists():
+            out.append(path.read_bytes())
+        else:
+            i = stored[(man["talk_id"], s["idx"])]
+            out.append(prev.take_blobs("video_blob", indices=[i])[0].read())
+    return out
+
+
+def write_segments(talks: list[dict], prev: lance.LanceDataset | None,
+                   stored: dict[tuple[str, int], int], prune: bool = True) -> int:
     """Append one talk at a time; the corpus is far larger than memory.
 
     Each talk's segment files are deleted once they are in the blob column, so the
     working copy and the stored copy never both exist for the whole corpus.
+
+    The new table is written beside the old one and swapped in at the end, because
+    the old one is still being read from for talks whose files are already pruned.
     """
-    shutil.rmtree(SEGMENTS_URI, ignore_errors=True)
+    building = SEGMENTS_URI + ".building"
+    shutil.rmtree(building, ignore_errors=True)
     total = 0
     for n, man in enumerate(talks):
         segs = man["segments"]
@@ -106,12 +140,12 @@ def write_segments(talks: list[dict], prune: bool = True) -> int:
             "start_s": [s["start_s"] for s in segs],
             "end_s": [s["end_s"] for s in segs],
             "size_bytes": [s["bytes"] for s in segs],
-            "video_blob": blob_array([open(s["path"], "rb").read() for s in segs]),
+            "video_blob": blob_array(segment_bytes(man, prev, stored)),
         }, schema=SEGMENTS_SCHEMA)
         # data_storage_version="2.2" is what makes this Blob V2. Without it none of the
         # laziness the demo depends on holds. See FINDINGS.md.
         lance.write_dataset(
-            tbl, SEGMENTS_URI,
+            tbl, building,
             mode="overwrite" if n == 0 else "append",
             data_storage_version="2.2",
         )
@@ -128,6 +162,8 @@ def write_segments(talks: list[dict], prune: bool = True) -> int:
                 cached["blobs_written"] = True
                 man_p.write_text(json.dumps(cached, indent=2))
         print(f"    segments {total:4d}  ({man['title'][:44]:44s})", end="\r", flush=True)
+    shutil.rmtree(SEGMENTS_URI, ignore_errors=True)
+    Path(building).rename(SEGMENTS_URI)
     return total
 
 
@@ -143,23 +179,27 @@ def main() -> int:
         return 1
     print(f"{len(talks)} talks\n")
 
-    # The segments table is rebuilt from scratch, which needs every talk's segment
-    # files on disk. They are pruned once their bytes are in the blob column, so a
-    # second build has nothing to read from.
+    # The segments table is rebuilt from scratch. A talk whose segment files were
+    # pruned by an earlier build is read back from that build's table; only a talk
+    # with neither has nothing to rebuild from.
+    prev, stored = stored_segments()
     missing = [
         man["title"]
         for man in talks
-        if any(not Path(sg["path"]).exists() for sg in man["segments"])
+        if any(not Path(sg["path"]).exists() and (man["talk_id"], sg["idx"]) not in stored
+               for sg in man["segments"])
     ]
     if missing:
-        print(f"  {len(missing)} talk(s) have no segment files left on disk, because a")
-        print("  previous build moved them into the blob column. To rebuild the tables:")
+        print(f"  {len(missing)} talk(s) have no segment files on disk and are not in")
+        print("  the existing segments table. To rebuild the tables:")
         print("      make prepare-force && make embed && make build")
         print(f"  first missing: {missing[0][:60]}")
         return 1
+    if stored:
+        print(f"  reusing stored video for talks already built ({len(stored)} segments)")
 
     print("  writing segments (Blob V2)...")
-    nseg = write_segments(talks, prune=not args.keep_segments)
+    nseg = write_segments(talks, prev, stored, prune=not args.keep_segments)
     print(f"    segments: {nseg} rows written        ")
 
     print("  writing moments...")

@@ -46,6 +46,27 @@ ROOT = cfg.resolve_root(cfg.load())
 # Empty when nothing is configured — deliberately not `Path()`, which is the
 # working directory, and for an app the user double-clicked that is `/`.
 CATALOG = Catalog(ROOT.uri or ROOT.root or "")
+# The demo's own catalog over the ingest output directory, opened only when the
+# active connection is some other database. Pointing the console at a dataset on
+# the Hub is not a reason for the stage demo to lose its corpus.
+DEMO_CATALOG: Catalog | None = None
+
+
+def load_demo() -> bool:
+    global DEMO_CATALOG
+    if demo.load(CATALOG):
+        return True
+    home = cfg.demo_root()
+    if home is None or str(home) == str(CATALOG.root_uri):
+        return False
+    DEMO_CATALOG = Catalog(home)
+    if demo.load(DEMO_CATALOG):
+        print(f"demo: the corpus is not under the active connection; serving it "
+              f"from {home}")
+        return True
+    DEMO_CATALOG.close_all()
+    DEMO_CATALOG = None
+    return False
 
 
 @asynccontextmanager
@@ -86,7 +107,7 @@ async def lifespan(app: FastAPI):
         print("kiosk: public demo — ingest and intelligence are not mounted, "
               "settings are read-only, queries are rate limited")
 
-    if demo.load(CATALOG):
+    if load_demo():
         demo.warm()
         print(f"ready: {demo.STATE.n_talks} talks, {demo.STATE.n_moments} moments, "
               f"{demo.STATE.corpus_video_bytes/1e6:.0f} MB of video")
@@ -96,6 +117,8 @@ async def lifespan(app: FastAPI):
 
     yield
     CATALOG.close_all()
+    if DEMO_CATALOG is not None:
+        DEMO_CATALOG.close_all()
 
 
 app = FastAPI(title="LanceScope", lifespan=lifespan)
