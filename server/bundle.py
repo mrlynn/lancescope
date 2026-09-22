@@ -555,6 +555,13 @@ def _md_query(w, q: dict | None) -> None:
     w(q.get("reproduction", "").rstrip())
     w("```")
     w("")
+    if q.get("reproduction_lancedb"):
+        w("The same query through `lancedb`:")
+        w("")
+        w("```python")
+        w(q["reproduction_lancedb"].rstrip())
+        w("```")
+        w("")
 
 
 def _md_weights(w, e: dict) -> None:

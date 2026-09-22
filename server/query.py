@@ -395,8 +395,7 @@ def _nearest(handle: Handle, spec: QuerySpec) -> dict:
     # Default to the index's own metric so a search actually uses the index. An
     # explicit choice is honoured — and warned about, in `_metric_warning`, when it
     # is the choice that turns an indexed search into a full scan.
-    metric = spec.metric or index_metrics(ds).get(column) or "cosine"
-    return {"column": column, "q": q, "k": spec.k, "metric": metric}
+    return {"column": column, "q": q, "k": spec.k, "metric": search_metric(handle, spec)}
 
 
 def reproduction(uri: str, spec: QuerySpec, projected: list[str]) -> str:
@@ -427,6 +426,9 @@ def reproduction(uri: str, spec: QuerySpec, projected: list[str]) -> str:
     elif spec.mode == "fts":
         args.append(f"full_text_query={spec.text!r}")
         args.append(f"limit={spec.limit}")
+        if spec.offset:
+            args.append(f"offset={spec.offset}")
+        args.append(f"prefilter={spec.prefilter}")
     else:
         args.append(f"limit={spec.limit}")
         if spec.offset:
@@ -442,6 +444,147 @@ def reproduction(uri: str, spec: QuerySpec, projected: list[str]) -> str:
     return "\n".join(lines)
 
 
+def _lancedb_location(uri: str) -> tuple[str, str, list[str]] | None:
+    """The database, table name and namespace path `lancedb` would open this by.
+
+    `lance` opens a dataset by its URI; `lancedb` opens a database and then a table
+    in it by name. Every directory-shaped source joins the two as
+    `{root}/{name}.lance`, so splitting that back is exact. LanceDB Cloud's `db://`
+    names are `db://{database}/{namespace…}/{table}`. Any other namespace has no
+    location this process can compute (see `Target`), and `None` says so rather
+    than printing a connect call that would not open anything.
+    """
+    uri = uri.rstrip("/")
+    if uri.startswith("db://"):
+        parts = uri[len("db://"):].split("/")
+        if len(parts) < 2 or not all(parts):
+            return None
+        return f"db://{parts[0]}", parts[-1], parts[1:-1]
+    root, _, leaf = uri.rpartition("/")
+    if not root or not leaf.endswith(".lance") or leaf == ".lance":
+        return None
+    return root, leaf[:-len(".lance")], []
+
+
+def lancedb_reproduction(uri: str, spec: QuerySpec, projected: list[str], *,
+                         metric: str | None = None,
+                         version: int | None = None) -> str | None:
+    """The same query written against `lancedb`, the API most readers actually use.
+
+    `reproduction` speaks `lance` because that is what this console runs. Somebody
+    building on LanceDB writes `tbl.search(...)`, and handing them a scanner call is
+    handing them a translation exercise. Same rule as `reproduction`: generated from
+    the spec, never from the UI.
+
+    `metric` is the one the search actually ran with. It is not optional in spirit:
+    `lancedb` defaults to L2 when none is named, so a script that left it out would
+    walk around a cosine index and scan every row — the silent failure
+    `unused_index_warning` exists to catch. `version` pins the table the way the
+    handle that ran the query was pinned.
+
+    Returns `None` for a table `lancedb` cannot be pointed at from here.
+    """
+    where = _lancedb_location(uri)
+    if where is None:
+        return None
+    root, name, namespace = where
+    spec = spec.normalised()
+
+    lines = ["import lancedb"]
+    if spec.mode == "hybrid":
+        lines.append("from lancedb.rerankers import RRFReranker")
+    lines.append("")
+    if root.startswith("db://"):
+        lines.append("# reads LANCEDB_API_KEY from the environment")
+        lines.append(f"db = lancedb.connect({root!r}, region=...)  # your database's region")
+    else:
+        lines.append(f"db = lancedb.connect({root!r})")
+    open_args = [repr(name)]
+    if namespace:
+        open_args.append(f"namespace_path={namespace!r}")
+    if version is not None:
+        open_args.append(f"version={version}")
+    lines.append(f"tbl = db.open_table({', '.join(open_args)})")
+
+    if spec.mode in ("vector", "hybrid"):
+        column = spec.vector_column
+        if spec.like_row is not None:
+            lines.append(f"q = tbl.take_offsets([{spec.like_row}]).select([{column!r}])"
+                         f".to_list()[0][{column!r}]")
+        else:
+            lines.append("q = [...]  # the vector you searched with")
+
+    chain: list[str] = []
+    if spec.mode == "vector":
+        head = f"tbl.search(q, vector_column_name={spec.vector_column!r})"
+        if metric:
+            chain.append(f".distance_type({metric!r})")
+    elif spec.mode == "fts":
+        head = f"tbl.search({spec.text!r}, query_type='fts')"
+    elif spec.mode == "hybrid":
+        head = f"tbl.search(query_type='hybrid', vector_column_name={spec.vector_column!r})"
+        if metric:
+            chain.append(f".distance_type({metric!r})")
+        chain.append(".vector(q)")
+        chain.append(f".text({spec.text!r})")
+    else:
+        head = "tbl.search()"
+
+    notes: list[str] = []
+    if spec.filter:
+        # `lancedb` prefilters unless told not to, and so does the console, for every
+        # search mode. Only an explicit postfilter needs saying.
+        if spec.mode in ("vector", "fts") and not spec.prefilter:
+            chain.append(f".where({spec.filter!r}, prefilter=False)")
+        else:
+            chain.append(f".where({spec.filter!r})")
+    chain.append(f".select({projected!r})")
+    if spec.mode == "hybrid":
+        # The console fuses the two legs itself, by rank, with the same constant.
+        chain.append(f".rerank(RRFReranker(K={RRF_K}))")
+    if spec.mode in ("vector", "hybrid"):
+        chain.append(f".limit({spec.k})")
+    else:
+        chain.append(f".limit({spec.limit})")
+        if spec.offset:
+            chain.append(f".offset({spec.offset})")
+
+    lines.append("")
+    lines.append("query = (")
+    lines.append(f"    {head}")
+    lines.extend(f"    {c}" for c in chain)
+    lines.append(")")
+    lines.append("table = query.to_arrow()")
+    if spec.mode == "hybrid" and spec.limit > spec.k:
+        notes += [f"# The console drew {spec.limit} full-text candidates before fusing; "
+                  f"LanceDB draws {spec.k}",
+                  "# from each leg, so the tail of the ranking can differ."]
+    if notes:
+        lines.append("")
+        lines.extend(notes)
+    lines.append("")
+    lines.append("# what it cost: runs the query again, with Lance's counters on every "
+                 "operator")
+    lines.append("print(query.analyze_plan())")
+    return "\n".join(lines)
+
+
+def search_metric(handle: Handle, spec: QuerySpec) -> str | None:
+    """The distance metric a vector search over this spec runs with — `_nearest`'s
+    choice, without reading a row to make it."""
+    if spec.mode not in ("vector", "hybrid") or not spec.vector_column:
+        return None
+    return (spec.metric or index_metrics(handle.ds).get(spec.vector_column)
+            or "cosine")
+
+
+def lancedb_reproduction_for(handle: Handle, spec: QuerySpec,
+                             projected: list[str]) -> str | None:
+    return lancedb_reproduction(handle.uri, spec, projected,
+                                metric=search_metric(handle, spec),
+                                version=handle.version)
+
+
 @dataclass
 class QueryOutcome:
     rows: list[dict]
@@ -455,6 +598,8 @@ class QueryOutcome:
     total_rows: int | None
     truncated: bool
     reproduction: str
+    # The same query against `lancedb`; `None` where it cannot be pointed at the table.
+    reproduction_lancedb: str | None = None
     # The version this result describes, and the newest one on disk when it was
     # read. They differ when the table has been written to since — which makes the
     # numbers on screen true of something that is no longer current.
@@ -478,6 +623,7 @@ class QueryOutcome:
             "total_rows": self.total_rows,
             "truncated": self.truncated,
             "reproduction": self.reproduction,
+            "reproduction_lancedb": self.reproduction_lancedb,
             "legs": self.legs,
             "version": self.version,
             "latest_version": self.latest_version,
@@ -523,6 +669,10 @@ def build_scanner(handle: Handle, spec: QuerySpec, projected: list[str],
         if not spec.text:
             raise QueryError("give some text to search for")
         kwargs["full_text_query"] = spec.text
+        # Without it Lance ranks first and filters the top `limit` afterwards, so a
+        # filtered search can return fewer rows than match. `lancedb` prefilters by
+        # default; so does this, and the hybrid full-text leg with it.
+        kwargs["prefilter"] = spec.prefilter
         kwargs["limit"] = spec.limit
         kwargs["offset"] = spec.offset
         _ask_for_score(kwargs, "_score")
@@ -698,6 +848,7 @@ def run_hybrid(handle: Handle, spec: QuerySpec, *, cell) -> QueryOutcome:
         total_rows=None,
         truncated=False,
         reproduction=reproduction(handle.uri, spec, projected),
+        reproduction_lancedb=lancedb_reproduction_for(handle, spec, projected),
         legs=[leg.as_dict() for leg in legs],
         version=ds.version,
         latest_version=_latest_version(ds),
@@ -775,6 +926,7 @@ def run(handle: Handle, spec: QuerySpec, *, cell) -> QueryOutcome:
         truncated=spec.mode == "scan" and total is not None
                   and spec.offset + len(rows) < total,
         reproduction=reproduction(handle.uri, spec, projected),
+        reproduction_lancedb=lancedb_reproduction_for(handle, spec, projected),
         version=ds.version,
         latest_version=_latest_version(ds),
         warnings=[w for w in (unused_index_warning(handle, spec, plan),) if w],

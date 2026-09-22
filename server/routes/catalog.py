@@ -1373,6 +1373,8 @@ async def query_explain(name: str, body: QueryBody) -> JSONResponse:
     # is slow has to be able to reach both without spending a scan to do it.
     return JSONResponse({"name": name, "plan": plan.as_dict(), "estimate": weight,
                          "reproduction": query.reproduction(h.uri, spec, projected),
+                         "reproduction_lancedb":
+                             query.lancedb_reproduction_for(h, spec, projected),
                          "omitted_columns": omitted,
                          "unused_index": query.unused_index_warning(h, spec, plan),
                          "read_bytes": d.read_bytes, "read_iops": d.read_iops})

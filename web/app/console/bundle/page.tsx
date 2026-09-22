@@ -268,6 +268,14 @@ function Sections({ b }: { b: Bundle }) {
                         border: "1px solid var(--rule)" }}>
             {q.reproduction}
           </pre>
+          {q.reproduction_lancedb && (
+            <pre className="mono text-[11px] leading-relaxed mt-2 p-3 rounded-sm
+                            overflow-x-auto"
+                 style={{ background: "rgb(var(--index-rgb) / 0.06)",
+                          border: "1px solid var(--rule)" }}>
+              {q.reproduction_lancedb}
+            </pre>
+          )}
         </section>
       )}
 

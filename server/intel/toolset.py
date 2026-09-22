@@ -543,7 +543,9 @@ TOOLS: tuple[Tool, ...] = (
                     "fetch and a number that looked like an answer there would be "
                     "worse than none. The answer carries a runnable Python "
                     "reproduction of the same query, generated from the spec that was "
-                    "planned rather than written by hand — hand that to the person, "
+                    "planned rather than written by hand — in `lance`, and in `lancedb` "
+                    "as `reproduction_lancedb` wherever the table can be opened by "
+                    "name. Hand the one that fits the person's code to them, "
                     "because this tool does not run anything and there is no tool here "
                     "that does. Running a query spends the read budget of somebody's "
                     "database on a turn, and that decision belongs to them, in their "
@@ -575,8 +577,8 @@ TOOLS: tuple[Tool, ...] = (
                                       "was built with; naming a different one is what "
                                       "turns an indexed search into a full scan."},
             "prefilter": {"type": "boolean",
-                          "description": "Apply the filter before the vector search "
-                                         "rather than after. Default true."},
+                          "description": "Apply the filter before the search ranks "
+                                         "rather than to its top results. Default true."},
         }),
         call=explain_query,
     ),
