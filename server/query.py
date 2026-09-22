@@ -533,8 +533,9 @@ def lancedb_reproduction(uri: str, spec: QuerySpec, projected: list[str], *,
     notes: list[str] = []
     if spec.filter:
         # `lancedb` prefilters unless told not to, and so does the console, for every
-        # search mode. Only an explicit postfilter needs saying.
-        if spec.mode in ("vector", "fts") and not spec.prefilter:
+        # search mode — hybrid applies it to both legs. Only an explicit postfilter
+        # needs saying.
+        if spec.mode != "scan" and not spec.prefilter:
             chain.append(f".where({spec.filter!r}, prefilter=False)")
         else:
             chain.append(f".where({spec.filter!r})")

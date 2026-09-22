@@ -161,6 +161,16 @@ def test_an_explicit_full_text_postfilter_is_written_as_one():
         "/d/t.lance", spec, ["id"])
 
 
+@pytest.mark.parametrize("mode", ["vector", "hybrid"])
+def test_a_search_postfilter_is_written_as_one(mode):
+    """Hybrid passes the flag to both legs, so it is the same postfilter the console
+    ran — a plain `.where` would prefilter both instead."""
+    spec = QuerySpec(mode=mode, text="x", vector_column="v", like_row=0,
+                     filter="year = 2024", prefilter=False)
+    assert ".where('year = 2024', prefilter=False)" in lancedb_reproduction(
+        "/d/t.lance", spec, ["id"])
+
+
 def test_a_filtered_full_text_search_finds_every_match_not_just_the_top_ones(api):
     """The console used to rank first and filter the top `limit` afterwards, which
     returned three of the four 2024 rows mentioning kubernetes."""

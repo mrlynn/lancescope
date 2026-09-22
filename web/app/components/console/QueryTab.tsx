@@ -284,11 +284,11 @@ export function QueryTab({ table, root, ai }: {
       timeout_s: Number(timeout) > 0 ? Number(timeout) : null,
       expand: exp.length ? exp : null,
       ...(mode === "fts" || mode === "hybrid" ? { text } : {}),
+      ...(mode !== "scan" ? { prefilter } : {}),
       ...(mode === "vector" || mode === "hybrid"
         ? {
             vector_column: vectorColumn,
             k: Number(k) || 10,
-            prefilter,
             // A described query and "rows like row N" are the same search with a
             // different source for the vector, so only one of them is sent.
             ...(queryVector ? { vector: queryVector } : { like_row: Number(likeRow) || 0 }),
@@ -369,9 +369,10 @@ export function QueryTab({ table, root, ai }: {
     limit: Number(limit) || 25,
     expand: expand.length ? expand : null,
     ...(mode === "fts" || mode === "hybrid" ? { text } : {}),
+    ...(mode !== "scan" ? { prefilter } : {}),
     ...(mode === "vector" || mode === "hybrid"
       ? { vector_column: vectorColumn, like_row: Number(likeRow) || 0,
-          k: Number(k) || 10, prefilter }
+          k: Number(k) || 10 }
       : {}),
   });
 
