@@ -118,6 +118,15 @@ def test_the_local_source_finds_the_corpus(corpus):
     assert LocalSource().capabilities(str(corpus)).disk_split.state == AVAILABLE
 
 
+def test_a_root_typed_with_a_tilde_is_the_home_directory(corpus, monkeypatch):
+    monkeypatch.setenv("HOME", str(corpus.parent))
+    typed = f"~/{corpus.name}"
+    assert LocalSource().list_tables(typed).tables == LocalSource().list_tables(str(corpus)).tables
+    name = LocalSource().list_tables(typed).tables[0]
+    assert LocalSource().exists(typed, name)
+    assert "~" not in LocalSource().target_for(typed, name).uri
+
+
 def test_a_uri_root_is_joined_as_text_not_as_a_path():
     """`Path` collapses `hf://datasets/x` to `hf:/datasets/x`, which no longer opens."""
     target = HfSource().target_for("hf://datasets/a/b", "data/train")
