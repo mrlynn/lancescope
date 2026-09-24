@@ -41,7 +41,7 @@ class LocalSource:
         )
 
     def list_tables(self, root: str) -> Discovery:
-        base = Path(root)
+        base = Path(root).expanduser()
         if not base.is_dir():
             return Discovery([], f"no such directory: {root}")
         found: set[str] = set()
@@ -50,9 +50,10 @@ class LocalSource:
         return Discovery(sorted(found), None)
 
     def target_for(self, root: str, name: str) -> Target:
-        # Through `Path` so that `~`, `..` and a trailing slash still behave the way
-        # the rest of the console expects.
-        return Target(uri=str(Path(root) / f"{name}.lance"))
+        # Through `Path` so that `..` and a trailing slash still behave the way the
+        # rest of the console expects. `Path` leaves `~` alone; a root typed as
+        # `~/data` has to be expanded here or nothing under it exists.
+        return Target(uri=str(Path(root).expanduser() / f"{name}.lance"))
 
     def exists(self, root: str, name: str) -> bool:
         return Path(self.target_for(root, name).uri).is_dir()
