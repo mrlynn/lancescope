@@ -491,6 +491,14 @@ class OllamaProvider:
             # Deterministic on purpose: this layer translates, and a translator that
             # answers differently each time is a translator you cannot test.
             "options": {"temperature": 0, "num_predict": max_tokens},
+            # Reasoning off. A thinking model spends `num_predict` on its reasoning
+            # first, and a translation budget is sized for the answer: measured,
+            # qwen3:8b at the filter route's 512 reasoned for all 512 tokens and came
+            # back with an empty `content` and `done_reason: length` — which reached
+            # the caller as "not JSON". With this it answered the same question in 20.
+            # Models that do not think (gemma3, llama3.2) accept the field and answer
+            # identically with or without it.
+            "think": False,
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
@@ -536,6 +544,12 @@ class OllamaProvider:
         above answers an invented tool with a tool result saying so, which is the only
         honest thing to do — and `registry.Model.tools` is how the console avoids
         offering the loop to a model that cannot hold one in the first place.
+
+        Unlike `complete()`, this leaves a thinking model's reasoning on. Choosing a
+        tool is the part reasoning is for, and the budget is eight times the
+        filter's: measured, qwen3:8b spent 939 of 4096 tokens reasoning its way to
+        the right first call. A turn that does run out comes back with no text and
+        no call, and the loop names that rather than showing a blank.
         """
         body: dict = {
             "model": self.model,
