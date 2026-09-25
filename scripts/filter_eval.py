@@ -18,7 +18,9 @@ the difference: on qwen3:8b that request spent the whole budget reasoning and
 returned an empty answer on 8 of the 25 cases.
 
 The corpus is the ingest output (`make ingest`), not a fixture, so it lives wherever
-that was run — in a worktree, usually the main checkout's `data/lance`.
+that was run — in a worktree, usually the main checkout's `data/lance`. Six cases ask
+about `moment_predictions`, which ingest does not write; `examples/moment_classifier`
+does. Without it those six are skipped, and the run says so.
 """
 
 from __future__ import annotations
@@ -150,6 +152,19 @@ def main() -> None:
         _let_it_think()
 
     cases = json.loads(args.cases.read_text())
+    # `moment_predictions` is not ingest output: the classifier example writes it.
+    # A corpus without it still scores the rest, and says how many it left out, so a
+    # 19-case run is never read as a 25-case one.
+    missing = sorted({c["table"] for c in cases
+                      if not (root / f"{c['table']}.lance").exists()})
+    if missing:
+        before = len(cases)
+        cases = [c for c in cases if c["table"] not in missing]
+        print(f"skipping {before - len(cases)} of {before} cases: no "
+              f"{', '.join(m + '.lance' for m in missing)} under {root}"
+              + (" (examples/moment_classifier/predict.py writes it)"
+                 if "moment_predictions" in missing else ""))
+
     reports = []
     for model in args.models:
         print(f"\n{model}")
