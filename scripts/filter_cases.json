@@ -1,0 +1,211 @@
+[
+ {
+  "table": "moments",
+  "question": "moments from the Go devroom",
+  "gold": [
+   "track = 'Go'"
+  ],
+  "tests": "a value named the way people say it, not the way the column stores it"
+ },
+ {
+  "table": "moments",
+  "question": "the RTC devroom",
+  "gold": [
+   "track = 'Real Time Communications (RTC)'"
+  ],
+  "tests": "an abbreviation of a stored value"
+ },
+ {
+  "table": "moments",
+  "question": "Python or JavaScript talks",
+  "gold": [
+   "track IN ('Python', 'JavaScript')"
+  ],
+  "tests": "a disjunction of values"
+ },
+ {
+  "table": "moments",
+  "question": "security or identity talks",
+  "gold": [
+   "track IN ('Security', 'Identity and Access Management')"
+  ],
+  "tests": "a value only loosely named"
+ },
+ {
+  "table": "moments",
+  "question": "everything except the keynotes",
+  "gold": [
+   "track != 'Keynotes'"
+  ],
+  "tests": "negation"
+ },
+ {
+  "table": "moments",
+  "question": "talks by Lennart Poettering",
+  "gold": [
+   "speaker = 'Lennart Poettering'"
+  ],
+  "tests": "a non-track facet"
+ },
+ {
+  "table": "moments",
+  "question": "Rust talks, but only the first ten minutes",
+  "gold": [
+   "track = 'Rust' AND ts_s < 600",
+   "track = 'Rust' AND ts_s <= 600"
+  ],
+  "tests": "compound: dropping either half is visible"
+ },
+ {
+  "table": "moments",
+  "question": "Go or Rust moments in the first five minutes of a talk",
+  "gold": [
+   "track IN ('Go', 'Rust') AND ts_s < 300",
+   "track IN ('Go', 'Rust') AND ts_s <= 300"
+  ],
+  "tests": "precedence: an OR without parentheses answers a different question"
+ },
+ {
+  "table": "moments",
+  "question": "moments that mention Kubernetes outside the Testing track",
+  "gold": [
+   "transcript LIKE '%Kubernetes%' AND track != 'Testing and Continuous Delivery'",
+   "lower(transcript) LIKE '%kubernetes%' AND track != 'Testing and Continuous Delivery'"
+  ],
+  "tests": "a value plus a substring"
+ },
+ {
+  "table": "moments",
+  "question": "moments whose transcript mentions Docker",
+  "gold": [
+   "transcript LIKE '%Docker%'",
+   "lower(transcript) LIKE '%docker%'"
+  ],
+  "tests": "free-text substring"
+ },
+ {
+  "table": "moments",
+  "question": "moments more than half an hour into a talk",
+  "gold": [
+   "ts_s > 1800",
+   "ts_s >= 1800"
+  ],
+  "tests": "unit conversion"
+ },
+ {
+  "table": "moments",
+  "question": "the first segment of every talk",
+  "gold": [
+   "segment_idx = 0"
+  ],
+  "tests": "a zero-based index"
+ },
+ {
+  "table": "moments",
+  "question": "talks with more than 500 people in the room",
+  "gold": null,
+  "tests": "refusal: no column holds attendance"
+ },
+ {
+  "table": "moments",
+  "question": "moments where the speaker looked nervous",
+  "gold": null,
+  "tests": "refusal: a judgement no column records"
+ },
+ {
+  "table": "moment_predictions",
+  "question": "predictions the classifier got wrong",
+  "gold": [
+   "correct = false"
+  ],
+  "tests": "a boolean"
+ },
+ {
+  "table": "moment_predictions",
+  "question": "held-out rows the model got wrong",
+  "gold": [
+   "held_out = true AND correct = false"
+  ],
+  "tests": "two booleans"
+ },
+ {
+  "table": "moment_predictions",
+  "question": "predictions with confidence under 0.5",
+  "gold": [
+   "confidence < 0.5"
+  ],
+  "tests": "a float threshold"
+ },
+ {
+  "table": "moment_predictions",
+  "question": "wrong predictions made with more than 40% confidence",
+  "gold": [
+   "correct = false AND confidence > 0.4",
+   "correct = false AND confidence >= 0.4"
+  ],
+  "tests": "percent to fraction, plus a boolean"
+ },
+ {
+  "table": "moment_predictions",
+  "question": "rows where the predicted talk is not the actual talk",
+  "gold": [
+   "predicted_talk != actual_talk",
+   "correct = false"
+  ],
+  "tests": "column against column — outside what the spike grammar admits"
+ },
+ {
+  "table": "moment_predictions",
+  "question": "predictions of the Go talk about a database for your program state",
+  "gold": [
+   "predicted_talk = 'fosdem-2025-4643-a-database-for-your-program-state'",
+   "predicted_talk LIKE '%database-for-your-program-state%'"
+  ],
+  "tests": "a slug value found from a paraphrase"
+ },
+ {
+  "table": "segments",
+  "question": "segments bigger than 15 MB",
+  "gold": [
+   "size_bytes > 15000000",
+   "size_bytes > 15728640",
+   "size_bytes >= 15000000",
+   "size_bytes >= 15728640"
+  ],
+  "tests": "unit conversion into bytes"
+ },
+ {
+  "table": "segments",
+  "question": "segments starting after the 40 minute mark",
+  "gold": [
+   "start_s > 2400",
+   "start_s >= 2400"
+  ],
+  "tests": "minutes to seconds"
+ },
+ {
+  "table": "segments",
+  "question": "the first three segments of each talk",
+  "gold": [
+   "segment_idx < 3",
+   "segment_idx <= 2"
+  ],
+  "tests": "an ordinal range"
+ },
+ {
+  "table": "segments",
+  "question": "segments presented by someone named Bob",
+  "gold": null,
+  "tests": "refusal: this table has no speaker column"
+ },
+ {
+  "table": "segments",
+  "question": "segments from the systemd keynote",
+  "gold": [
+   "title = '14 Years of systemd'",
+   "title LIKE '%systemd%'",
+   "lower(title) LIKE '%systemd%'"
+  ],
+  "tests": "a title found from a word in it"
+ }
+]
